@@ -1,0 +1,205 @@
+<Window x:Class="AquaHub.UI.Shell.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:AquaHub.UI.Controls"
+        xmlns:ui="clr-namespace:AquaHub.UI"
+        Title="Aqua Hub" Width="1440" Height="920" MinWidth="820" MinHeight="580"
+        WindowStartupLocation="CenterScreen" Background="Transparent"
+        FontFamily="{StaticResource F.Text}" Foreground="{DynamicResource B.Text}" FontSize="14"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Icon="/Assets/AquaHub.ico">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="48" GlassFrameThickness="-1" ResizeBorderThickness="6" UseAeroCaptionButtons="True" CornerRadius="0"/>
+    </WindowChrome.WindowChrome>
+
+    <Grid x:Name="Root">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border x:Name="Fallback" Grid.ColumnSpan="2" Background="{DynamicResource B.WindowOpaque}" Visibility="Collapsed"/>
+
+        <!-- ══════════ Navigation ══════════ -->
+        <Grid x:Name="Nav" Width="228" ClipToBounds="True">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <StackPanel Orientation="Horizontal" Margin="20,0,0,0" VerticalAlignment="Center">
+                <Image Source="/Assets/AquaHub.png" Width="22" Height="22" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <TextBlock x:Name="BrandText" Text="Aqua Hub" FontSize="13" FontWeight="SemiBold" Margin="12,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Margin="0,6,0,0" x:Name="NavItems">
+                <RadioButton Style="{StaticResource NavItem}" Tag="today" ui:UiProps.Icon="home" Content="Today" IsChecked="True" ToolTip="Today (Ctrl+1)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="news" ui:UiProps.Icon="news" Content="News" ToolTip="News (Ctrl+2)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="social" ui:UiProps.Icon="social" Content="Social pulse" ToolTip="Social pulse (Ctrl+3)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="markets" ui:UiProps.Icon="markets" Content="Markets" ToolTip="Markets (Ctrl+4)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="upcoming" ui:UiProps.Icon="upcoming" Content="Upcoming" ToolTip="Agenda &amp; predictions (Ctrl+5)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="system" ui:UiProps.Icon="system" Content="This PC" ToolTip="This PC (Ctrl+6)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="launchpad" ui:UiProps.Icon="launchpad" Content="Launchpad" ToolTip="Apps, music &amp; scenes (Ctrl+7)"/>
+                <Rectangle Style="{StaticResource Divider}" Margin="18,8"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="ask" ui:UiProps.Icon="ask" Content="Ask Aqua" ToolTip="Ask Aqua (Ctrl+8)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="workbench" ui:UiProps.Icon="wand" Content="Workbench" ToolTip="Teach Aqua skills and things to remember"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="agents" ui:UiProps.Icon="agents" Content="Agents" ToolTip="Agents (Ctrl+9)"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Margin="0,0,0,10">
+                <!-- AI status -->
+                <Button x:Name="AiStatus" Style="{StaticResource Btn.Row}" Margin="10,0,10,4" Padding="10,8" Click="OnAiStatusClick" ToolTip="Local AI status">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="20" Height="20">
+                            <c:Icon Kind="cube" Width="18" Height="18" Foreground="{DynamicResource B.Text2}"/>
+                            <Ellipse x:Name="AiDot" Width="8" Height="8" Fill="{DynamicResource B.Up}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-1"
+                                     Stroke="{DynamicResource B.Window}" StrokeThickness="1.5"/>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Margin="14,0,0,0">
+                            <TextBlock x:Name="AiModel" Text="Local AI" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="AiState" Text="Checking…" Style="{StaticResource T.Caption}" FontSize="11"/>
+                        </StackPanel>
+                    </Grid>
+                </Button>
+                <RadioButton x:Name="SettingsNav" Style="{StaticResource NavItem}" Tag="settings" ui:UiProps.Icon="settings" Content="Settings" ToolTip="Settings (Ctrl+,)"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- ══════════ Content ══════════ -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Title bar: the command box shrinks with the window (the status text makes way first) -->
+            <Grid x:Name="TitleBar" Margin="0,0,150,0" SizeChanged="OnTitleBarSizeChanged">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="CommandBox" Style="{StaticResource Btn.Standard}" WindowChrome.IsHitTestVisibleInChrome="True" HorizontalAlignment="Stretch"
+                        MaxWidth="480" MinWidth="150" Height="34" Margin="4,0,12,0" Padding="12,0" HorizontalContentAlignment="Stretch" Click="OnCommandBoxClick"
+                        ToolTip="Ask anything or run a command (Ctrl+K)">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <c:Icon Kind="ask" Width="15" Height="15" Foreground="{DynamicResource B.AccentText}"/>
+                        <TextBlock Grid.Column="1" Text="Ask Aqua or type a command…" Foreground="{DynamicResource B.Text3}" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="13"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <Border x:Name="CommandKeyHint" Grid.Column="2" CornerRadius="4" Background="{DynamicResource B.Subtle}" Padding="6,1" VerticalAlignment="Center" Margin="6,0,0,0">
+                            <TextBlock Text="Ctrl K" FontSize="11" Foreground="{DynamicResource B.Text3}"/>
+                        </Border>
+                    </Grid>
+                </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="SyncText" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,6,0" Background="Transparent"
+                               AutomationProperties.AutomationId="sync-status"/>
+                    <Button x:Name="RefreshButton" Style="{StaticResource Btn.Icon}" WindowChrome.IsHitTestVisibleInChrome="True" Click="OnRefreshClick" ToolTip="Refresh everything (F5)">
+                        <c:Icon Kind="refresh" Width="16" Height="16"/>
+                    </Button>
+                    <Button x:Name="BellButton" Style="{StaticResource Btn.Icon}" WindowChrome.IsHitTestVisibleInChrome="True" Click="OnBellClick" ToolTip="Alerts" Margin="2,0,0,0">
+                        <Grid Width="18" Height="18">
+                            <c:Icon Kind="bell" Width="17" Height="17"/>
+                            <Border x:Name="BellBadge" MinWidth="14" Height="14" CornerRadius="7" Background="{DynamicResource B.Down}" HorizontalAlignment="Right"
+                                    VerticalAlignment="Top" Margin="0,-6,-8,0" Padding="3,0" Visibility="Collapsed">
+                                <TextBlock x:Name="BellCount" FontSize="9" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="DndButton" Style="{StaticResource Btn.Icon}" WindowChrome.IsHitTestVisibleInChrome="True" Click="OnDndClick" ToolTip="Do not disturb" Margin="2,0,0,0"
+                            AutomationProperties.AutomationId="dnd-toggle">
+                        <c:Icon x:Name="DndIcon" Kind="bell-off" Width="16" Height="16"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- Page layer -->
+            <Border Grid.Row="1" Background="{DynamicResource B.Layer}" BorderBrush="{DynamicResource B.LayerStroke}" BorderThickness="1,1,0,0" CornerRadius="10,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <!-- Offline notice: the hub keeps working from what it already collected -->
+                    <Border x:Name="OfflineBar" Background="{DynamicResource B.WarnSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
+                            AutomationProperties.AutomationId="offline-bar">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <c:Icon Kind="wifi-off" Width="16" Height="16" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="OfflineText" Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13"/>
+                            <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Padding="12,4" FontSize="12.5" Click="OnRefreshClick" Content="Try again"/>
+                        </Grid>
+                    </Border>
+                    <ContentControl x:Name="PageHost" Grid.Row="1" Focusable="False">
+                        <ContentControl.RenderTransform>
+                            <TranslateTransform x:Name="PageShift"/>
+                        </ContentControl.RenderTransform>
+                    </ContentControl>
+                    <StackPanel x:Name="Banners" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,24" Width="380"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Alerts popup -->
+        <!-- Local AI: status and the Ollama server on/off switch (click the model status in the sidebar) -->
+        <Popup x:Name="AiPopup" PlacementTarget="{Binding ElementName=AiStatus}" Placement="Top" VerticalOffset="-6"
+               AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade">
+            <Border Margin="10,16,10,10" Width="320" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="10"
+                    AutomationProperties.AutomationId="ai-popup">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="22" ShadowDepth="5" Direction="270" Opacity="0.32" Color="Black"/>
+                </Border.Effect>
+                <StackPanel Margin="16,14,16,14">
+                    <TextBlock Text="Local AI · Ollama" Style="{StaticResource T.CardTitle}"/>
+                    <TextBlock x:Name="AiPopupStatus" Style="{StaticResource T.Body2}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="AiPopupDetail" Style="{StaticResource T.Caption}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button x:Name="AiPopupToggle" Style="{StaticResource Btn.Accent}" Click="OnAiServerToggle" AutomationProperties.AutomationId="ai-server-toggle"/>
+                        <Button Style="{StaticResource Btn.Standard}" Margin="8,0,0,0" Content="Agents" Click="OnAiPopupAgents"/>
+                        <Button Style="{StaticResource Btn.Standard}" Margin="8,0,0,0" Content="Settings" Click="OnAiPopupSettings"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <Popup x:Name="AlertsPopup" PlacementTarget="{Binding ElementName=BellButton}" Placement="Bottom" HorizontalOffset="-330" VerticalOffset="6"
+               AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade">
+            <Border Margin="10,0,10,16" Width="400" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="10">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="22" ShadowDepth="5" Direction="270" Opacity="0.32" Color="Black"/>
+                </Border.Effect>
+                <DockPanel Margin="6">
+                    <Grid DockPanel.Dock="Top" Margin="10,8,6,6">
+                        <TextBlock Text="Alerts" Style="{StaticResource T.CardTitle}"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Style="{StaticResource Btn.Link}" Content="Mark all read" Click="OnMarkRead"/>
+                            <Button Style="{StaticResource Btn.Link}" Content="Clear" Click="OnClearAlerts"/>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="NoAlerts" DockPanel.Dock="Top" Text="You're all caught up." Style="{StaticResource T.Body2}" Margin="12,6,12,14"/>
+                    <ScrollViewer MaxHeight="440" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="AlertList" ItemTemplate="{StaticResource Tpl.AlertRow}"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Popup>
+
+        <!-- Modal overlay (onboarding / dialogs) -->
+        <Grid x:Name="Overlay" Grid.ColumnSpan="2" Visibility="Collapsed">
+            <Border Background="{DynamicResource B.Scrim}"/>
+            <ContentControl x:Name="OverlayHost" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
+    </Grid>
+</Window>

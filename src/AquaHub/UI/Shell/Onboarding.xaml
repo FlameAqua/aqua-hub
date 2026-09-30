@@ -1,0 +1,136 @@
+<UserControl x:Class="AquaHub.UI.Shell.Onboarding"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:AquaHub.UI.Controls"
+             xmlns:ui="clr-namespace:AquaHub.UI">
+    <Border Width="720" MinHeight="520" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="16">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="40" ShadowDepth="10" Direction="270" Opacity="0.45"/>
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Grid Margin="40,36,40,10">
+                <!-- Step 1: welcome -->
+                <StackPanel x:Name="Step1">
+                    <Image Source="/Assets/AquaHub.png" Width="72" Height="72" HorizontalAlignment="Left"/>
+                    <TextBlock Text="Welcome to Aqua Hub" Style="{StaticResource T.Display}" Margin="0,18,0,8"/>
+                    <TextBlock Text="Your agents read the news, your local feeds, the markets and your calendar — then tell you what matters. You never have to doom-scroll again."
+                               Style="{StaticResource T.Body}" Foreground="{DynamicResource B.Text2}" FontSize="15" LineHeight="23"/>
+                    <StackPanel Margin="0,26,0,0">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <Border Width="36" Height="36" CornerRadius="10" Background="{DynamicResource B.AccentSoft}"><c:Icon Kind="sparkle" Width="18" Height="18" Foreground="{DynamicResource B.AccentText}"/></Border>
+                            <StackPanel Margin="14,0,0,0"><TextBlock Text="One brief, morning and evening" FontWeight="SemiBold"/><TextBlock Text="Cross-checked stories, local pulse, markets, agenda and weather." Style="{StaticResource T.Caption}"/></StackPanel>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <Border Width="36" Height="36" CornerRadius="10" Background="{DynamicResource B.AccentSoft}"><c:Icon Kind="shield" Width="18" Height="18" Foreground="{DynamicResource B.AccentText}"/></Border>
+                            <StackPanel Margin="14,0,0,0"><TextBlock Text="Private by design" FontWeight="SemiBold"/><TextBlock Text="AI runs on this PC. No account, no telemetry, no cloud." Style="{StaticResource T.Caption}"/></StackPanel>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="36" Height="36" CornerRadius="10" Background="{DynamicResource B.AccentSoft}"><c:Icon Kind="bolt" Width="18" Height="18" Foreground="{DynamicResource B.AccentText}"/></Border>
+                            <StackPanel Margin="14,0,0,0"><TextBlock Text="Always one keystroke away" FontWeight="SemiBold"/><TextBlock x:Name="HotkeyHint" Style="{StaticResource T.Caption}"/></StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Step 2: location -->
+                <StackPanel x:Name="Step2" Visibility="Collapsed">
+                    <TextBlock Text="Where are you?" Style="{StaticResource T.Title}"/>
+                    <TextBlock Text="Used for weather, local news and what people nearby are talking about." Style="{StaticResource T.Body2}" Margin="0,6,0,18"/>
+                    <Grid>
+                        <TextBox x:Name="City" ui:UiProps.Placeholder="Search your city…" TextChanged="OnCityChanged" FontSize="15"/>
+                        <Popup x:Name="CityPopup" PlacementTarget="{Binding ElementName=City}" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" VerticalOffset="4">
+                            <Border Width="640" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="8" Padding="4">
+                                <ListBox x:Name="CityResults" Style="{StaticResource PlainList}" MaxHeight="260" MouseUp="OnPickCity"/>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <Border Style="{StaticResource CardInner}" Margin="0,14,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <c:Icon Kind="location" Width="16" Height="16" Foreground="{DynamicResource B.AccentText}"/>
+                            <TextBlock x:Name="CityChosen" Margin="10,0,0,0" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+                        <RadioButton x:Name="Metric" Style="{StaticResource Chip}" Content="°C · km/h" GroupName="units" IsChecked="True"/>
+                        <RadioButton x:Name="Imperial" Style="{StaticResource Chip}" Content="°F · mph" GroupName="units"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Step 3: interests -->
+                <StackPanel x:Name="Step3" Visibility="Collapsed">
+                    <TextBlock Text="What do you care about?" Style="{StaticResource T.Title}"/>
+                    <TextBlock Text="Stories about these rank higher. You can change everything later in Settings." Style="{StaticResource T.Body2}" Margin="0,6,0,14"/>
+                    <WrapPanel x:Name="InterestChips"/>
+                    <TextBlock Text="Local communities (subreddits)" Style="{StaticResource T.CardTitle}" Margin="0,16,0,8"/>
+                    <c:ChipEditor x:Name="Subs"/>
+                    <TextBlock Text="Stocks &amp; funds to watch" Style="{StaticResource T.CardTitle}" Margin="0,12,0,8"/>
+                    <c:ChipEditor x:Name="Watch"/>
+                </StackPanel>
+
+                <!-- Step 4: AI -->
+                <StackPanel x:Name="Step4" Visibility="Collapsed">
+                    <TextBlock Text="Your private AI" Style="{StaticResource T.Title}"/>
+                    <TextBlock Text="Aqua Hub uses a language model running on this PC to write summaries and answer questions. Nothing is sent to the cloud."
+                               Style="{StaticResource T.Body2}" Margin="0,6,0,18"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="AiBadge" Width="44" Height="44" CornerRadius="12" Background="{DynamicResource B.UpSoft}">
+                                <c:Icon x:Name="AiIcon" Kind="check" Width="22" Height="22" Foreground="{DynamicResource B.Up}"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                <TextBlock x:Name="AiTitle" FontSize="16" FontWeight="SemiBold" Text="Checking…"/>
+                                <TextBlock x:Name="AiBody" Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <CheckBox x:Name="PauseGaming" Style="{StaticResource Switch}" IsChecked="True" Margin="0,18,0,0" HorizontalAlignment="Left"
+                              Content="Pause AI and free the GPU while I'm gaming"/>
+                </StackPanel>
+
+                <!-- Step 5: finish -->
+                <StackPanel x:Name="Step5" Visibility="Collapsed">
+                    <TextBlock Text="You're all set" Style="{StaticResource T.Title}"/>
+                    <TextBlock Text="Your agents are already gathering today's news. Your first brief will be ready in a minute or two." Style="{StaticResource T.Body2}" Margin="0,6,0,18"/>
+                    <CheckBox x:Name="StartWithWindows" Style="{StaticResource Switch}" IsChecked="True" Content="Start Aqua Hub with Windows (runs quietly in the tray)" HorizontalAlignment="Left"/>
+                    <Border Style="{StaticResource CardInner}" Margin="0,20,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Handy shortcuts" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <TextBlock x:Name="Shortcuts" Style="{StaticResource T.Body2}" LineHeight="22"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource CardInner}" Margin="0,10,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Keep the Aqua icon on your taskbar" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,4,12,0"
+                                           Text="Windows 11 tucks new tray icons behind the ^ arrow. Turn Aqua Hub on under Taskbar → Other system tray icons for one-click access — then click it for the quick panel, double-click for this window, middle-click to play or pause."/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Style="{StaticResource Btn.Standard}" Content="Open taskbar settings" VerticalAlignment="Center" Click="OnTaskbarSettings"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Grid>
+
+            <!-- Footer -->
+            <Grid Grid.Row="1" Margin="40,0,40,28">
+                <StackPanel x:Name="Dots" Orientation="Horizontal" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="BackButton" Style="{StaticResource Btn.Subtle}" Content="Back" Click="OnBack" Margin="0,0,8,0" Visibility="Hidden"/>
+                    <Button x:Name="NextButton" Style="{StaticResource Btn.Accent}" Content="Get started" Click="OnNext" MinWidth="120"/>
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

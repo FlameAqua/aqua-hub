@@ -1,0 +1,132 @@
+<UserControl x:Class="AquaHub.UI.Pages.AgentsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:AquaHub.UI.Controls"
+             xmlns:ui="clr-namespace:AquaHub.UI">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="32,26,32,36" MaxWidth="1560">
+            <Grid Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Text="Agents" Style="{StaticResource T.Title}"/>
+                    <TextBlock x:Name="Subtitle" Style="{StaticResource T.Body2}" Margin="0,4,0,0" TextWrapping="Wrap" MaxWidth="820" HorizontalAlignment="Left"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                    <Button x:Name="OllamaButton" Style="{StaticResource Btn.Standard}" Click="OnToggleOllama" Margin="0,0,8,0"
+                            AutomationProperties.AutomationId="agents-ollama-toggle" ToolTip="The local model server the AI agents use">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="OllamaDot" Width="8" Height="8" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="OllamaText" Margin="8,0,0,0"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource Btn.Standard}" Click="OnPauseAll" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal"><c:Icon x:Name="PauseIcon" Kind="pause" Width="14" Height="14"/><TextBlock x:Name="PauseText" Text="Pause all" Margin="8,0,0,0"/></StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource Btn.Accent}" Click="OnRunAll">
+                        <StackPanel Orientation="Horizontal"><c:Icon Kind="refresh" Width="14" Height="14"/><TextBlock Text="Run all now" Margin="8,0,0,0"/></StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <ItemsControl x:Name="Stages">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><c:FlowGrid MaxColumns="4" MinColumnWidth="300" Gap="16"/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="4,0,0,10">
+                                <Border Width="24" Height="24" CornerRadius="7" Background="{DynamicResource B.AccentSoft}">
+                                    <TextBlock Text="{Binding Number}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource B.AccentText}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Margin="10,0,0,0">
+                                    <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding Description}" Style="{StaticResource T.Caption}"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <ItemsControl ItemsSource="{Binding Agents}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource Card}" Margin="0,0,0,10" Padding="16,14" ToolTip="{Binding Description}">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Grid Width="10" Height="10" VerticalAlignment="Center">
+                                                            <Ellipse Fill="{Binding StateBrush}"/>
+                                                        </Grid>
+                                                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" Margin="8,0,0,0"/>
+                                                        <Border Style="{StaticResource Pill}" Background="{DynamicResource B.AccentSoft}" Margin="8,0,0,0" Visibility="{Binding UsesAi, Converter={StaticResource Vis}}">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <c:Icon Kind="sparkle" Width="9" Height="9" Foreground="{DynamicResource B.AccentText}"/>
+                                                                <TextBlock Text="AI" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource B.AccentText}" Margin="3,0,0,0"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </StackPanel>
+                                                    <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" HorizontalAlignment="Right" Command="{Binding RunCommand}" ToolTip="Run now" AutomationProperties.Name="{Binding Name, StringFormat=Run {0} now}">
+                                                        <c:Icon Kind="play" Width="12" Height="12"/>
+                                                    </Button>
+                                                </Grid>
+                                                <TextBlock Text="{Binding StateText}" FontSize="12" Foreground="{Binding StateBrush}" Margin="18,2,0,0"/>
+                                                <TextBlock Text="{Binding Message}" Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}" Margin="0,8,0,0" MaxHeight="58" Visibility="{Binding Message, Converter={StaticResource Vis}}"/>
+                                                <TextBlock Style="{StaticResource T.Caption}" Margin="0,8,0,0" TextWrapping="Wrap" Text="{Binding FooterText, Mode=OneWay}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Grid Margin="0,10,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <c:Card Title="Activity" Icon="clock" Subtitle="most recent runs">
+                    <ItemsControl x:Name="Runs">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="54"/>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="60"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Time}" Style="{StaticResource T.Caption}"/>
+                                    <Ellipse Grid.Column="1" Width="7" Height="7" Fill="{Binding Brush}" HorizontalAlignment="Left"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding Agent}" FontSize="12.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Grid.Column="3" Text="{Binding Message}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Grid.Column="4" Text="{Binding Duration}" Style="{StaticResource T.Caption}" HorizontalAlignment="Right"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </c:Card>
+                <c:Card Grid.Column="2" Title="Model output inspector" Icon="eye" Subtitle="what the local model actually said">
+                    <StackPanel>
+                        <TextBlock Text="Every AI result is produced on this PC. Expand an entry to see the raw structured output behind it." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <TextBlock x:Name="NoOutputs" Text="Nothing yet — model output appears here once the local model has written summaries, the pulse or the brief." Style="{StaticResource T.Body2}" TextWrapping="Wrap" Visibility="Collapsed"/>
+                        <ItemsControl x:Name="Outputs">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Expander Margin="0,0,0,6" Foreground="{DynamicResource B.Text}" IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                        <Expander.Header>
+                                            <TextBlock FontSize="12.5"><Run Text="{Binding Purpose, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="{Binding Meta, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/></TextBlock>
+                                        </Expander.Header>
+                                        <Border Style="{StaticResource CardInner}" Margin="0,6,0,0">
+                                            <TextBlock Text="{Binding Output}" FontFamily="Cascadia Mono, Consolas" FontSize="11.5" TextWrapping="Wrap" Foreground="{DynamicResource B.Text2}"/>
+                                        </Border>
+                                    </Expander>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </c:Card>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

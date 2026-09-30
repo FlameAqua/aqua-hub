@@ -1,0 +1,306 @@
+<UserControl x:Class="AquaHub.UI.Pages.MarketsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:AquaHub.UI.Controls"
+             xmlns:ui="clr-namespace:AquaHub.UI">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="32,26,32,36" MaxWidth="1560">
+            <Grid Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Text="Markets" Style="{StaticResource T.Title}"/>
+                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
+                </StackPanel>
+                <Grid HorizontalAlignment="Right" VerticalAlignment="Center" Width="300">
+                    <TextBox x:Name="AddBox" ui:UiProps.Placeholder="Add a company or ticker…" ToolTip="Search for a company or ticker to add it to your watchlist" TextChanged="OnSearchChanged"/>
+                    <Popup x:Name="SearchPopup" PlacementTarget="{Binding ElementName=AddBox}" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" VerticalOffset="4">
+                        <Border Width="300" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="8" Padding="4" Margin="0,0,8,12">
+                            <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.3"/></Border.Effect>
+                            <ListBox x:Name="SearchResults" Style="{StaticResource PlainList}" MaxHeight="300" MouseUp="OnPickSymbol">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Style="{StaticResource T.Caption}">
+                                                <Run Text="{Binding Symbol, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding Exchange, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding Type, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+                    </Popup>
+                </Grid>
+            </Grid>
+
+            <!-- Index & macro tiles -->
+            <ItemsControl ItemsSource="{Binding Tiles}" Margin="-6,0,-6,10">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Style="{StaticResource Btn.Row}" Command="{Binding OpenCommand}" Margin="6,0" Padding="14,12" Background="{DynamicResource B.Card}" AutomationProperties.Name="{Binding Name}"
+                                BorderBrush="{DynamicResource B.CardStroke}" BorderThickness="1" ui:UiProps.CornerRadius="12">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{DynamicResource B.Text2}" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding PriceText}" Style="{StaticResource T.Number}" FontSize="17" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                    <c:Icon Kind="{Binding Arrow}" Width="11" Height="11" Foreground="{Binding ChangeBrush}"/>
+                                    <TextBlock Text="{Binding ChangeText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding ChangeBrush}" Margin="3,0,0,0"/>
+                                </StackPanel>
+                                <c:Sparkline Values="{Binding Intraday}" Baseline="{Binding Baseline}" Stroke="{Binding ChangeBrush}" Height="26" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="3*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="2*" MinWidth="340"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Detail -->
+                <Border Style="{StaticResource Card}" Padding="22,18">
+                    <StackPanel>
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource T.Caption}" FontSize="13">
+                                    <Run Text="{Binding Detail.Symbol, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  ·  "/><Run Text="{Binding DetailExchange, Mode=OneWay}"/>
+                                </TextBlock>
+                                <TextBlock Text="{Binding Detail.Name}" Style="{StaticResource T.Subtitle}" FontSize="20" Margin="0,2,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <TextBlock Text="{Binding Detail.PriceText}" Style="{StaticResource T.Number}" FontSize="34" FontWeight="SemiBold"/>
+                                    <Border CornerRadius="6" Background="{Binding Detail.ChangeSoft}" Padding="8,3" VerticalAlignment="Center" Margin="14,4,0,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <c:Icon Kind="{Binding Detail.Arrow}" Width="12" Height="12" Foreground="{Binding Detail.ChangeBrush}"/>
+                                            <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{Binding Detail.ChangeBrush}" Margin="4,0,0,0">
+                                                <Run Text="{Binding Detail.AbsChangeText, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Detail.ChangeText, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Text="{Binding Detail.StateText}" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="12,6,0,0"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding HoldingText}" Style="{StaticResource T.Caption}" Margin="0,4,0,0" Visibility="{Binding HoldingText, Converter={StaticResource Vis}}"/>
+                            </StackPanel>
+                            <WrapPanel x:Name="Ranges" HorizontalAlignment="Right" VerticalAlignment="Top"/>
+                        </Grid>
+
+                        <Grid Height="280" Margin="0,16,0,6">
+                            <c:LineChart x:Name="Chart" Stroke="{Binding ChartBrush}" LabelBrush="{DynamicResource B.Text3}" GridBrush="{DynamicResource B.Divider}"/>
+                            <TextBlock x:Name="ChartStatus" Style="{StaticResource T.Caption}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <ItemsControl ItemsSource="{Binding Stats}" Margin="0,10,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><UniformGrid Columns="4"/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,6,12,6">
+                                        <TextBlock Text="{Binding Label}" Style="{StaticResource T.Caption}"/>
+                                        <TextBlock Text="{Binding Value}" FontSize="14" FontWeight="SemiBold" Margin="0,2,0,0" Foreground="{Binding Brush}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <Rectangle Style="{StaticResource Divider}" Margin="0,12"/>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- Technical signal -->
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Technical signal" Style="{StaticResource T.CardTitle}"/>
+                                    <Border Style="{StaticResource Pill}" Background="{Binding Detail.SignalSoft}" Margin="8,0,0,0">
+                                        <TextBlock Text="{Binding Detail.SignalText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Detail.SignalBrush}"/>
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Text="Transparent rule-based composite of trend, momentum, RSI, MACD and 52-week position." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,4,0,8"/>
+                                <ItemsControl ItemsSource="{Binding Factors}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="16"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Ellipse Width="5" Height="5" Fill="{DynamicResource B.Text3}" VerticalAlignment="Top" Margin="2,7,0,0"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding}" Style="{StaticResource T.Body2}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                            <!-- AI view -->
+                            <StackPanel Grid.Column="2">
+                                <StackPanel Orientation="Horizontal">
+                                    <c:Icon Kind="sparkle" Width="13" Height="13" Foreground="{DynamicResource B.AccentText}"/>
+                                    <TextBlock Text="Analyst view" Style="{StaticResource T.CardTitle}" Margin="6,0,0,0"/>
+                                    <Border Style="{StaticResource Pill}" Background="{Binding Detail.StanceSoft}" Margin="8,0,0,0" Visibility="{Binding Detail.HasStance, Converter={StaticResource Vis}}">
+                                        <TextBlock Text="{Binding Detail.StanceText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Detail.StanceBrush}"/>
+                                    </Border>
+                                </StackPanel>
+                                <Grid Margin="0,8,0,0" Visibility="{Binding InsightConfidence, Converter={StaticResource Vis}}">
+                                    <TextBlock Text="Confidence" Style="{StaticResource T.Caption}"/>
+                                    <c:Bar Value="{Binding InsightConfidenceValue}" Fill="{Binding Detail.StanceBrush}" Track="{DynamicResource B.Track}" Height="5" Margin="74,0,40,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding InsightConfidence}" Style="{StaticResource T.Caption}" HorizontalAlignment="Right"/>
+                                </Grid>
+                                <TextBlock Text="{Binding InsightSummary}" Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}" Margin="0,8,0,6"/>
+                                <ItemsControl ItemsSource="{Binding InsightRationale}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="16"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <c:Icon Kind="check" Width="11" Height="11" Foreground="{DynamicResource B.Up}" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding}" Style="{StaticResource T.Body2}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <ItemsControl ItemsSource="{Binding InsightRisks}" Margin="0,4,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="16"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <c:Icon Kind="alert" Width="11" Height="11" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding}" Style="{StaticResource T.Body2}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="Indices, FX and commodities get technicals only." Style="{StaticResource T.Caption}" Visibility="{Binding InsightSummary, Converter={StaticResource VisNot}}"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Watchlist + market brief -->
+                <StackPanel Grid.Column="2" VerticalAlignment="Top">
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,8">
+                            <TextBlock Text="Watchlist" Style="{StaticResource T.CardTitle}"/>
+                            <TextBlock Text="{Binding PortfolioText}" Style="{StaticResource T.Caption}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding Watchlist}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Style="{StaticResource Btn.Row}" Click="OnSelectRow" Tag="{Binding Symbol}" Margin="-10,0,-10,0" Padding="10,7" AutomationProperties.Name="{Binding Symbol}" AutomationProperties.AutomationId="{Binding Symbol, StringFormat=watch-{0}}">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Remove from watchlist" Click="OnRemoveSymbol" Tag="{Binding Symbol}" ui:UiProps.Icon="trash"/>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="64"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Symbol}" FontSize="13" FontWeight="SemiBold"/>
+                                                    <Border Style="{StaticResource Pill}" Background="{Binding StanceSoft}" Margin="8,0,0,0" Padding="6,0" Visibility="{Binding HasStance, Converter={StaticResource Vis}}">
+                                                        <TextBlock Text="{Binding StanceText}" FontSize="10.5" FontWeight="SemiBold" Foreground="{Binding StanceBrush}"/>
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Name}" Style="{StaticResource T.Caption}" Margin="0,1,0,0"/>
+                                            </StackPanel>
+                                            <c:Sparkline Grid.Column="1" Values="{Binding Intraday}" Baseline="{Binding Baseline}" Stroke="{Binding ChangeBrush}" Height="26" FillArea="False" Thickness="1.4" Margin="4,0"/>
+                                            <StackPanel Grid.Column="2" MinWidth="88" HorizontalAlignment="Right">
+                                                <TextBlock Text="{Binding PriceText}" Style="{StaticResource T.Number}" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                                                <TextBlock Text="{Binding ChangeText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding ChangeBrush}" HorizontalAlignment="Right" Margin="0,1,0,0"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="Right-click a symbol (or press the context-menu key) to remove it. Add holdings in Settings → Markets to track position value."
+                                   Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <c:Card Title="Market brief" Icon="sparkle" Badge="{Binding BriefBadge}" Subtitle="{Binding BriefMeta}" Margin="0,16,0,0">
+                <StackPanel>
+                    <TextBlock Text="{Binding SessionText}" Style="{StaticResource T.Caption}" Margin="0,0,0,6" Visibility="{Binding SessionText, Converter={StaticResource Vis}}"/>
+                    <TextBlock Text="{Binding BriefOverview}" FontSize="15" LineHeight="23" TextWrapping="Wrap"/>
+                    <ItemsControl ItemsSource="{Binding Highlights}" Margin="0,10,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="16"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Width="5" Height="5" Fill="{DynamicResource B.AccentText}" VerticalAlignment="Top" Margin="2,8,0,0"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding}" Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+                </c:Card>
+                </StackPanel>
+            </Grid>
+
+            <!-- Ideas (educational) -->
+            <c:Card Title="Ideas to consider" Icon="target" Subtitle="balanced, risk-labelled — educational only" Margin="0,16,0,0">
+                <StackPanel>
+                    <TextBlock Text="Your Market Analyst hasn't suggested any ideas yet — they appear after it reviews your watchlist." Style="{StaticResource T.Body2}"
+                               Visibility="{Binding Ideas, Converter={StaticResource VisNot}}"/>
+                    <ItemsControl ItemsSource="{Binding Ideas}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><c:FlowGrid MaxColumns="3" MinColumnWidth="300" Gap="12"/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource CardInner}" Padding="16,14">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource Pill}" Background="{DynamicResource B.AccentSoft}">
+                                                <TextBlock Text="{Binding KindLabel}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource B.AccentText}"/>
+                                            </Border>
+                                            <Border Style="{StaticResource Pill}" Background="{Binding RiskSoft}" Margin="6,0,0,0">
+                                                <TextBlock Text="{Binding RiskLabel}" FontSize="11" FontWeight="SemiBold" Foreground="{Binding RiskBrush}"/>
+                                            </Border>
+                                            <TextBlock Text="{Binding Horizon}" Style="{StaticResource T.Caption}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" Margin="0,10,0,4" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding Thesis}" Style="{StaticResource T.Body2}"/>
+                                        <TextBlock Text="{Binding SymbolsText}" Style="{StaticResource T.Caption}" Margin="0,8,0,0" Foreground="{DynamicResource B.AccentText}"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Border Style="{StaticResource CardInner}" Margin="0,14,0,0" Background="{DynamicResource B.WarnSoft}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <c:Icon Kind="shield" Width="15" Height="15" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                            <TextBlock Grid.Column="1" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Foreground="{DynamicResource B.Text2}"
+                                       Text="Educational analysis generated on this PC from delayed prices, technical indicators and headlines. It is not personal financial advice and may be wrong. Consider your own situation, diversify, and consult a licensed adviser before investing. Aqua Hub never places trades."/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </c:Card>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    Central, pinned package versions. Runtime dependencies are deliberately minimal:
+      * Microsoft.Data.Sqlite (Microsoft) -> SQLitePCLRaw bundle (native SQLite with FTS5)
+      * System.Speech (Microsoft) -> Windows' offline desktop speech recognizer, for dictating into Ask
+      * Velopack (MIT, no dependencies of its own on .NET 8+) -> installer and updates from the GitHub releases
+    Everything else (HTTP, JSON, XML, WinRT, Win32) comes from the .NET BCL / Windows SDK projections.
+    Test-only packages are used exclusively by tests/AquaHub.Tests.
+  -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="System.Speech" Version="10.0.12" />
+    <PackageVersion Include="Velopack" Version="1.2.161" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+  </ItemGroup>
+</Project>

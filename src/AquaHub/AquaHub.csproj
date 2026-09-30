@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Native Windows shell (WPF, hardware-accelerated, no embedded browser engine).
+    Windows 10 19041+ TFM gives first-class WinRT projections (media sessions, speech, UI settings).
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>$(AquaWindowsTfm)</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>AquaHub</RootNamespace>
+    <AssemblyName>AquaHub</AssemblyName>
+    <ApplicationIcon>Assets\AquaHub.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyTitle>Aqua Hub</AssemblyTitle>
+    <Description>Aqua Hub — your private, agent-driven personal hub</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Lean runtime profile for an always-on background app -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <!-- Program.Main lets Velopack (installer and updates) run before the WPF application starts. -->
+    <StartupObject>AquaHub.Program</StartupObject>
+  </PropertyGroup>
+
+  <!-- Release builds name the GitHub repository they come from (release.yml passes -p:UpdateRepository=...); installed
+       copies check its releases for updates. Source builds leave it out and never check. -->
+  <ItemGroup Condition="'$(UpdateRepository)' != ''">
+    <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Return freed memory to the OS more aggressively (background app). -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AquaHub.Core\AquaHub.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Offline dictation for Ask (Windows' desktop speech recognizer). -->
+    <PackageReference Include="System.Speech" />
+    <!-- Installer and updates from the project's GitHub releases (Services/UpdateService.cs). -->
+    <PackageReference Include="Velopack" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\AquaHub.ico" />
+    <Content Include="Assets\AquaHub.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

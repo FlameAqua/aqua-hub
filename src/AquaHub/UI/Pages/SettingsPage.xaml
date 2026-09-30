@@ -1,0 +1,997 @@
+<UserControl x:Class="AquaHub.UI.Pages.SettingsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:AquaHub.UI.Controls"
+             xmlns:ui="clr-namespace:AquaHub.UI"
+             xmlns:svc="clr-namespace:AquaHub.Services">
+    <Grid Margin="32,26,20,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Grid Margin="0,0,12,16">
+            <StackPanel>
+                <TextBlock Text="Settings" Style="{StaticResource T.Title}"/>
+                <TextBlock Text="Changes apply instantly and are saved automatically." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <TextBlock x:Name="SavedText" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <Button Style="{StaticResource Btn.Standard}" Click="OnEditJson" ToolTip="Open settings.json in Notepad (power users)">
+                    <StackPanel Orientation="Horizontal"><c:Icon Kind="copy" Width="14" Height="14"/><TextBlock Text="Edit JSON" Margin="8,0,0,0"/></StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <ListBox x:Name="Sections" Style="{StaticResource PlainList}" SelectionChanged="OnSection" Margin="0,0,16,0" VerticalAlignment="Top">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal">
+                            <c:Icon Kind="{Binding Icon}" Width="16" Height="16" Foreground="{DynamicResource B.Text2}"/>
+                            <TextBlock Text="{Binding Name}" Margin="12,0,0,0"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <ScrollViewer x:Name="Scroller" Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,12,32">
+                <Grid MaxWidth="980" HorizontalAlignment="Left" x:Name="Panels">
+
+                    <!-- ═══ General ═══ -->
+                    <StackPanel x:Name="P_general">
+                        <TextBlock Text="General" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="user" Title="Your name" Description="Used in greetings and your brief.">
+                            <TextBox Text="{Binding General.UserName, UpdateSourceTrigger=PropertyChanged}" Width="240"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="power" Title="Start with Windows" Description="Runs quietly in the tray so your agents stay current.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.LaunchAtStartup}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="close" Title="Closing the window keeps Aqua Hub running" Description="Use the tray icon or hotkey to bring it back. Quit from the tray menu.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.CloseToTray}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="moon" Title="Theme">
+                            <ComboBox SelectedValue="{Binding General.Theme}" SelectedValuePath="Tag" Width="200">
+                                <ComboBoxItem Content="Use Windows setting" Tag="system"/>
+                                <ComboBoxItem Content="Dark" Tag="dark"/>
+                                <ComboBoxItem Content="Light" Tag="light"/>
+                            </ComboBox>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="droplet" Title="Accent colour" Description="Aqua, your Windows accent, or any #RRGGBB colour.">
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox x:Name="AccentCombo" SelectedValuePath="Tag" Width="200" SelectionChanged="OnAccentChanged">
+                                    <ComboBoxItem Content="Aqua" Tag="aqua"/>
+                                    <ComboBoxItem Content="Windows accent" Tag="system"/>
+                                    <ComboBoxItem Content="Custom…" Tag="custom"/>
+                                </ComboBox>
+                                <TextBox x:Name="AccentHex" Width="100" Margin="8,0,0,0" ui:UiProps.Placeholder="#RRGGBB" LostFocus="OnAccentHex" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="keyboard" Title="Quick panel hotkey" Description="Toggles the taskbar widget from anywhere.">
+                            <c:HotkeyBox Text="{Binding General.HotkeyFlyout, UpdateSourceTrigger=PropertyChanged}" DefaultGesture="Ctrl+Alt+H" Width="200"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="keyboard" Title="Command palette hotkey" Description="Ask or command from anywhere.">
+                            <c:HotkeyBox Text="{Binding General.HotkeyPalette, UpdateSourceTrigger=PropertyChanged}" DefaultGesture="Ctrl+Alt+Space" Width="200"/>
+                        </c:SettingRow>
+                        <TextBlock x:Name="HotkeyErrors" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="4,0,0,8" TextWrapping="Wrap"/>
+                        <c:SettingRow Icon="markets" Title="Market trend on the tray icon" Description="A small up/down marker for your first index — glanceable without opening anything.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.ShowTaskbarTicker}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="clock" Title="24-hour clock">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.Use24Hour}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bolt" Title="Eco mode" Description="Refresh less often while you're away or on battery.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.EcoMode}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="eye" Title="Reduce motion" Description="Turn off page and panel animations.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.ReduceMotion}"/>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Location ═══ -->
+                    <StackPanel x:Name="P_location" Visibility="Collapsed">
+                        <TextBlock Text="Location &amp; weather" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="location" Title="Your city" Description="Drives weather, local news and what counts as 'local'.">
+                            <StackPanel>
+                                <Grid Width="300">
+                                    <TextBox x:Name="CitySearch" ui:UiProps.Placeholder="Search a city…" TextChanged="OnCitySearch"/>
+                                    <Popup x:Name="CityPopup" PlacementTarget="{Binding ElementName=CitySearch}" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" VerticalOffset="4">
+                                        <Border Width="300" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="8" Padding="4">
+                                            <ListBox x:Name="CityResults" Style="{StaticResource PlainList}" MaxHeight="280" MouseUp="OnPickCity"/>
+                                        </Border>
+                                    </Popup>
+                                </Grid>
+                                <TextBlock x:Name="CityCurrent" Style="{StaticResource T.Caption}" Margin="2,6,0,0"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="thermometer" Title="Units">
+                            <ComboBox SelectedValue="{Binding Location.Units}" SelectedValuePath="Tag" Width="200">
+                                <ComboBoxItem Content="Metric (°C, km/h)" Tag="metric"/>
+                                <ComboBoxItem Content="Imperial (°F, mph)" Tag="imperial"/>
+                            </ComboBox>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="globe" Title="Language &amp; region" Description="Language for summaries and regional news editions.">
+                            <ComboBox SelectedValue="{Binding Location.Language}" SelectedValuePath="Tag" Width="200">
+                                <ComboBoxItem Content="English (Ireland)" Tag="en-IE"/>
+                                <ComboBoxItem Content="English (UK)" Tag="en-GB"/>
+                                <ComboBoxItem Content="English (US)" Tag="en-US"/>
+                                <ComboBoxItem Content="English (Australia)" Tag="en-AU"/>
+                                <ComboBoxItem Content="English (Canada)" Tag="en-CA"/>
+                            </ComboBox>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="hash" Title="Local keywords" Description="Stories mentioning these count as local.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="LocalKeywords"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ News ═══ -->
+                    <StackPanel x:Name="P_news" Visibility="Collapsed">
+                        <TextBlock Text="News" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="star" Title="Your interests" Description="Stories about these rank higher and get summarised first.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Interests"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="mute" Title="Muted topics" Description="Stories about these sink to the bottom.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Muted"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="refresh" Title="Refresh every (minutes)">
+                            <TextBox Text="{Binding News.RefreshMinutes, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="sparkle" Title="Stories to summarise with AI" Description="Top stories that get an on-device summary each run.">
+                            <TextBox Text="{Binding News.SummarizeTop, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="layers" Title="Sources" Description="Tier 1 = wire services &amp; public broadcasters, 2 = reputable outlets, 3 = aggregators.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <ItemsControl x:Name="SourcesList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,3">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="0,0,12,0"/>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Name}" FontSize="13.5"/>
+                                                        <TextBlock Style="{StaticResource T.Caption}"><Run Text="{Binding Category, Mode=OneWay}"/><Run Text=" · tier "/><Run Text="{Binding Tier, Mode=OneWay}"/><Run Text="{Binding Query, Mode=OneWay, StringFormat=' · Google News: {0}'}"/></TextBlock>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="3" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveSource" Tag="{Binding Id}" ToolTip="Remove source">
+                                                        <c:Icon Kind="trash" Width="13" Height="13"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="160"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="130"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="NewSourceName" ui:UiProps.Placeholder="Name" Margin="0,0,6,0"/>
+                                        <TextBox x:Name="NewSourceUrl" Grid.Column="1" ui:UiProps.Placeholder="https://… RSS or Atom feed URL" Margin="0,0,6,0"/>
+                                        <ComboBox x:Name="NewSourceCat" Grid.Column="2" MinWidth="120" Margin="0,0,6,0" SelectedIndex="0">
+                                            <ComboBoxItem Content="world"/><ComboBoxItem Content="local"/><ComboBoxItem Content="europe"/>
+                                            <ComboBoxItem Content="business"/><ComboBoxItem Content="tech"/><ComboBoxItem Content="science"/>
+                                        </ComboBox>
+                                        <Button Grid.Column="3" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddSource"/>
+                                    </Grid>
+                                    <TextBlock x:Name="SourceError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Social ═══ -->
+                    <StackPanel x:Name="P_social" Visibility="Collapsed">
+                        <TextBlock Text="Social" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
+                        <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   Text="Reads public posts from local communities, plus — if you connect them — your own Bluesky and Mastodon timelines. X/Twitter, Facebook and Instagram offer no public feeds; add any RSS bridge (e.g. a self-hosted RSSHub) as an extra feed."/>
+                        <c:SettingRow x:Name="Row_bluesky" Icon="user" Title="Your Bluesky timeline" Description="Posts from people you follow. Create an app password in Bluesky → Settings → Privacy and security → App passwords; it is kept in Windows Credential Manager.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="220"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Text="{Binding Social.BlueskyHandle, UpdateSourceTrigger=PropertyChanged}" ui:UiProps.Placeholder="you.bsky.social" Margin="0,0,6,0"/>
+                                        <PasswordBox x:Name="BskyPassword" Grid.Column="1" Margin="0,0,6,0" AutomationProperties.Name="Bluesky app password"/>
+                                        <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Content="Connect" Click="OnConnectBluesky"/>
+                                        <Button Grid.Column="3" Style="{StaticResource Btn.Subtle}" Content="Disconnect" Click="OnDisconnectBluesky" Margin="6,0,0,0"/>
+                                    </Grid>
+                                    <TextBlock x:Name="BskyStatus" Style="{StaticResource T.Caption}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_mastodon" Icon="hash" Title="Your Mastodon home timeline" Description="Uses the server below. Create an access token with the read:statuses scope in Mastodon → Preferences → Development; it is kept in Windows Credential Manager.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <PasswordBox x:Name="MastodonToken" Margin="0,0,6,0" AutomationProperties.Name="Mastodon access token"/>
+                                        <Button Grid.Column="1" Style="{StaticResource Btn.Standard}" Content="Connect" Click="OnConnectMastodon"/>
+                                        <Button Grid.Column="2" Style="{StaticResource Btn.Subtle}" Content="Disconnect" Click="OnDisconnectMastodon" Margin="6,0,0,0"/>
+                                    </Grid>
+                                    <TextBlock x:Name="MastodonStatus" Style="{StaticResource T.Caption}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_reddit" Icon="social" Title="Subreddits" Description="Local and interest communities (read via public RSS).">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Subreddits"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="hash" Title="Mastodon instance" Description="Server used for hashtag timelines.">
+                            <TextBox Text="{Binding Social.MastodonInstance, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="hash" Title="Mastodon hashtags">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Hashtags"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="globe" Title="Bluesky trending topics">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Social.BlueskyTrending}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="user" Title="Bluesky accounts" Description="Handles to follow, e.g. someone.bsky.social">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="BskyAccounts"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="layers" Title="Bluesky custom feeds" Description="Paste a feed link (bsky.app/profile/…/feed/…) or its at:// address.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="BskyFeeds"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_youtube" Icon="play" Title="YouTube channels" Description="New uploads from channels you like. Paste a channel link (youtube.com/@name or /channel/UC…), an @handle, a video link or a UC… ID — the name and logo are filled in for you.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <ItemsControl x:Name="ChannelList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid Width="32" Height="32" Margin="0,0,10,0" VerticalAlignment="Center">
+                                                        <Ellipse Fill="{DynamicResource B.Subtle}"/>
+                                                        <c:Icon Kind="play" Width="13" Height="13" Foreground="{DynamicResource B.Text3}"/>
+                                                        <Image svc:Img.Url="{Binding AvatarUrl}" svc:Img.DecodeWidth="64" Stretch="UniformToFill">
+                                                            <Image.Clip><EllipseGeometry Center="16,16" RadiusX="16" RadiusY="16"/></Image.Clip>
+                                                        </Image>
+                                                    </Grid>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Name}" FontSize="13.5"/>
+                                                        <TextBlock Style="{StaticResource T.Caption}">
+                                                            <Run Text="{Binding Handle, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding ChannelId, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/>
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveChannel" Tag="{Binding ChannelId}" ToolTip="Remove channel"
+                                                            AutomationProperties.Name="{Binding Name, StringFormat=Remove channel {0}}">
+                                                        <c:Icon Kind="trash" Width="13" Height="13"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="NewChannelId" ui:UiProps.Placeholder="youtube.com/@channel, @handle, a video link or UC… ID" Margin="0,0,6,0"
+                                                 AutomationProperties.Name="YouTube channel link or handle" KeyDown="OnChannelKey"/>
+                                        <Button x:Name="AddChannelButton" Grid.Column="1" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddChannel" MinWidth="64"/>
+                                    </Grid>
+                                    <TextBlock x:Name="ChannelError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="link" Title="Extra feeds" Description="Any RSS/Atom feed read as social posts — e.g. an RSSHub bridge for accounts you follow on X or Instagram.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <ItemsControl x:Name="ExtraFeedList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,3">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="0,0,12,0" AutomationProperties.Name="{Binding Name, StringFormat=Read {0}}"/>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Name}" FontSize="13.5"/>
+                                                        <TextBlock Text="{Binding Url}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveExtraFeed" Tag="{Binding Id}" ToolTip="Remove feed"
+                                                            AutomationProperties.Name="{Binding Name, StringFormat=Remove feed {0}}">
+                                                        <c:Icon Kind="trash" Width="13" Height="13"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="160"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="NewFeedName" ui:UiProps.Placeholder="Name" Margin="0,0,6,0"/>
+                                        <TextBox x:Name="NewFeedUrl" Grid.Column="1" ui:UiProps.Placeholder="https://… RSS or Atom feed" Margin="0,0,6,0"/>
+                                        <CheckBox x:Name="NewFeedLocal" Grid.Column="2" Content="Local" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <Button Grid.Column="3" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddExtraFeed"/>
+                                    </Grid>
+                                    <TextBlock x:Name="ExtraFeedError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_hackernews" Icon="bolt" Title="Hacker News front page" Description="The stories tech people are discussing.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Social.HackerNews}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="refresh" Title="Refresh every (minutes)">
+                            <TextBox Text="{Binding Social.RefreshMinutes, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Markets ═══ -->
+                    <StackPanel x:Name="P_markets" Visibility="Collapsed">
+                        <TextBlock Text="Markets" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="markets" Title="Watchlist &amp; holdings" Description="Optional shares and cost basis show position value and P/L. Price targets raise alerts.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="36"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Symbol" Style="{StaticResource T.Caption}"/>
+                                        <TextBlock Grid.Column="1" Text="Shares" Style="{StaticResource T.Caption}"/>
+                                        <TextBlock Grid.Column="2" Text="Cost / share" Style="{StaticResource T.Caption}"/>
+                                        <TextBlock Grid.Column="3" Text="Alert above" Style="{StaticResource T.Caption}"/>
+                                        <TextBlock Grid.Column="4" Text="Alert below" Style="{StaticResource T.Caption}"/>
+                                    </Grid>
+                                    <ItemsControl x:Name="WatchList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,3">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="90"/>
+                                                        <ColumnDefinition Width="90"/>
+                                                        <ColumnDefinition Width="90"/>
+                                                        <ColumnDefinition Width="90"/>
+                                                        <ColumnDefinition Width="36"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock VerticalAlignment="Center"><Run Text="{Binding Symbol, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding Name, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/></TextBlock>
+                                                    <TextBox Grid.Column="1" Text="{Binding Shares, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
+                                                    <TextBox Grid.Column="2" Text="{Binding CostBasis, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
+                                                    <TextBox Grid.Column="3" Text="{Binding AlertAbove, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
+                                                    <TextBox Grid.Column="4" Text="{Binding AlertBelow, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
+                                                    <Button Grid.Column="5" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveWatch" Tag="{Binding Symbol}" ToolTip="Remove">
+                                                        <c:Icon Kind="trash" Width="13" Height="13"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="Add symbols from the Markets page search box." Style="{StaticResource T.Caption}" Margin="0,8,0,0"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="globe" Title="Indices" Description="Yahoo symbols, e.g. ^GSPC, ^STOXX50E, ^ISEQ">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Indices"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="layers" Title="Currencies, crypto &amp; commodities" Description="e.g. EURUSD=X, BTC-USD, GC=F">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Macro"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bell" Title="Big-move alert (%)" Description="Notify when a watched instrument moves this much in a day.">
+                            <TextBox Text="{Binding Markets.AlertMovePercent, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="shield" Title="Risk profile" Description="Shapes the tone of AI ideas (always educational, never advice).">
+                            <ComboBox SelectedValue="{Binding Markets.RiskProfile}" SelectedValuePath="Tag" Width="200">
+                                <ComboBoxItem Content="Conservative" Tag="conservative"/>
+                                <ComboBoxItem Content="Balanced" Tag="balanced"/>
+                                <ComboBoxItem Content="Growth" Tag="growth"/>
+                                <ComboBoxItem Content="Aggressive" Tag="aggressive"/>
+                            </ComboBox>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="clock" Title="Investment horizon">
+                            <ComboBox SelectedValue="{Binding Markets.Horizon}" SelectedValuePath="Tag" Width="200">
+                                <ComboBoxItem Content="Short-term (weeks)" Tag="short-term"/>
+                                <ComboBoxItem Content="Medium-term (months)" Tag="medium-term"/>
+                                <ComboBoxItem Content="Long-term (years)" Tag="long-term"/>
+                            </ComboBox>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="refresh" Title="Quote refresh while markets are open (seconds)">
+                            <TextBox Text="{Binding Markets.RefreshSeconds, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Agenda ═══ -->
+                    <StackPanel x:Name="P_agenda" Visibility="Collapsed">
+                        <TextBlock Text="Agenda" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="upcoming" Title="Calendars" Description="Private ICS links from Google/Outlook/iCloud, or a local .ics file. Read-only.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <ItemsControl x:Name="CalendarList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,3">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="0,0,12,0"/>
+                                                    <StackPanel Grid.Column="1">
+                                                        <TextBlock Text="{Binding Name}" FontSize="13.5"/>
+                                                        <TextBlock Text="{Binding Url}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveCalendar" Tag="{Binding Url}"><c:Icon Kind="trash" Width="13" Height="13"/></Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="NewCalName" ui:UiProps.Placeholder="Name" Margin="0,0,6,0"/>
+                                        <TextBox x:Name="NewCalUrl" Grid.Column="1" ui:UiProps.Placeholder="https://… .ics link or C:\path\calendar.ics" Margin="0,0,6,0"/>
+                                        <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Content="Browse…" Click="OnBrowseIcs" Margin="0,0,6,0"/>
+                                        <Button Grid.Column="3" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddCalendar"/>
+                                    </Grid>
+                                    <TextBlock x:Name="CalError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="flag" Title="Public holidays" Description="Two-letter country codes, e.g. IE, GB, US.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Holidays"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="markets" Title="Economic calendar" Description="High-impact releases (inflation, jobs, central banks).">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Events.Economic}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="globe" Title="Economic calendar currencies">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Currencies"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bolt" Title="Earnings dates (Finnhub)" Description="Free key from finnhub.io — stored in Windows Credential Manager, never in settings.">
+                            <StackPanel Orientation="Horizontal">
+                                <PasswordBox x:Name="FinnhubKey" Width="220"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Save key" Margin="6,0,0,0" Click="OnSaveFinnhub"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bell" Title="Remind me before events (minutes)">
+                            <TextBox Text="{Binding Events.ReminderMinutes, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="upcoming" Title="Look ahead (days)">
+                            <TextBox Text="{Binding Events.LookaheadDays, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Predictions ═══ -->
+                    <StackPanel x:Name="P_predictions" Visibility="Collapsed">
+                        <TextBlock Text="Predictions" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="target" Title="Polymarket" Description="Global prediction markets (public data, no account).">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Predictions.Polymarket}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="hash" Title="Polymarket topics" Description="Tags such as economy, politics, geopolitics, tech, crypto, climate.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="PmTags"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="target" Title="Kalshi" Description="US-regulated exchange (public data).">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Predictions.Kalshi}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="filter" Title="Kalshi categories" Description="e.g. Economics, Politics, Climate and Weather, Financials.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="KalshiCats"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bell" Title="Alert on swings of (percentage points)">
+                            <TextBox Text="{Binding Predictions.SwingAlertPoints, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="filter" Title="Minimum 24h volume (USD)">
+                            <TextBox Text="{Binding Predictions.MinVolume24h, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ AI ═══ -->
+                    <StackPanel x:Name="P_ai" Visibility="Collapsed">
+                        <TextBlock Text="AI &amp; models" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
+                        <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   Text="All AI runs locally through Ollama (or any OpenAI-compatible local server such as LM Studio or llama.cpp). Without a model, Aqua Hub still works using fast extractive summaries."/>
+                        <c:SettingRow Icon="sparkle" Title="Use local AI">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.Enabled}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="cube" Title="Model server">
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox SelectedValue="{Binding Ai.Provider}" SelectedValuePath="Tag" Width="170" Margin="0,0,6,0">
+                                    <ComboBoxItem Content="Ollama" Tag="ollama"/>
+                                    <ComboBoxItem Content="OpenAI-compatible" Tag="openai"/>
+                                </ComboBox>
+                                <TextBox Text="{Binding Ai.Endpoint, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="shield" Title="API key (OpenAI-compatible servers only)" Description="For LM Studio, llama.cpp, vLLM and similar servers that require a key. Stored in Windows Credential Manager.">
+                            <StackPanel Orientation="Horizontal">
+                                <PasswordBox x:Name="AiKey" Width="220" AutomationProperties.Name="AI server API key"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Save key" Margin="6,0,0,0" Click="OnSaveAiKey"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="cube" Title="Model" Description="'Automatic' picks the best installed model (qwen3.5:9b → qwen3:8b → gemma3…).">
+                            <ComboBox x:Name="ModelCombo" Width="240" SelectionChanged="OnModelChanged"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="book" Title="Model for briefs &amp; market analysis" Description="Optionally a larger model for the longer write-ups. Using one model avoids VRAM swapping.">
+                            <ComboBox x:Name="DeepModelCombo" Width="240" SelectionChanged="OnDeepModelChanged"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="check" Title="Connection">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="AiTest" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,10,0" MaxWidth="360" TextWrapping="Wrap"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Test" Click="OnTestAi"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="game" Title="Pause AI while gaming" Description="Steps aside while a full-screen game is using the GPU heavily, then resumes automatically.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.PauseWhenFullscreen}"/>
+                        </c:SettingRow>
+
+                        <TextBlock Text="LOCAL AI SERVER (OLLAMA)" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
+                        <c:SettingRow Icon="cube" Title="Ollama" Description="The on-device model server. Turning it off frees its memory; AI features use quick fallbacks meanwhile.">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="OllamaStatus" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,10,0" MaxWidth="280" TextWrapping="Wrap"
+                                           AutomationProperties.AutomationId="settings-ollama-status"/>
+                                <Button x:Name="OllamaToggle" Style="{StaticResource Btn.Standard}" Click="OnOllamaToggle" MinWidth="86"
+                                        AutomationProperties.AutomationId="settings-ollama-toggle"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="wand" Title="Let Aqua start and stop Ollama" Description="Off: Aqua never starts or stops the server itself. A server Aqua started stops when you quit Aqua; a remote endpoint is never touched.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.ManageOllama}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bolt" Title="Start it when you ask something" Description="Also for Regenerate and your scheduled briefs. Background agents never start it, so an idle stop really frees memory.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.StartOllamaOnDemand}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="game" Title="Stop it while a game needs the GPU" Description="When a full-screen game, or any app, keeps the GPU busy for a minute. It starts again two minutes after the GPU frees up.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.StopOllamaForGpu}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="clock" Title="Stop it when unused" Description="Ollama keeps hundreds of MB of RAM even with no model loaded. Counts from the last request once no model is loaded.">
+                            <ComboBox x:Name="OllamaIdle" Width="170" SelectedValuePath="Minutes" DisplayMemberPath="Label" SelectedValue="{Binding Ai.StopOllamaIdleMinutes}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="disk" Title="Ollama location" Description="Leave empty to use the standard install (%LOCALAPPDATA%\Programs\Ollama) or PATH.">
+                            <TextBox Text="{Binding Ai.OllamaPath, UpdateSourceTrigger=PropertyChanged}" Width="260" ui:UiProps.Placeholder="Auto-detected"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="sunrise" Title="Brief times" Description="When your Chief of Staff writes a fresh brief (HH:mm).">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="BriefTimes"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="clock" Title="Keep model loaded for" Description="e.g. 5m, 30m, 1h. Shorter frees VRAM sooner.">
+                            <TextBox Text="{Binding Ai.KeepAlive, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bolt" Title="Allow model 'thinking'" Description="Slower but can help reasoning models. Off is best for summaries.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.Think}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="shield" Title="Allow a non-local endpoint" Description="Off keeps all prompts on this PC.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.AllowRemoteEndpoint}"/>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Ask Aqua ═══ -->
+                    <StackPanel x:Name="P_ask" Visibility="Collapsed">
+                        <TextBlock Text="Ask Aqua" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
+                        <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                   Text="What Ask may use beyond what your agents collected. The switches under the Ask box (Web, Research, Think, Use my PC) choose per question; these settings set the limits. The model itself always runs on this PC."/>
+
+                        <TextBlock Text="THE WEB" Style="{StaticResource T.Overline}" Margin="4,6,0,8"/>
+                        <c:SettingRow Icon="globe" Title="Let Ask search the web" Description="Searches go to the search engine below and pages are read straight from their sites. Off: Ask only uses your feeds, your files and the model's own knowledge.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.Web}" AutomationProperties.Name="Let Ask search the web"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="search" Title="Search engine" Description="DuckDuckGo needs no account. Or use your own SearXNG instance, or Brave Search with a free API key.">
+                            <ComboBox x:Name="SearchEngineCombo" SelectedValue="{Binding Ask.SearchEngine}" SelectedValuePath="Tag" Width="220" SelectionChanged="OnSearchEngineChanged">
+                                <ComboBoxItem Content="DuckDuckGo" Tag="duckduckgo"/>
+                                <ComboBoxItem Content="SearXNG (your instance)" Tag="searxng"/>
+                                <ComboBoxItem Content="Brave Search (API key)" Tag="brave"/>
+                            </ComboBox>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="SearxngRow" Icon="link" Title="SearXNG address" Description="With the JSON output format enabled, e.g. https://searx.example.org">
+                            <TextBox Text="{Binding Ask.SearxngUrl, UpdateSourceTrigger=PropertyChanged}" Width="260" ui:UiProps.Placeholder="https://…"/>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="BraveRow" Icon="shield" Title="Brave Search API key" Description="Stored in Windows Credential Manager, never in settings.json.">
+                            <StackPanel Orientation="Horizontal">
+                                <PasswordBox x:Name="BraveKey" Width="220" AutomationProperties.Name="Brave Search API key"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Save key" Margin="6,0,0,0" Click="OnSaveBraveKey"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="book" Title="Pages Research reads" Description="More pages give fuller reports but take longer.">
+                            <ComboBox x:Name="ResearchPagesCombo" SelectedValue="{Binding Ask.ResearchPages}" Width="120"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="news" Title="Read the articles for “Tell me more”" Description="Asking about a story reads a couple of the outlets' own articles, not just their headlines and summaries.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ReadStoryArticles}" AutomationProperties.Name="Read the articles for Tell me more"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="brain" Title="Start with Think on" Description="Think makes the model reason before answering: slower, better for tricky questions. You can switch it per question.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ThinkByDefault}" AutomationProperties.Name="Start with Think on"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="wand" Title="Plan searches with the model" Description="Before answering, the model works out proper search queries, the words your files are likely named with and which links to open. Adds a second or two; off uses simpler rules.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.PlanWithModel}" AutomationProperties.Name="Plan searches with the model"/>
+                        </c:SettingRow>
+
+                        <TextBlock Text="CHATS" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
+                        <c:SettingRow x:Name="Row_chats" Icon="message" Title="Delete chats after" Description="Chats you haven't used for this long are deleted; starred chats are kept until you delete them. Only kept on this PC (Privacy › Keep Ask chats).">
+                            <ComboBox x:Name="ChatRetentionCombo" Width="170" SelectedValuePath="Days" DisplayMemberPath="Label" SelectedValue="{Binding Ask.ChatRetentionDays}"
+                                      AutomationProperties.Name="Delete chats after"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="layers" Title="Context window" Description="How much the model can take in at once: the chat so far plus what Aqua gathered. Automatic grows it as a chat needs; bigger remembers more but uses more graphics memory and is slower, and changing it reloads the model.">
+                            <ComboBox x:Name="ContextWindowCombo" Width="200" SelectedValuePath="Tokens" DisplayMemberPath="Label" SelectedValue="{Binding Ask.ContextWindow}"
+                                      AutomationProperties.Name="Context window"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="clock" Title="Earlier messages sent with each question" Description="Older messages are left out (the footer says when).">
+                            <ComboBox x:Name="HistoryMessagesCombo" Width="120" SelectedValue="{Binding Ask.HistoryMessages}" AutomationProperties.Name="Earlier messages sent"/>
+                        </c:SettingRow>
+
+                        <TextBlock Text="VOICE" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
+                        <c:SettingRow x:Name="Row_voice" Icon="mic" Title="Voice input" Description="The microphone button in Ask. Whisper (install it below) is by far the most accurate and runs on this PC. “Windows, on this PC” uses Windows' own recognizer offline; “Windows online speech” is better but sends your voice to Microsoft's speech service (and needs Online speech recognition on in Windows privacy settings).">
+                            <ComboBox x:Name="VoiceCombo" Width="220" SelectedValue="{Binding Ask.Voice}" SelectedValuePath="Tag" SelectionChanged="OnVoiceEngineChanged" AutomationProperties.Name="Voice input">
+                                <ComboBoxItem Content="Whisper (on this PC)" Tag="whisper"/>
+                                <ComboBoxItem Content="Windows, on this PC" Tag="offline"/>
+                                <ComboBoxItem Content="Windows online speech" Tag="online"/>
+                                <ComboBoxItem Content="Off" Tag="off"/>
+                            </ComboBox>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_whisper" Icon="download" Title="Whisper" Description="OpenAI's Whisper speech model, run on this PC by whisper.cpp: far more accurate than Windows' recognizer, and your voice never leaves the PC. Installing downloads the whisper.cpp program (8 MB, from its GitHub release) and the model you pick (from the whisper.cpp project on Hugging Face); each file is checked against its published SHA-256 fingerprint before it's used. Bigger models hear better but take longer to write.">
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox x:Name="WhisperModelCombo" Width="260" SelectedValuePath="Id" SelectedValue="{Binding Ask.WhisperModel}" SelectionChanged="OnWhisperModelChanged"
+                                          AutomationProperties.Name="Whisper model" AutomationProperties.AutomationId="whisper-model">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button x:Name="WhisperInstallButton" Style="{StaticResource Btn.Accent}" Content="Install" Margin="6,0,0,0" MinWidth="90" Click="OnWhisperInstall"
+                                        AutomationProperties.AutomationId="whisper-install"/>
+                            </StackPanel>
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <Grid x:Name="WhisperProgressTrack" Height="6" Margin="0,2,0,8" Visibility="Collapsed" AutomationProperties.Name="Whisper download">
+                                        <Border CornerRadius="3" Background="{DynamicResource B.Track}"/>
+                                        <Border x:Name="WhisperProgressFill" CornerRadius="3" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
+                                    </Grid>
+                                    <TextBlock x:Name="WhisperStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap" AutomationProperties.AutomationId="whisper-status"/>
+                                    <WrapPanel Margin="0,6,0,0">
+                                        <Button x:Name="WhisperCancelButton" Style="{StaticResource Btn.Standard}" Content="Cancel" Click="OnWhisperCancel" Visibility="Collapsed"
+                                                Margin="0,0,6,0" AutomationProperties.AutomationId="whisper-cancel"/>
+                                        <Button x:Name="WhisperRemoveButton" Style="{StaticResource Btn.Standard}" Content="Remove Whisper" Click="OnWhisperRemove" Visibility="Collapsed"
+                                                Margin="0,0,6,0" AutomationProperties.AutomationId="whisper-remove"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="info" Title="Suggest Whisper while I dictate" Description="With Windows' recognizers, a note under the Ask box says they often mishear and links here.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.WhisperTip}" AutomationProperties.Name="Suggest Whisper while I dictate"/>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_microphone" Icon="headphones" Title="Microphone" Description="What Whisper and “Windows, on this PC” listen to. Windows online speech always uses Windows' default microphone, set in Sound settings.">
+                            <StackPanel Orientation="Horizontal">
+                                <!-- Long device names end in "…" (the full name is the tooltip) rather than being cut mid-word. -->
+                                <ComboBox x:Name="MicCombo" Width="290" HorizontalContentAlignment="Stretch" SelectionChanged="OnMicChanged" AutomationProperties.Name="Microphone"
+                                          AutomationProperties.AutomationId="voice-microphone">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Sound settings" Click="OnSoundSettings" Margin="6,0,0,0"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="wand" Title="Tidy up what I say" Description="For Windows' recognizers: when a word plainly doesn't fit (“what's the whether like”), the local model puts in the one that sounds like it and adds punctuation, before the words go in the Ask box; sentences that already make sense are left alone. Undo puts back the words as heard. Needs local AI; nothing leaves this PC. Whisper's words don't need it.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.VoiceTidy}" AutomationProperties.Name="Tidy up what I say"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="send" Title="Send when I stop speaking" Description="Off: the words go into the Ask box so you can check them first.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.VoiceAutoSend}" AutomationProperties.Name="Send when I stop speaking"/>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_voicetest" Icon="pulse" Title="Test voice input" Description="Say a sentence to see how loud the microphone is and what Aqua hears — with Windows' recognizers, before and after the tidy-up.">
+                            <Button x:Name="VoiceTestButton" Style="{StaticResource Btn.Standard}" Content="Start test" Click="OnVoiceTest" AutomationProperties.AutomationId="voice-test"/>
+                            <c:SettingRow.Below>
+                                <StackPanel x:Name="VoiceTestPanel" Visibility="Collapsed" Margin="0,2,0,0">
+                                    <Grid x:Name="VoiceLevelTrack" Height="6" Margin="0,0,0,8" AutomationProperties.Name="Microphone level">
+                                        <Border CornerRadius="3" Background="{DynamicResource B.Track}"/>
+                                        <Border x:Name="VoiceLevelFill" CornerRadius="3" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
+                                    </Grid>
+                                    <TextBlock x:Name="VoiceTestStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
+                                    <TextBox x:Name="VoiceTestHeard" Style="{StaticResource ReadOnlyText}" Margin="0,6,0,0" Visibility="Collapsed" AutomationProperties.Name="What Aqua heard"/>
+                                    <TextBox x:Name="VoiceTestTidied" Style="{StaticResource ReadOnlyText}" Margin="0,4,0,0" Visibility="Collapsed" Foreground="{DynamicResource B.Accent}"
+                                             AutomationProperties.Name="After the tidy-up"/>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_voicetraining" Icon="wrench" Title="Help Windows understand you" Description="For “Windows, on this PC”: set up your microphone, then read a few sentences aloud so Windows' recognizer learns your voice. Speech settings has the speech language and “Recognise non-native accents”. Whisper needs none of this.">
+                            <c:SettingRow.Below>
+                                <WrapPanel>
+                                    <Button Style="{StaticResource Btn.Standard}" Content="Set up microphone" Click="OnMicSetup" Margin="0,0,6,6" AutomationProperties.AutomationId="voice-mic-setup"/>
+                                    <Button Style="{StaticResource Btn.Standard}" Content="Train my voice" Click="OnVoiceTraining" Margin="0,0,6,6" AutomationProperties.AutomationId="voice-training"/>
+                                    <Button Style="{StaticResource Btn.Standard}" Content="Speech settings" Click="OnSpeechSettings" Margin="0,0,6,6"/>
+                                </WrapPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+
+                        <TextBlock Text="YOUR PC" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
+                        <c:SettingRow Icon="computer" Title="Allow “Use my PC”" Description="Lets Ask search and read files in the folders below, look at your screen, show system status, and — with your OK — open files, links and apps or control media. Off hides the switch.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.Computer}" AutomationProperties.Name="Allow Use my PC"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="folder" Title="Folders Ask may read" Description="Subfolders included. Passwords, keys, credential files and app data are never read, wherever they are.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <ItemsControl x:Name="AskFolderList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,3">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <c:Icon Kind="folder" Width="15" Height="15" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Label}" FontSize="13.5"/>
+                                                        <TextBlock Text="{Binding Path}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveAskFolder" Tag="{Binding Raw}"
+                                                            ToolTip="Stop Ask reading this folder" AutomationProperties.Name="{Binding Label, StringFormat=Remove folder {0}}">
+                                                        <c:Icon Kind="trash" Width="13" Height="13"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Button Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" Margin="0,8,0,0" Click="OnAddAskFolder">
+                                        <StackPanel Orientation="Horizontal"><c:Icon Kind="plus" Width="13" Height="13"/><TextBlock Text="Add a folder…" Margin="6,0,0,0"/></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_apps" Icon="bolt" Title="Let Ask operate apps" Description="With Use my PC: Ask can read an app window's buttons and fields, click them, type and press shortcuts — each time with your OK. Never terminals, sign-in or security prompts, password managers or password fields.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ControlApps}" AutomationProperties.Name="Let Ask operate apps"/>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_allowedApps" Icon="launchpad" Title="Apps Ask may operate"
+                                      Description="Any app except the off-limits ones (terminals, File Explorer, code editors with a terminal, system tools, sign-in prompts, password managers), or only the apps you list — by app name, as list_windows shows it (e.g. notepad, spotify, outlook).">
+                            <ComboBox x:Name="OperateAppsCombo" Width="230" SelectedValue="{Binding Ask.OperateApps}" SelectedValuePath="Tag" AutomationProperties.Name="Apps Ask may operate">
+                                <ComboBoxItem Content="Any app (except off-limits)" Tag="any"/>
+                                <ComboBoxItem Content="Only the apps I list" Tag="listed"/>
+                            </ComboBox>
+                            <c:SettingRow.Below><c:ChipEditor x:Name="AllowedApps"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="shield" Title="Ask before acting" Description="Opening files, links and apps, working in app windows, media controls and reading the clipboard each show Allow / Don't allow in the chat first.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ConfirmActions}" AutomationProperties.Name="Ask before acting"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="screenshot" Title="Ask before taking screenshots" Description="When Ask decides to look at your screen itself. Your own screenshot button never asks.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ConfirmScreenshots}" AutomationProperties.Name="Ask before taking screenshots"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="file" Title="PDF pages to read" Description="PDFs are read with Windows' own text recognition on this PC, page by page.">
+                            <ComboBox x:Name="PdfPagesCombo" SelectedValue="{Binding Ask.MaxPdfPages}" Width="120"/>
+                        </c:SettingRow>
+                        <Border Style="{StaticResource CardInner}" Padding="12,10" Margin="0,8,0,0">
+                            <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap"
+                                       Text="Ask never runs programs, scripts or shell commands. Once an answer has looked at your files, screen or attachments, anything it wants to send to the web — a search or a page — needs your OK, so a web page can't talk it into sending your data out; and after it has read web pages, typing or clicking in your apps always asks again."/>
+                        </Border>
+
+                        <TextBlock Text="WORKBENCH" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
+                        <c:SettingRow x:Name="Row_workbench" Icon="wand" Title="Use the skills I taught" Description="Skills you made in the Workbench, used when a request fits.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.UseSkills}" AutomationProperties.Name="Use the skills I taught"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="brain" Title="Use what Aqua remembers" Description="Facts you asked Aqua to remember go into every answer.">
+                            <StackPanel Orientation="Horizontal">
+                                <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.UseMemory}" AutomationProperties.Name="Use what Aqua remembers" VerticalAlignment="Center"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Open the Workbench" Margin="12,0,0,0" Click="OnOpenWorkbench"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Apps & scenes ═══ -->
+                    <StackPanel x:Name="P_apps" Visibility="Collapsed">
+                        <TextBlock Text="Apps &amp; scenes" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="launchpad" Title="Apps" Description="Pinned apps appear in the quick panel. Mark your music player so 'play …' works. Add apps on the Launchpad page.">
+                            <c:SettingRow.Below>
+                                <ItemsControl x:Name="AppsList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,3">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontSize="13.5"/>
+                                                    <TextBlock Text="{Binding Target}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis" MaxWidth="420" HorizontalAlignment="Left"/>
+                                                </StackPanel>
+                                                <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding Pinned}" Content="Pinned" Margin="0,0,16,0"/>
+                                                <CheckBox Grid.Column="2" Style="{StaticResource Switch}" IsChecked="{Binding IsMusicPlayer}" Content="Music" Margin="0,0,10,0"/>
+                                                <Button Grid.Column="3" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveApp" Tag="{Binding Id}"><c:Icon Kind="trash" Width="13" Height="13"/></Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="wand" Title="Scenes" Description="Chain actions: open/close apps, music, volume, do-not-disturb, pause AI, links, pages and waits.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <StackPanel x:Name="ScenesHost"/>
+                                    <Button Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" Margin="0,8,0,0" Click="OnAddScene">
+                                        <StackPanel Orientation="Horizontal"><c:Icon Kind="plus" Width="13" Height="13"/><TextBlock Text="New scene" Margin="6,0,0,0"/></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Notifications ═══ -->
+                    <StackPanel x:Name="P_notifications" Visibility="Collapsed">
+                        <TextBlock Text="Notifications" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow Icon="bell" Title="Notifications">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.Enabled}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bell-off" Title="Do not disturb" Description="Alerts still collect in the bell, silently.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.DoNotDisturb}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="clock" Title="Quiet hours">
+                            <StackPanel Orientation="Horizontal">
+                                <c:TimeBox Time="{Binding Notifications.QuietStart}" AutomationProperties.Name="Quiet hours start"/>
+                                <TextBlock Text="to" Margin="8,0" VerticalAlignment="Center" Foreground="{DynamicResource B.Text2}"/>
+                                <c:TimeBox Time="{Binding Notifications.QuietEnd}" AutomationProperties.Name="Quiet hours end"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="game" Title="Hold notifications while gaming or presenting">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.SuppressWhenFullscreen}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="markets" Title="Market moves &amp; price targets"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.PriceAlerts}"/></c:SettingRow>
+                        <c:SettingRow Icon="news" Title="Breaking stories" Description="Fresh stories covered by 4+ outlets including a wire service."><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.BigStories}"/></c:SettingRow>
+                        <c:SettingRow Icon="target" Title="Prediction market swings"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.PredictionSwings}"/></c:SettingRow>
+                        <c:SettingRow Icon="upcoming" Title="Calendar reminders"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.CalendarReminders}"/></c:SettingRow>
+                        <c:SettingRow Icon="system" Title="PC health warnings" Description="Low disk space, memory pressure."><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.SystemWarnings}"/></c:SettingRow>
+                        <c:SettingRow Icon="sparkle" Title="Brief is ready"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.BriefReady}"/></c:SettingRow>
+                        <c:SettingRow Icon="hash" Title="Track keywords" Description="Get an alert when these appear in news or social posts.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Keywords"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Privacy & data ═══ -->
+                    <StackPanel x:Name="P_privacy" Visibility="Collapsed">
+                        <TextBlock Text="Privacy &amp; data" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <Border Style="{StaticResource CardInner}" Margin="0,0,0,10" Background="{DynamicResource B.AccentSoft}">
+                            <TextBlock Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}" TextWrapping="Wrap"
+                                       Text="Aqua Hub has no account, no telemetry and no cloud. It only talks to the news, market, weather and social sources you enable (over HTTPS) and to your local model. Secrets live in Windows Credential Manager."/>
+                        </Border>
+                        <c:SettingRow Icon="eye" Title="Load article images" Description="Thumbnails come from publishers' servers and reveal your IP address to them.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Privacy.LoadRemoteImages}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="ask" Title="Keep Ask chats" Description="Kept only in the local database; unstarred chats are deleted after the time set in Ask Aqua › Chats. Off deletes them all now.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Privacy.KeepAskHistory}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="clock" Title="Keep items for (days)" Description="Saved stories are kept until you unsave them.">
+                            <TextBox Text="{Binding Privacy.RetentionDays, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="database" Title="Local database" x:Name="DbRow">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource Btn.Standard}" Content="Open data folder" Click="OnOpenData" Margin="0,0,6,0"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Clear caches" Click="OnClearCaches"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                    </StackPanel>
+
+                    <!-- ═══ Debug ═══ -->
+                    <StackPanel x:Name="P_debug" Visibility="Collapsed">
+                        <TextBlock Text="Debug" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <Border Style="{StaticResource CardInner}" Margin="0,0,0,10" Background="{DynamicResource B.AccentSoft}">
+                            <TextBlock Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}" TextWrapping="Wrap"
+                                       Text="For chasing a problem: what Aqua logged, every warning and error with its full details, and a summary to paste into a bug report. Logs stay on this PC and never hold your passwords or keys."/>
+                        </Border>
+                        <c:SettingRow x:Name="Row_log" Icon="book" Title="Diagnostics log" Description="Everything Aqua does, at the level below. Capped while Aqua runs: 2 MB, and the 2 MB before that as aquahub.old.log.">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource Btn.Standard}" Content="Open log" Click="OnOpenLog" Margin="0,0,6,0" AutomationProperties.AutomationId="debug-open-log"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Open folder" Click="OnOpenLogFolder"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_problems" Icon="warning" Title="Problems log"
+                                      Description="Only warnings and errors, each with its full details — the exception, its stack and where it happened. 1 MB, plus the 1 MB before that.">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource Btn.Standard}" Content="Open" Click="OnOpenProblems" Margin="0,0,6,0" AutomationProperties.AutomationId="debug-open-problems"/>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Copy recent problems" Click="OnCopyProblems" AutomationProperties.AutomationId="debug-copy-problems"/>
+                            </StackPanel>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="bug" Title="Verbose logging" Description="Also record routine detail (debug level). Turn it on while chasing a problem — the log fills faster.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.VerboseLog}" AutomationProperties.Name="Verbose logging"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="copy" Title="Diagnostics summary" Description="Version, Windows, .NET, the model and its server, the data folder's size and the latest problems — with your user name, PC name, file names and web addresses masked. No passwords or keys.">
+                            <Button Style="{StaticResource Btn.Standard}" Content="Copy summary" Click="OnCopyDiagnostics" AutomationProperties.AutomationId="debug-copy-summary"/>
+                        </c:SettingRow>
+                        <Grid Margin="4,18,0,8">
+                            <TextBlock x:Name="ProblemsHeader" Text="RECENT PROBLEMS" Style="{StaticResource T.Overline}" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource Btn.Link}" Content="Refresh" Click="OnRefreshProblems" HorizontalAlignment="Right" FontSize="12"/>
+                        </Grid>
+                        <TextBlock x:Name="NoProblems" Style="{StaticResource T.Caption}" Margin="4,0,0,8" Text="No warnings or errors since Aqua started."/>
+                        <ItemsControl x:Name="ProblemsList" AutomationProperties.AutomationId="debug-problems">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource CardInner}" Margin="0,0,0,6" Padding="12,8">
+                                        <StackPanel>
+                                            <TextBlock TextWrapping="Wrap">
+                                                <Run Text="{Binding When, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/><Run Text="  "/><Run Text="{Binding Level, Mode=OneWay}" Foreground="{Binding LevelBrush, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding Area, Mode=OneWay}" Foreground="{DynamicResource B.Text2}"/>
+                                            </TextBlock>
+                                            <TextBox Style="{StaticResource ReadOnlyText}" Text="{Binding Message, Mode=OneWay}" Margin="0,2,0,0"/>
+                                            <Expander Header="Details" Margin="0,4,0,0" FontSize="12" Visibility="{Binding HasDetail, Converter={StaticResource Vis}}">
+                                                <TextBox Style="{StaticResource ReadOnlyText}" Text="{Binding Detail, Mode=OneWay}" FontFamily="Cascadia Mono, Consolas" FontSize="11.5"
+                                                         MaxHeight="220" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"/>
+                                            </Expander>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- ═══ About ═══ -->
+                    <StackPanel x:Name="P_about" Visibility="Collapsed">
+                        <TextBlock Text="About" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <Border Style="{StaticResource Card}" Padding="22">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Source="/Assets/AquaHub.png" Width="56" Height="56"/>
+                                    <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="Aqua Hub" FontSize="22" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="VersionText" Style="{StaticResource T.Caption}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,16,0,0"
+                                           Text="A private, agent-driven personal hub. Native WPF on .NET, SQLite, and your local model via Ollama. Weather by Open-Meteo, quotes via Yahoo Finance charts, prediction markets from Polymarket/Kalshi, holidays from Nager.Date."/>
+                                <TextBlock x:Name="PathsText" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="UPDATES" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
+                        <c:SettingRow x:Name="Row_updates" Icon="download" Title="Updates"
+                                      Description="New versions come from Aqua Hub's GitHub releases. Nothing downloads until you choose to; the download is checked against the release's SHA-256 fingerprint, installs when Aqua Hub restarts, and leaves your settings and history as they are.">
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="UpdateCheckButton" Style="{StaticResource Btn.Standard}" Content="Check now" Click="OnUpdateCheck" MinWidth="90"
+                                        AutomationProperties.AutomationId="update-check"/>
+                                <Button x:Name="UpdateActionButton" Style="{StaticResource Btn.Accent}" Content="Download" Click="OnUpdateAction" Margin="6,0,0,0" MinWidth="90"
+                                        Visibility="Collapsed" AutomationProperties.AutomationId="update-action"/>
+                            </StackPanel>
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <Grid x:Name="UpdateProgressTrack" Height="6" Margin="0,2,0,8" Visibility="Collapsed" AutomationProperties.Name="Update download">
+                                        <Border CornerRadius="3" Background="{DynamicResource B.Track}"/>
+                                        <Border x:Name="UpdateProgressFill" CornerRadius="3" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
+                                    </Grid>
+                                    <TextBlock x:Name="UpdateStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap" AutomationProperties.AutomationId="update-status"/>
+                                    <TextBox x:Name="UpdateNotes" Style="{StaticResource ReadOnlyText}" Margin="0,8,0,0" MaxHeight="200" VerticalScrollBarVisibility="Auto"
+                                             Visibility="Collapsed" AutomationProperties.Name="What's new"/>
+                                    <WrapPanel Margin="0,6,0,0">
+                                        <Button x:Name="UpdateCancelButton" Style="{StaticResource Btn.Standard}" Content="Cancel download" Click="OnUpdateCancel" Visibility="Collapsed"
+                                                Margin="0,0,6,0" AutomationProperties.AutomationId="update-cancel"/>
+                                        <Button x:Name="UpdateReleasesButton" Style="{StaticResource Btn.Link}" Content="All releases on GitHub" Click="OnUpdateReleases" Visibility="Collapsed"
+                                                AutomationProperties.AutomationId="update-releases"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="refresh" Title="Check for updates automatically"
+                                      Description="About once a day, an installed copy asks GitHub for the latest release. The request carries nothing about you, and Aqua only tells you what it finds.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.CheckForUpdates}" Click="OnAutoUpdateToggled"
+                                      AutomationProperties.Name="Check for updates automatically"/>
+                        </c:SettingRow>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>

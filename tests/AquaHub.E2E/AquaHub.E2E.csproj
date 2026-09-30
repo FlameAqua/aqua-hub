@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    End-to-end UI tests for the native WPF shell, driven through Windows UI Automation
+    (System.Windows.Automation - the accessibility API behind WinAppDriver/Appium).
+    The app under test is launched as a separate process in dry-run mode (the e2e switch) against a
+    throw-away profile; nothing here references the src projects. Not part of AquaHub.sln on purpose.
+    See REPORT.md in this folder for how to run it and for the latest results.
+    Env overrides: AQUAHUB_E2E_EXE, AQUAHUB_E2E_PRISTINE, AQUAHUB_E2E_RUNS, AQUAHUB_E2E_AI_TIMEOUT (seconds).
+  -->
+  <PropertyGroup>
+    <TargetFramework>$(AquaWindowsTfm)</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>AquaHub.E2E</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- xUnit analyzers: long-running UI flows are intentionally synchronous. -->
+    <NoWarn>$(NoWarn);xUnit1031;xUnit1013;CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <Using Include="Xunit" />
+    <Using Include="Xunit.Abstractions" />
+    <Using Include="System.Windows.Automation" />
+    <Using Include="AquaHub.E2E.Infrastructure" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

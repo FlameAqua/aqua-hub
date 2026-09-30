@@ -1,0 +1,11 @@
+bin/
+obj/
+publish/
+*.user
+.vs/
+TestResults/
+# Velopack packaging output (vpk pack) and its notes file
+Releases/
+release-notes.md
+# Screenshots with personal details (your name, what was playing, press photos): kept locally, never published
+docs/screenshots/private/

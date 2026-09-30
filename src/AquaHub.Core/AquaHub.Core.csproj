@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Platform-neutral core: models, settings, storage, networking, parsing, analysis, AI and agents. -->
+  <PropertyGroup>
+    <TargetFramework>$(AquaNet)</TargetFramework>
+    <RootNamespace>AquaHub.Core</RootNamespace>
+    <AssemblyName>AquaHub.Core</AssemblyName>
+    <IsTrimmable>false</IsTrimmable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AquaHub.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,31 @@
+<Project>
+  <!--
+    Target framework selection: build on .NET 10 (LTS) automatically when a .NET 10 SDK is present
+    (MSBuild 18+), otherwise fall back to .NET 9. Override with /p:AquaNet=net10.0.
+  -->
+  <PropertyGroup>
+    <AquaNet Condition="'$(AquaNet)' == '' and $([MSBuild]::VersionGreaterThanOrEquals('$(MSBuildVersion)', '18.0'))">net10.0</AquaNet>
+    <AquaNet Condition="'$(AquaNet)' == ''">net9.0</AquaNet>
+    <AquaWindowsTfm>$(AquaNet)-windows10.0.19041.0</AquaWindowsTfm>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <Version>1.0.0</Version>
+    <Authors>Aqua Hub</Authors>
+    <Product>Aqua Hub</Product>
+    <Copyright>Personal use</Copyright>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Reproducible, audited restores -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+</Project>

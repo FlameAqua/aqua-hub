@@ -1,0 +1,72 @@
+# Publishes a release when a version tag is pushed (git tag v1.1.0 && git push origin v1.1.0): builds and tests,
+# then packages with Velopack into Setup.exe, a portable zip and the update packages (full and delta) that installed
+# copies download. Installed copies look for these on this repository's releases, so the repository must be public.
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write   # create the GitHub release and upload its files
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      # Pinned so a newer SDK on the runner can't switch the target framework (the lock files are for .NET 9).
+      AQUA_NET: net9.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the release notes list the commits since the previous tag
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Version from the tag
+        id: version
+        shell: pwsh
+        run: |
+          $v = '${{ github.ref_name }}'.Substring(1)
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Tags look like v1.2.3 (got ${{ github.ref_name }})" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Restore (locked, signed packages only)
+        run: dotnet restore AquaHub.sln --locked-mode -p:AquaNet=${{ env.AQUA_NET }}
+      - name: Build
+        run: dotnet build AquaHub.sln -c Release --no-restore -p:AquaNet=${{ env.AQUA_NET }} -p:Version=${{ steps.version.outputs.version }}
+      - name: Unit & behaviour tests
+        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build -p:AquaNet=${{ env.AQUA_NET }}
+
+      - name: Publish the app (framework-dependent, ReadyToRun)
+        run: >
+          dotnet publish src/AquaHub/AquaHub.csproj -c Release -r win-x64 --self-contained false -o publish
+          -p:AquaNet=${{ env.AQUA_NET }} -p:PublishReadyToRun=true -p:DebugType=none
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:UpdateRepository=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Release notes (the commits since the previous tag)
+        shell: pwsh
+        run: |
+          $prev = git describe --tags --abbrev=0 '${{ github.ref_name }}^' 2>$null
+          $range = if ($LASTEXITCODE -eq 0 -and $prev) { "$prev..${{ github.ref_name }}" } else { '${{ github.ref_name }}' }
+          $lines = @(git log --no-merges --pretty='format:- %s' $range)
+          (@("## Aqua Hub ${{ steps.version.outputs.version }}", '') + $lines) -join "`n" | Set-Content -Encoding utf8 release-notes.md
+          Get-Content release-notes.md
+          $global:LASTEXITCODE = 0
+
+      - name: Install Velopack's packaging tool
+        run: dotnet tool install -g vpk --version 1.2.161
+      - name: Fetch the previous release (for delta updates; there is none before the first)
+        continue-on-error: true
+        run: vpk download github --repoUrl ${{ github.server_url }}/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+      - name: Package
+        run: >
+          vpk pack --packId AquaHub.App --packVersion ${{ steps.version.outputs.version }} --packDir publish
+          --mainExe AquaHub.exe --packTitle "Aqua Hub" --packAuthors "Aqua Hub"
+          --icon src/AquaHub/Assets/AquaHub.ico --framework net9-x64-desktop --releaseNotes release-notes.md
+      - name: Upload the release
+        run: >
+          vpk upload github --repoUrl ${{ github.server_url }}/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }}
+          --publish --releaseName "Aqua Hub ${{ steps.version.outputs.version }}" --tag ${{ github.ref_name }}

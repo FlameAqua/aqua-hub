@@ -1,0 +1,19 @@
+<Application x:Class="AquaHub.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:AquaHub.UI.ViewModels"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/UI/Theme/Colors.Dark.xaml"/>
+                <ResourceDictionary Source="/UI/Theme/Styles.xaml"/>
+                <ResourceDictionary>
+                    <vm:BoolToVisibility x:Key="Vis"/>
+                    <vm:BoolToVisibility x:Key="VisNot" Invert="True"/>
+                </ResourceDictionary>
+                <ResourceDictionary Source="/UI/Theme/Templates.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,142 @@
+<UserControl x:Class="AquaHub.UI.Pages.UpcomingPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:AquaHub.UI.Controls"
+             xmlns:ui="clr-namespace:AquaHub.UI">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="32,26,32,36" MaxWidth="1560">
+            <Grid Margin="0,0,0,18">
+                <StackPanel>
+                    <TextBlock Text="Upcoming &amp; predictions" Style="{StaticResource T.Title}"/>
+                    <TextBlock Text="Your agenda, key dates for markets, and what the crowd expects to happen." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
+                </StackPanel>
+                <Button Style="{StaticResource Btn.Standard}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnAddCalendar">
+                    <StackPanel Orientation="Horizontal"><c:Icon Kind="plus" Width="14" Height="14"/><TextBlock Text="Add calendar" Margin="8,0,0,0"/></StackPanel>
+                </Button>
+            </Grid>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" MinWidth="340"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="3*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Agenda -->
+                <c:Card Title="Agenda" Icon="upcoming" Subtitle="{Binding AgendaMeta}" VerticalAlignment="Top">
+                    <StackPanel>
+                        <ItemsControl ItemsSource="{Binding Days}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,14">
+                                        <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource B.AccentText}" Margin="0,0,0,6"/>
+                                        <ItemsControl ItemsSource="{Binding Events}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="4"/>
+                                                            <ColumnDefinition Width="64"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border CornerRadius="2" Background="{Binding KindBrush}"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontSize="13" Foreground="{DynamicResource B.Text2}" Margin="10,1,0,0"/>
+                                                        <StackPanel Grid.Column="2">
+                                                            <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                            <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,2,0,0">
+                                                                <Run Text="{Binding KindLabel, Mode=OneWay}" Foreground="{Binding KindBrush, Mode=OneWay}"/><Run Text="{Binding Detail, Mode=OneWay, StringFormat=' · {0}'}"/>
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Border Style="{StaticResource CardInner}" Visibility="{Binding NoCalendars, Converter={StaticResource Vis}}">
+                            <StackPanel>
+                                <TextBlock Text="Connect your calendar" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource T.Body2}" Margin="0,4,0,8"
+                                           Text="Paste the private ICS address from Google Calendar (Settings → Integrate calendar → Secret address in iCal format) or Outlook (Publish calendar → ICS), or pick a local .ics file."/>
+                                <Button Style="{StaticResource Btn.Accent}" HorizontalAlignment="Left" Click="OnAddCalendar" Content="Add a calendar"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </c:Card>
+
+                <StackPanel Grid.Column="2">
+                    <!-- Foresight -->
+                    <c:Card Title="Foresight" Icon="sparkle" Badge="{Binding ForesightBadge}" Subtitle="{Binding ForesightMeta}"
+                            Background="{DynamicResource B.Hero}" BorderBrush="{DynamicResource B.AccentSoft}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding ForesightOverview}" FontSize="15" LineHeight="23" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <ItemsControl ItemsSource="{Binding ForesightItems}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource CardInner}" Margin="0,0,0,8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="30" Height="30" CornerRadius="8" Background="{DynamicResource B.Subtle}" VerticalAlignment="Top">
+                                                    <c:Icon Kind="{Binding Icon}" Width="15" Height="15" Foreground="{Binding Brush}"/>
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                                    <Grid>
+                                                        <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,90,0"/>
+                                                        <TextBlock Text="{Binding When}" Style="{StaticResource T.Caption}" HorizontalAlignment="Right"/>
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding Detail}" Style="{StaticResource T.Body2}" Margin="0,3,0,0"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </c:Card>
+
+                </StackPanel>
+            </Grid>
+
+            <!-- Predictions -->
+            <TextBlock Text="Prediction markets" Style="{StaticResource T.Subtitle}" Margin="2,24,0,4"/>
+            <TextBlock Text="Crowd-sourced probabilities from real-money markets. They reflect sentiment, not certainty." Style="{StaticResource T.Caption}" Margin="2,0,0,12"/>
+            <ItemsControl ItemsSource="{Binding Predictions}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><c:FlowGrid MaxColumns="3" MinColumnWidth="320" Gap="12"/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Style="{StaticResource Btn.Row}" Command="{Binding OpenCommand}" Background="{DynamicResource B.Card}" BorderBrush="{DynamicResource B.CardStroke}"
+                                BorderThickness="1" ui:UiProps.CornerRadius="12" Padding="16,14" ToolTip="Open on the market's website" AutomationProperties.Name="{Binding Title}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                <ItemsControl ItemsSource="{Binding Outcomes}" Margin="0,10,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="0,0,0,8">
+                                                <Grid>
+                                                    <TextBlock Text="{Binding Label}" Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}" FontWeight="{Binding LabelWeight}" TextTrimming="CharacterEllipsis" Margin="0,0,110,0"/>
+                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                        <TextBlock Text="{Binding ChangeText}" FontSize="11" Foreground="{Binding ChangeBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                        <TextBlock Text="{Binding ProbText}" Style="{StaticResource T.Number}" FontSize="13" FontWeight="SemiBold"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                                <c:Bar Value="{Binding Probability}" Fill="{Binding BarBrush}" Track="{DynamicResource B.Track}" Height="5" Margin="0,4,0,0"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{Binding Meta}" Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
