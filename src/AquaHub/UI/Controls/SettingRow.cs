@@ -25,14 +25,25 @@ public class SettingRow : ContentControl
         Loaded += (_, _) => NameControls();
     }
 
-    /// <summary>Gives unnamed inputs in the row an accessible name (screen readers, UI automation).</summary>
+    /// <summary>
+    /// Gives the row's inputs an accessible name (screen readers, UI automation): the row title. A name set on the
+    /// control itself wins, but not one from a style (a text box's placeholder, e.g. "Press a shortcut…"); a button
+    /// keeps its visible label ("Open log") and gets the title as help text.
+    /// </summary>
     private void NameControls()
     {
         if (string.IsNullOrEmpty(Title) || Content is not DependencyObject root) return;
         var n = 0;
         foreach (var control in Controls(root))
         {
-            if (!string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetName(control))) continue;
+            var nameSource = DependencyPropertyHelper.GetValueSource(control, System.Windows.Automation.AutomationProperties.NameProperty).BaseValueSource;
+            if (nameSource == BaseValueSource.Local && !string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetName(control))) continue;
+            if (control is ContentControl { Content: string label } && label.Length > 0)
+            {
+                if (string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetHelpText(control)))
+                    System.Windows.Automation.AutomationProperties.SetHelpText(control, Title);
+                continue;
+            }
             System.Windows.Automation.AutomationProperties.SetName(control, n++ == 0 ? Title : $"{Title} ({n})");
         }
     }

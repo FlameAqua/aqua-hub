@@ -12,6 +12,9 @@ namespace AquaHub.UI.Shell;
 
 public sealed class PaletteItem
 {
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => Subtitle.Length > 0 ? $"{Title}, {Subtitle}" : Title;
+
     public required string Title { get; init; }
     public string Subtitle { get; init; } = "";
     public string Icon { get; init; } = "arrow-right";
@@ -38,9 +41,20 @@ public partial class CommandPalette : Window
             var ok = WindowEffects.Apply(this, Backdrop.Acrylic, Hub.Theme.IsDark);
             Fallback.Visibility = ok ? Visibility.Collapsed : Visibility.Visible;
         };
-        Deactivated += (_, _) => { if (!Hub.SnapshotMode) Close(); };
+        // Closing deactivates the window, which would ask it to close again mid-close (WPF throws), so close once.
+        Closing += (_, _) => _closing = true;
+        Deactivated += (_, _) => { if (!Hub.SnapshotMode) CloseOnce(); };
         Closed += (_, _) => _askCts?.Cancel();
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { Close(); e.Handled = true; } };
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { CloseOnce(); e.Handled = true; } };
+    }
+
+    private bool _closing;
+
+    private void CloseOnce()
+    {
+        if (_closing) return;
+        _closing = true;
+        Close();
     }
 
     public void ShowNear(Window? owner)
@@ -356,7 +370,7 @@ public partial class CommandPalette : Window
         if (!item.KeepOpen) Hide();
         try { await item.Run(); }
         catch (Exception ex) { Core.Util.Log.Warn("palette", "Action failed", ex); }
-        if (!item.KeepOpen) Close();
+        if (!item.KeepOpen) CloseOnce();
     }
 
     private async Task AskInlineAsync(string question)
@@ -390,7 +404,7 @@ public partial class CommandPalette : Window
 
     private void OnContinueInAsk(object sender, RoutedEventArgs e)
     {
-        Close();
+        CloseOnce();
         Hub.Windows.ShowMain("ask", _lastQuestion);
     }
 }

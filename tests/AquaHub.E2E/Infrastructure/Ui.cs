@@ -153,7 +153,11 @@ public static class Ui
         FindAll(root, Type(ControlType.Document)).Select(d =>
         {
             try { return d.TryGetCurrentPattern(TextPattern.Pattern, out var p) ? ((TextPattern)p).DocumentRange.GetText(-1).Trim() : ""; }
-            catch (Exception ex) when (Wait.IsTransient(ex)) { return ""; }
+            catch (Exception ex) when (Wait.IsTransient(ex))
+            {
+                Results.Log($"   (couldn't read a document's text: {ex.GetType().Name}: {ex.Message})");
+                return "";
+            }
         }).Where(t => t.Length > 0).ToList();
 
     /// <summary>Values of read-only text boxes (Ask shows your questions as selectable, copyable text).</summary>

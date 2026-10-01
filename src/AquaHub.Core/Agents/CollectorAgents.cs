@@ -17,7 +17,8 @@ public sealed class NewsScoutAgent : Agent
     public override async Task<AgentResult> RunAsync(HubContext ctx, CancellationToken ct)
     {
         var s = ctx.S;
-        var specs = s.News.Sources.Where(x => x.Enabled).Select(x => RssSource.ToSpec(x, s.Location)).ToList();
+        // A search for your place ("{city}") has nothing to look for until you choose one.
+        var specs = s.News.Sources.Where(x => x.Enabled && RssSource.CanFetch(x, s.Location)).Select(x => RssSource.ToSpec(x, s.Location)).ToList();
         if (specs.Count == 0) return AgentResult.Unchanged("No news sources enabled");
         var outcomes = await Task.WhenAll(specs.Select(spec => RssSource.FetchAsync(ctx.Http, spec, ct))).ConfigureAwait(false);
         var items = outcomes.SelectMany(o => o.Items).ToList();
@@ -306,6 +307,7 @@ public sealed class WeatherAgent : Agent
 
     public override async Task<AgentResult> RunAsync(HubContext ctx, CancellationToken ct)
     {
+        if (!ctx.S.Location.HasCoordinates) return AgentResult.Unchanged("No place chosen yet (Settings › Location & weather)");
         var w = await WeatherSource.FetchAsync(ctx.Http, ctx.S.Location, ct).ConfigureAwait(false);
         if (w?.Now is null) return AgentResult.Fail(ctx.Http.LooksOffline ? "Offline — keeping the last forecast" : "Weather service unavailable");
         ctx.State.SetWeather(w);

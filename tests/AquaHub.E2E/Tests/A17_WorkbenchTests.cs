@@ -45,7 +45,8 @@ public sealed class A17_WorkbenchTests : E2ETestBase
         {
             Bench();
             Ui.Invoke(Ui.FindAll(PageRoot("workbench"), Ui.Button("Delete this skill")).First());
-            var dialog = Wait.For(() => AppWindows.Popups(Pid).FirstOrDefault(w => Ui.Find(w, Ui.Button("OK")) is not null), "the confirmation");
+            // A message box is owned by the main window, so UI Automation lists it there.
+            var dialog = Wait.For(() => AppWindows.WithOwned(Pid).FirstOrDefault(w => Ui.NameOf(w) == "Workbench" && Ui.Find(w, Ui.Button("OK")) is not null), "the confirmation");
             Ui.Invoke(Ui.WaitFind(dialog, Ui.Button("OK"), "OK"));
             Wait.For(() => !Ui.Texts(PageRoot("workbench")).Contains("E2E focus time"), "the skill removed");
         });

@@ -177,6 +177,9 @@ public static partial class HtmlText
         if (cut < max * 0.6) cut = max - 1;
         return s[..cut].TrimEnd(',', ';', ':', '-', ' ') + "…";
     }
+
+    /// <summary>The text on one line (any run of spaces or line breaks becomes one space), cut to <paramref name="max"/>.</summary>
+    public static string OneLine(string s, int max) => Truncate(string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)), max);
 }
 
 /// <summary>How long model-written text may stand in while the model is unavailable.</summary>

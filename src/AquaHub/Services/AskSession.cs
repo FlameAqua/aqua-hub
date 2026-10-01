@@ -64,7 +64,10 @@ public sealed class AskSession
     public ObservableCollection<AttachmentChipVM> Pending { get; } = new();
     public bool IsBusy => Current.IsBusy;
 
-    // The composer's switches (kept for the session; defaults from Settings › Ask Aqua).
+    /// <summary>The model picked in the composer (null until the installed models are known: the Settings › AI one).</summary>
+    public string? Model { get; set; }
+
+    // The composer's switches (kept for the session; defaults from Settings › Ask Aqua, Think and Research per model).
     public bool Web { get; set; }
     public bool Think { get; set; }
     public bool Research { get; set; }
@@ -255,7 +258,7 @@ public sealed class AskSession
     // ───────────────────────────── Asking ─────────────────────────────
 
     private AskOptions CurrentOptions(string? storyId) =>
-        new() { Web = Web, Think = Think, Research = Research, Computer = Computer, StoryId = storyId };
+        new() { Web = Web, Think = Think, Research = Research, Computer = Computer, StoryId = storyId, Model = Model };
 
     private static string ModeOf(AskOptions o) =>
         string.Join(" · ", new[] { o.Research ? "Research" : o.UsesWeb ? "Web" : null, o.Think ? "Think" : null, o.Computer ? "Use my PC" : null }.Where(x => x is not null));
@@ -289,6 +292,8 @@ public sealed class AskSession
         thread.Cts?.Cancel();
         var cts = thread.Cts = new CancellationTokenSource();
         var opts = options ?? CurrentOptions(null);
+        // Every question goes to the composer's model, however it was asked (a chip, a skill, "Look it up").
+        if (opts.Model is null) opts = opts with { Model = Model };
         var attachments = Pending.Where(p => p.Attachment is not null).ToList();
         Pending.Clear();
         var history = HistoryOf(thread);
@@ -392,8 +397,11 @@ public sealed class AskSession
             answer.IsDone = true;
             if (ReferenceEquals(thread.Cts, cts)) SetBusy(thread, false);
             Persist(thread);
-            if (thread.Summary is { Named: false } && thread.Messages.Count(m => m.IsUser) == 1 && answer.Footer.EndsWith("on-device", StringComparison.Ordinal))
-                _ = NameChatAsync(thread);
+            // A "remember …"/"forget …" chat keeps its question as the title: it was answered without the model, so
+            // there's nothing worth waking it for.
+            if (thread.Summary is { Named: false } && thread.Messages.Count(m => m.IsUser) == 1 && answer.Footer.EndsWith("on-device", StringComparison.Ordinal)
+                && !answer.HasMemoryActions)
+                _ = NameChatAsync(thread, opts.Model);
         }
     }
 
@@ -443,7 +451,8 @@ public sealed class AskSession
     }
 
     /// <summary>Gives a new chat a short title from its first exchange (in the background, when the model is idle).</summary>
-    private static async Task NameChatAsync(ChatThread thread)
+    /// <param name="model">The model that answered (already loaded, so naming doesn't swap models).</param>
+    private static async Task NameChatAsync(ChatThread thread, string? model)
     {
         var summary = thread.Summary;
         if (summary is null || !Hub.Core.Llm.Health.Available) return;
@@ -453,6 +462,7 @@ public sealed class AskSession
         {
             var result = await Task.Run(() => Hub.Core.Llm.CompleteAsync(new LlmRequest
             {
+                Model = model,
                 Purpose = "chat-title",
                 Priority = LlmPriority.Background,
                 System = "You name chats. Reply with the title only: 2 to 6 words, no quotes, no full stop.",

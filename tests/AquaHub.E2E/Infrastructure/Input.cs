@@ -9,7 +9,7 @@ public enum VK : ushort
     PageUp = 0x21, PageDown = 0x22, End = 0x23, Home = 0x24, Left = 0x25, Up = 0x26, Right = 0x27, Down = 0x28, Delete = 0x2E,
     D0 = 0x30, D1, D2, D3, D4, D5, D6, D7, D8, D9,
     A = 0x41, K = 0x4B,
-    Apps = 0x5D, F5 = 0x74, F10 = 0x79, OemComma = 0xBC,
+    Apps = 0x5D, F5 = 0x74, F9 = 0x78, F10 = 0x79, OemComma = 0xBC,
 }
 
 /// <summary>
@@ -50,7 +50,7 @@ public static class Input
     {
         var fg = AppWindows.ForegroundPid();
         if (fg != pid)
-            throw new InvalidOperationException($"Refusing to send input: the foreground window belongs to process {fg}, not the app under test ({pid}).");
+            throw new InputRefusedException($"Refusing to send input: the foreground window belongs to process {fg}, not the app under test ({pid}).");
     }
 
     public static void Chord(int pid, params VK[] keys)
@@ -58,7 +58,7 @@ public static class Input
         Guard(pid);
         var inputs = new List<Win32.INPUT>();
         foreach (var k in keys) inputs.Add(Key(k, up: false));
-        foreach (var k in keys.Reverse()) inputs.Add(Key(k, up: true));
+        foreach (var k in Enumerable.Reverse(keys)) inputs.Add(Key(k, up: true));
         Send(inputs);
         Thread.Sleep(60);
     }
@@ -94,7 +94,7 @@ public static class Input
         var pt = new Win32.POINT { X = (int)Math.Round(screenPoint.X), Y = (int)Math.Round(screenPoint.Y) };
         var under = Win32.WindowFromPoint(pt);
         if (Win32.PidOf(under) != pid)
-            throw new InvalidOperationException($"Refusing to click at {pt.X},{pt.Y}: the window there belongs to process {Win32.PidOf(under)}.");
+            throw new InputRefusedException($"Refusing to click at {pt.X},{pt.Y}: the window there belongs to process {Win32.PidOf(under)}.");
         Win32.GetCursorPos(out var old);
         Win32.SetCursorPos(pt.X, pt.Y);
         Thread.Sleep(40);
@@ -116,7 +116,7 @@ public static class Input
         if (!element.TryGetClickablePoint(out p))
         {
             var r = element.Current.BoundingRectangle;
-            if (r.IsEmpty) throw new InvalidOperationException($"{Ui.Describe(element)} has no on-screen area to click");
+            if (r.IsEmpty) throw new InputRefusedException($"{Ui.Describe(element)} has no on-screen area to click");
             p = new Point(r.Left + r.Width / 2, r.Top + r.Height / 2);
         }
         Click(pid, p, right);
@@ -153,3 +153,9 @@ public static class Input
         U = new Win32.InputUnion { mi = new Win32.MOUSEINPUT { dwFlags = flags } },
     };
 }
+
+/// <summary>
+/// Input wasn't sent because the target isn't ready for it (another window is in front, or the element has no area
+/// yet). A focus race, so waits and retries treat it as transient.
+/// </summary>
+public sealed class InputRefusedException(string message) : InvalidOperationException(message);

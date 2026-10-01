@@ -9,11 +9,11 @@ taskbar quick panel, a global command palette and toast alerts. All AI runs on t
 
 | Concern | Choice | Why |
 |---|---|---|
-| UI framework | **WPF on .NET (9, auto-upgrades to 10 LTS when its SDK is present)** | Native, DirectX-rendered, no embedded browser engine; sub-second start. Measured footprint in §5. First-class Win32/WinRT access (tray, DWM Mica/Acrylic, global hotkeys, media sessions, Core Audio, speech). |
+| UI framework | **WPF on .NET 10 (LTS)** | Native, DirectX-rendered, no embedded browser engine; sub-second start. Measured footprint in §5. First-class Win32/WinRT access (tray, DWM Mica/Acrylic, global hotkeys, media sessions, Core Audio, speech). |
 | Rejected: Electron | — | Bundles Chromium + Node (150 MB+ disk, 300 MB+ RAM). Explicitly out of scope. |
 | Rejected: Tauri | — | Lighter than Electron but still a WebView2/Chromium multi-process runtime (+80–150 MB RAM), and needs the Rust + MSVC toolchains. |
 | Rejected: WinUI 3 | — | Heavier runtime/packaging story for unpackaged apps and no lighter than WPF in practice. |
-| Language | C# 13 | Memory-safe, fast, great Windows interop. |
+| Language | C# 14 | Memory-safe, fast, great Windows interop. |
 | Storage | **SQLite** (Microsoft.Data.Sqlite, WAL, FTS5) | Zero-admin, crash-safe, full-text search for “Ask Aqua”. |
 | Local AI | **Ollama** (default) or any **OpenAI-compatible** local server (LM Studio, llama.cpp, vLLM) | Swap models freely; loopback-only by default. |
 | Default model | `qwen3.5:9b` (auto-detected) | Strong instruction following + structured output at ~6 GB VRAM; fits a 12 GB GPU with room for context. `qwen3:14b`/`gemma3:12b` optional for long write-ups. Falls back to smaller models (`qwen3.5:4b`, `gemma3:4b`) on smaller GPUs. |
@@ -22,7 +22,7 @@ taskbar quick panel, a global command palette and toast alerts. All AI runs on t
 ## 2. Solution layout
 
 ```
-src/AquaHub.Core     platform-neutral engine (net9.0/net10.0) — fully unit-tested
+src/AquaHub.Core     platform-neutral engine (net10.0) — fully unit-tested
   Settings/          HubSettings (JSON), copy-on-write SettingsStore, validation, ISecretStore
   Data/              HubDatabase: items + FTS5, JSON snapshots, LLM cache, HTTP validators, alerts, runs, prices
   Net/               HttpFetcher: HTTPS-only, size caps, conditional GET, retries, per-host cool-down
@@ -41,7 +41,7 @@ src/AquaHub          Windows shell (WPF)
                      taskbar integration (jump list, thumbnail media buttons, alerts badge)
   UI/                design system (Theme/*.xaml), controls (charts, gauges, icons, FlowGrid),
                      shell (MainWindow, FlyoutWindow, CommandPalette, Onboarding), pages
-tests/AquaHub.Tests  xUnit (91): parsers, security cases, clustering, indicators, ICS, commands,
+tests/AquaHub.Tests  xUnit (550+): parsers, security cases, clustering, indicators, ICS, commands,
                      LLM plumbing, DB, settings merge, notification policy, scheduling/back-off,
                      Sentinel de-duplication, fact checks; plus an opt-in live run (AQUAHUB_LIVE=1)
 tests/AquaHub.E2E    UI Automation suite that drives the real app (every page, button, window)
@@ -124,9 +124,11 @@ through a `UiThrottle`, so a background refresh never costs more than one layout
 * **Only what changed** – the dashboard view model raises just the properties of the section that changed
   (telemetry every 2.5 s no longer re-evaluates the whole page).
 * **Alerts** – `HubContext.RaiseAlert` stores an alert (optionally once per key), refreshes the bell and hands it to
-  the platform, which applies do not disturb, quiet hours and game mode. Each Windows notification remembers the
-  alert it showed, so clicking it opens that alert; a summary of held alerts opens the bell's list. Opening an alert
-  anywhere (the list, an in-app banner or a notification) marks just that one read, and the banner closes.
+  the platform, which applies do not disturb, quiet hours and game mode. Windows reports a click on one of the
+  tray icon's notifications without saying which: when only one was shown since the last click, the click opens
+  that alert; after several, or on a summary of held alerts, it opens the bell's list. Opening an alert anywhere
+  (the list, an in-app banner or a notification) marks just that one read, and its banner closes; *Clear* and *Mark
+  all read* also take the alerts' banners away. A banner stays while the pointer or keyboard focus is on it.
 
 ## 5. Performance & footprint
 
@@ -395,13 +397,16 @@ framework-dependent ReadyToRun build and packages it with Velopack (`vpk pack`, 
 records the repository it came from as assembly metadata (`UpdateRepository`); source builds leave it out.
 
 `Program.Main` runs `VelopackApp` before WPF starts: it handles Setup's install/update/uninstall hooks (uninstalling
-removes the Start with Windows entries that start this copy) and installs an update that was downloaded but not yet
-applied. Setup installs per user into `%LOCALAPPDATA%\AquaHub.App`, beside, never inside, the profile in
+removes the Start with Windows entries that start this copy). Velopack's own apply-at-start is off: an update that was
+downloaded but not installed is applied by `App.OnStartup` in the first instance only, after the single-instance
+check, so a second launch (a jump-list task, a shortcut) just forwards its command and never closes a running Aqua
+Hub. Setup installs per user into `%LOCALAPPDATA%\AquaHub.App`, beside, never inside, the profile in
 `%LOCALAPPDATA%\AquaHub`.
 
 `UpdateService` (app) and `UpdatePolicy` (Core, unit-tested) split the work. An installed copy checks the releases
 a few minutes after start and then about every 20 hours (2 hours after a failed check) while *Check for updates
-automatically* is on; a new version raises one alert per version, which opens Settings › About. Nothing downloads
+automatically* is on; a new version raises an alert (once per version, and again after ten days or more if it's
+still not installed), which opens Settings › About. Nothing downloads
 until *Download* there; then *Restart now* hands over to Velopack's updater, which waits for Aqua to exit, swaps the
 versions and starts it again with the same profile. If you don't restart, the update installs at the next start.
 In an E2E session *Check now* is journalled instead of performed.

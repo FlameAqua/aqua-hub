@@ -38,8 +38,10 @@ public abstract class E2ETestBase : IClassFixture<AppFixture>
     {
         _test = $"{GetType().Name}.{test}";
         _softFailures.Clear();
+        _timeoutsInARow = 0;
         Results.Log($"=== START {_test}");
-        var app = App;
+        // A test that ended the app (on purpose or not) has reported it; this one starts with a running copy.
+        var app = Fixture.EnsureRunning();
         var logMark = app.Log.Mark();
         Exception? hard = null;
         try
@@ -54,14 +56,12 @@ public abstract class E2ETestBase : IClassFixture<AppFixture>
         }
 
         var problems = new List<string>();
-        var current = Fixture.Current;
-        if (current is not null && ReferenceEquals(current, app) && !app.IsAlive && !AllowsExit)
+        // The fixture never swaps instances behind a test's back, so a dead app here died during this test (unless
+        // the test replaced it itself with Fixture.Restart()).
+        if (ReferenceEquals(Fixture.Current, app) && !app.IsAlive && !AllowsExit)
             problems.Add($"The app process ({app.Pid}) exited during the test (exit code {SafeExitCode(app)}).");
-        if (current is not null && ReferenceEquals(current, app))
-        {
-            var crashes = app.Log.CrashesSince(logMark);
-            if (crashes.Count > 0) problems.Add("Unhandled exceptions in aquahub.log:\n  " + string.Join("\n  ", crashes.Take(8)));
-        }
+        var crashes = app.Log.CrashesSince(logMark);
+        if (crashes.Count > 0) problems.Add("Unhandled exceptions in aquahub.log:\n  " + string.Join("\n  ", crashes.Take(8)));
         problems.AddRange(_softFailures);
         Results.Log($"=== END {_test}: {(hard is null && problems.Count == 0 ? "PASS" : "FAIL")}");
 
@@ -91,11 +91,17 @@ public abstract class E2ETestBase : IClassFixture<AppFixture>
     protected bool Check(string area, string interaction, Action action)
     {
         Step($"[{area}] {interaction}");
+        var page = PageOrNull();
         try
         {
             action();
             Results.RecordInteraction(_test, area, interaction, true);
+            _timeoutsInARow = 0;
             return true;
+        }
+        catch (AppExitedException)
+        {
+            throw;   // nothing left to check; Run reports the exit
         }
         catch (Exception ex)
         {
@@ -105,9 +111,22 @@ public abstract class E2ETestBase : IClassFixture<AppFixture>
             Results.RecordInteraction(_test, area, interaction, false, ex.Message);
             Out.WriteLine("   FAILED: " + msg);
             Results.Log("   FAILED: " + msg);
-            try { Recover(); } catch (Exception rex) { Results.Log("   recover failed: " + rex.Message); }
+            try { Recover(page); } catch (Exception rex) { Results.Log("   recover failed: " + rex.Message); }
+            _timeoutsInARow = ex is TimeoutException ? _timeoutsInARow + 1 : 0;
+            if (_timeoutsInARow >= MaxTimeoutsInARow)
+                throw new InvalidOperationException(
+                    $"{MaxTimeoutsInARow} checks in a row timed out, so the rest of this test was skipped (the UI is probably stuck; the first of them says where)");
             return false;
         }
+    }
+
+    private int _timeoutsInARow;
+    private const int MaxTimeoutsInARow = 3;
+
+    private string? PageOrNull()
+    {
+        try { return CurrentPage(); }
+        catch (Exception ex) when (ex is AppExitedException || Wait.IsTransient(ex)) { return null; }
     }
 
     /// <summary>Records a noteworthy observation (goes to findings.jsonl for the report).</summary>
@@ -135,12 +154,36 @@ public abstract class E2ETestBase : IClassFixture<AppFixture>
 
     private static string Sanitize(string s) => new(s.Select(c => char.IsLetterOrDigit(c) ? c : '_').Take(60).ToArray());
 
-    /// <summary>Best-effort return to a neutral state after a failed soft check.</summary>
-    protected virtual void Recover()
+    /// <summary>
+    /// Best-effort return to where the failed check started: popups, menus and dialogs closed, the main window shown,
+    /// and the page it was on (so one failure doesn't make the following checks time out on the wrong page).
+    /// </summary>
+    protected virtual void Recover(string? page = null)
     {
         DismissTransients();
+        CloseDialogs();
         var main = App.TryMain();
         if (main is null) App.Command("activate");
+        if (page is not null && PageOrNull() != page)
+        {
+            Results.Log($"   back to {page}");
+            GoTo(page);
+        }
+    }
+
+    /// <summary>Closes message boxes and file dialogs a failed check left open (they belong to the app under test).</summary>
+    protected void CloseDialogs()
+    {
+        var closed = 0;
+        foreach (var h in Win32.WindowsOf(Pid))
+        {
+            if (!Win32.IsWindowVisible(h) || Win32.ClassOf(h) != "#32770") continue;
+            Win32.PostMessage(h, Win32.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            closed++;
+        }
+        if (closed == 0) return;
+        Results.Log($"   closed {closed} leftover dialog(s)");
+        Thread.Sleep(300);
     }
 
     /// <summary>Closes context menus, popups, the quick panel and the palette if any are open.</summary>
@@ -296,4 +339,17 @@ public abstract class E2ETestBase : IClassFixture<AppFixture>
 
     protected static AutomationElement MenuItem(AutomationElement menu, string name) =>
         Ui.WaitFind(menu, Ui.And(Ui.Type(ControlType.MenuItem), Ui.Name(name)), $"menu item '{name}'");
+
+    /// <summary>Opens the tray menu with --tray-menu, asking a second time if the first one didn't appear.</summary>
+    protected AutomationElement TrayMenu()
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            App.Command("tray-menu");
+            AutomationElement? menu = null;
+            if (Wait.Until(() => (menu = AppWindows.Menu(Pid, "tray-menu")) is not null, TimeSpan.FromSeconds(5))) return menu!;
+            if (attempt == 2) throw new TimeoutException("Timed out waiting for: tray menu (#tray-menu), asked twice");
+            Step("   the tray menu didn't appear — asking again");
+        }
+    }
 }

@@ -10,8 +10,15 @@ using AquaHub.Services;
 
 namespace AquaHub.UI.ViewModels;
 
-public sealed record BriefSectionVM(string Title, string Icon, List<string> Bullets);
-public sealed record PulseTopicVM(string Title, string Summary, int Heat, double HeatValue, Brush SentimentBrush, string Sentiment, string Platforms);
+public sealed record BriefSectionVM(string Title, string Icon, List<string> Bullets)
+{
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => Title;
+}
+public sealed record PulseTopicVM(string Title, string Summary, int Heat, double HeatValue, Brush SentimentBrush, string Sentiment, string Platforms)
+{
+    public override string ToString() => Title;
+}
 
 /// <summary>State for the Today dashboard (and, in part, the taskbar flyout).</summary>
 public sealed class TodayVM : ObservableObject
@@ -39,6 +46,7 @@ public sealed class TodayVM : ObservableObject
         OpenMusicCommand = new RelayCommand(() => _ = Hub.Actions.ExecuteAsync(new HubCommand("media_play")));
         MuteCommand = new RelayCommand(() => { Hub.Volume.ToggleMute(); RefreshVolume(); });
         Go = new RelayCommand(p => Hub.Windows.ShowMain(p as string ?? "today"));
+        SetPlace = new RelayCommand(_ => Hub.Windows.ShowMain("settings", "location"));
     }
 
     private bool _attached;
@@ -113,7 +121,8 @@ public sealed class TodayVM : ObservableObject
         var name = string.IsNullOrWhiteSpace(s.General.UserName) ? "" : ", " + s.General.UserName;
         var greeting = Fmt.Greeting(DateTime.Now) + name;
         var parts = new List<string> { DateTime.Now.ToString("dddd d MMMM", CultureInfo.CurrentCulture) };
-        if (Hub.State.Weather?.Now is { } w) parts.Add($"{s.Location.City} {Fmt.Temp(w.Temp)} {WeatherSource.Describe(w.Code).ToLowerInvariant()}");
+        if (Hub.State.Weather?.Now is { } w)
+            parts.Add($"{(s.Location.IsSet ? s.Location.City + " " : "")}{Fmt.Temp(w.Temp)} {WeatherSource.Describe(w.Code).ToLowerInvariant()}");
         var big = Hub.State.Stories.Count(c => c.SourceCount >= 4 && DateTimeOffset.UtcNow - c.Latest < TimeSpan.FromHours(12));
         if (big > 0) parts.Add($"{big} major {(big == 1 ? "story" : "stories")} developing");
         var next = Hub.State.Events.FirstOrDefault(e => !e.AllDay && e.Start > DateTimeOffset.Now && e.Kind == EventKind.Calendar);
@@ -164,6 +173,10 @@ public sealed class TodayVM : ObservableObject
 
     // ───────────── Weather ─────────────
     public bool HasWeather { get; private set; }
+    /// <summary>No place is chosen, so there's no forecast to wait for: the card asks for one instead.</summary>
+    public bool NeedsPlace { get; private set; }
+    public bool WeatherLoading => !HasWeather && !NeedsPlace;
+    public ICommand SetPlace { get; }
     public string Temp { get; private set; } = "";
     public string Condition { get; private set; } = "";
     public string WeatherDetail { get; private set; } = "";
@@ -178,6 +191,7 @@ public sealed class TodayVM : ObservableObject
     {
         var w = Hub.State.Weather;
         HasWeather = w?.Now is not null;
+        NeedsPlace = !HasWeather && !Hub.S.Location.HasCoordinates;
         if (w?.Now is { } now)
         {
             var metric = w.Units != "imperial";
@@ -191,8 +205,8 @@ public sealed class TodayVM : ObservableObject
             (Hours, Days) = WeatherVM.Build(w, Hub.S.General.Use24Hour, 7, 5);
             WeatherLocation = w.Location;
         }
-        RaiseMany(nameof(HasWeather), nameof(Temp), nameof(Condition), nameof(WeatherDetail), nameof(HiLo), nameof(WeatherCode), nameof(IsDay),
-            nameof(Hours), nameof(Days), nameof(WeatherLocation));
+        RaiseMany(nameof(HasWeather), nameof(NeedsPlace), nameof(WeatherLoading), nameof(Temp), nameof(Condition), nameof(WeatherDetail), nameof(HiLo),
+            nameof(WeatherCode), nameof(IsDay), nameof(Hours), nameof(Days), nameof(WeatherLocation));
     }
 
     // ───────────── Stories ─────────────

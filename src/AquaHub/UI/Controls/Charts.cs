@@ -30,8 +30,8 @@ internal sealed class ChartAutomationPeer : FrameworkElementAutomationPeer
 
     protected override AutomationControlType GetAutomationControlTypeCore() => _type;
     protected override string GetClassNameCore() => Owner.GetType().Name;
-    protected override bool IsControlElementCore() => true;
-    protected override bool IsContentElementCore() => true;
+    // The base keeps hidden (collapsed) charts out of the control view; visible ones are content.
+    protected override bool IsContentElementCore() => base.IsControlElementCore();
 
     internal static string Trend(IReadOnlyList<double>? values)
     {

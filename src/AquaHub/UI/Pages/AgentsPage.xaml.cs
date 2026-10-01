@@ -10,11 +10,20 @@ using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Pages;
 
-public sealed record StageVM(int Number, string Name, string Description, List<AgentVM> Agents);
-public sealed record RunVM(string Time, string Agent, string Message, string Duration, Brush Brush);
+public sealed record StageVM(int Number, string Name, string Description, List<AgentVM> Agents)
+{
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => $"{Number}. {Name}";
+}
+public sealed record RunVM(string Time, string Agent, string Message, string Duration, Brush Brush)
+{
+    public override string ToString() => $"{Time} {Agent}: {Message}";
+}
 /// <summary>One model output in the inspector; kept across refreshes so an open entry stays open.</summary>
 public sealed class OutputVM : ObservableObject
 {
+    public override string ToString() => $"{Purpose}: {Meta}";
+
     private bool _expanded;
     private string _meta = "";
     public OutputVM(string key, string purpose, string output) { Key = key; Purpose = purpose; Output = output; }

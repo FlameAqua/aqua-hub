@@ -17,6 +17,12 @@ public sealed class SessionOptions
     /// <summary>Start with <c>--background</c> (no main window).</summary>
     public bool Background { get; init; }
 
+    /// <summary>
+    /// Give a profile copy without a place a fixed one (Dublin), so weather and local news don't depend on what was
+    /// answered during onboarding. Tests of the no-place state turn this off.
+    /// </summary>
+    public bool SeedPlace { get; init; } = true;
+
     /// <summary>Tweaks applied to the copied settings.json before launch.</summary>
     public Action<JsonObject>? EditSettings { get; init; }
 
@@ -84,6 +90,7 @@ public sealed class AppSession : IDisposable
                     g["hotkeyFlyout"] = "";
                     g["hotkeyPalette"] = "";
                 }
+                if (options.SeedPlace) SeedDublin(root);
                 options.EditSettings?.Invoke(root);
             });
         }
@@ -95,6 +102,23 @@ public sealed class AppSession : IDisposable
         Results.Log($"[session] started {name} pid={process.Id} profile={profile}");
         session.WaitUntilReady();
         return session;
+    }
+
+    /// <summary>A place for a profile that has none (onboarding's place step was skipped): Dublin, as the tests expect.</summary>
+    private static void SeedDublin(JsonObject root)
+    {
+        if (root["location"] is JsonObject existing && (existing["city"]?.GetValue<string>() ?? "").Trim().Length > 0) return;
+        var loc = root["location"] as JsonObject ?? new JsonObject();
+        loc["city"] = "Dublin";
+        loc["region"] = "Ireland";
+        loc["country"] = "IE";
+        loc["latitude"] = 53.35;
+        loc["longitude"] = -6.26;
+        loc["timezone"] = "Europe/Dublin";
+        loc["language"] = "en-IE";
+        loc["localKeywords"] = new JsonArray("Dublin", "Ireland", "Irish");
+        root["location"] = loc;
+        Results.Log("[session] the warm profile has no place; seeded Dublin");
     }
 
     private static Process Launch(string exe, IEnumerable<string> args)
@@ -246,19 +270,33 @@ public sealed class AppFixture : IDisposable
 
     public AppSession? Current => _session;
 
+    /// <summary>
+    /// The running instance, started on first use. If it has died this throws instead of quietly starting another:
+    /// a fresh copy mid-test would hide the crash and let later checks pass against a different app.
+    /// </summary>
     public AppSession Session
     {
         get
         {
             if (_session is null) _session = AppSession.Start(_name, _options);
-            else if (!_session.IsAlive)
-            {
-                Results.Log($"[fixture] {_name}: instance pid {_session.Pid} is gone — starting a fresh one");
-                _session.Dispose();
-                _session = AppSession.Start($"{_name}-restart{++_restarts}", _options);
-            }
+            else if (!_session.IsAlive) throw new AppExitedException(_session);
             return _session;
         }
+    }
+
+    /// <summary>
+    /// At the start of a test: the instance, replaced by a fresh one if an earlier test ended it (that test has
+    /// already reported the exit, or meant it, like a quit test).
+    /// </summary>
+    public AppSession EnsureRunning()
+    {
+        if (_session is { } s && !s.IsAlive)
+        {
+            Results.Log($"[fixture] {_name}: instance pid {s.Pid} ended in an earlier test — starting a fresh one");
+            s.Dispose();
+            _session = AppSession.Start($"{_name}-restart{++_restarts}", _options);
+        }
+        return Session;
     }
 
     /// <summary>Replaces the running instance (fresh profile copy).</summary>
@@ -270,4 +308,14 @@ public sealed class AppFixture : IDisposable
     }
 
     public void Dispose() => _session?.Dispose();
+}
+
+/// <summary>The app under test is no longer running (never a transient error: waits stop at once).</summary>
+public sealed class AppExitedException(AppSession session) : Exception(
+    $"The app (pid {session.Pid}) is no longer running (exit code {ExitCodeOf(session)}); the rest of this test can't run")
+{
+    private static string ExitCodeOf(AppSession s)
+    {
+        try { return s.Process.ExitCode.ToString(); } catch { return "?"; }
+    }
 }

@@ -25,6 +25,9 @@
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <!-- Program.Main lets Velopack (installer and updates) run before the WPF application starts. -->
     <StartupObject>AquaHub.Program</StartupObject>
+    <!-- Releases are published for win-x64; listing it here puts its packages in packages.lock.json, so the release's
+         publish restores in locked mode like everything else. Ordinary builds stay RID-neutral. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <!-- Release builds name the GitHub repository they come from (release.yml passes -p:UpdateRepository=...); installed

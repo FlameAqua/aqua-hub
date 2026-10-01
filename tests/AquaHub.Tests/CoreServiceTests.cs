@@ -41,6 +41,21 @@ public class SettingsTests
         Assert.Equal(new[] { "07:30" }, s.Ai.BriefTimes);
     }
 
+    /// <summary>The time pickers can't produce these, but a hand-edited settings.json can.</summary>
+    [Theory]
+    [InlineData("99:99", "24:00", "23:00", "07:00")]
+    [InlineData("", "abc", "23:00", "07:00")]
+    [InlineData("22:15", "06:45", "22:15", "06:45")]
+    public void InvalidQuietHoursFallBackToDefaults(string start, string end, string expectedStart, string expectedEnd)
+    {
+        var s = new HubSettings();
+        s.Notifications.QuietStart = start;
+        s.Notifications.QuietEnd = end;
+        SettingsStore.Validate(s);
+        Assert.Equal(expectedStart, s.Notifications.QuietStart);
+        Assert.Equal(expectedEnd, s.Notifications.QuietEnd);
+    }
+
     [Fact]
     public void StorePersistsAtomicallyAndRoundTrips()
     {
@@ -219,6 +234,19 @@ public class CommandTests
         Assert.NotNull(cmd);
         Assert.Equal(action, cmd!.Action);
         if (target.Length > 0) Assert.Equal(target, cmd.Target);
+    }
+
+    [Theory]
+    [InlineData("could you make the sound a little quieter", false)]
+    [InlineData("can you open my music app", false)]
+    [InlineData("would you turn the volume down", false)]
+    [InlineData("could you explain the bond market?", true)]
+    [InlineData("can I still watch the match tonight", true)]
+    [InlineData("could the ECB cut rates", true)]
+    public void PoliteRequestsAreLeftToTheCommandAgent(string input, bool asked)
+    {
+        var cmd = new CommandInterpreter(null, Settings).TryFastPath(input);
+        Assert.Equal(asked, cmd?.Action == "ask");
     }
 
     [Fact]

@@ -108,7 +108,7 @@ public static class Prompts
             sb.Append('\n');
         }
         var reader = c.IsLocal
-            ? $"This is a local story for a reader in {s.Location.City}, {s.Location.Region}."
+            ? s.Location.IsSet ? $"This is a local story for a reader in {s.Location.Label}." : "This is a local story for the reader's area."
             : "Explain the broader significance; do not mention the reader or where they live.";
         return new LlmRequest
         {
@@ -155,7 +155,7 @@ public static class Prompts
             System = "You distil social media chatter into a calm local briefing so the reader never has to doom-scroll. " +
                      Style(s.Ai, s.Location) + " Group posts into 3-6 real topics; ignore memes, spam and self-promotion. " +
                      "heat is 1 (minor) to 5 (everyone is talking about it). post_numbers reference the [n] posts. " + UntrustedNotice,
-            Messages = { new("user", $"Posts from the last day around {s.Location.City}, {s.Location.Region}:\n{Data(sb.ToString())}") },
+            Messages = { new("user", $"Posts from the last day{(s.Location.IsSet ? " around " + s.Location.Label : "")}:\n{Data(sb.ToString())}") },
             Schema = PulseSchema,
             Temperature = 0.3,
             MaxTokens = 1300,
@@ -268,7 +268,7 @@ public static class Prompts
             System = "You help a busy person see what's coming. " + Style(s.Ai, s.Location) + " " +
                      "Pick the most consequential upcoming events and the most informative crowd forecasts. " +
                      "Quote probabilities exactly as given and always name the MOST likely outcome first. importance: 1 (minor) to 3 (major). " + UntrustedNotice,
-            Messages = { new("user", $"Today is {DateTimeOffset.Now.ToString("dddd d MMMM yyyy", inv)}. The reader lives in {s.Location.City}.\n{Data(sb.ToString())}") },
+            Messages = { new("user", $"Today is {DateTimeOffset.Now.ToString("dddd d MMMM yyyy", inv)}.{(s.Location.IsSet ? " The reader lives in " + s.Location.City + "." : "")}\n{Data(sb.ToString())}") },
             Schema = ForesightSchema,
             Temperature = 0.25,
             MaxTokens = 1300,
@@ -294,9 +294,9 @@ public static class Prompts
             Deep = true,
             System = $"You write {name}'s personal {period} brief: everything important in under a minute of reading. " + Style(s.Ai, s.Location) + " " +
                      "Use 4-6 sections, in this order where the digest has content: 'World' (the biggest international stories), " +
-                     $"'{s.Location.City}' (local news and what people nearby are discussing), 'Markets', 'Agenda' (upcoming items and crowd forecasts), 'Weather'. " +
+                     $"'{s.Location.LocalTitle}' (local news and what people nearby are discussing), 'Markets', 'Agenda' (upcoming items and crowd forecasts), 'Weather'. " +
                      "Keep each bullet specific (names, numbers, times) and balanced — not only incidents. Only use the digest provided. " + UntrustedNotice,
-            Messages = { new("user", $"Digest for {DateTimeOffset.Now:dddd d MMMM}, {s.Location.City}:\n{Data(digest)}") },
+            Messages = { new("user", $"Digest for {DateTimeOffset.Now:dddd d MMMM}{(s.Location.IsSet ? ", " + s.Location.City : "")}:\n{Data(digest)}") },
             Schema = BriefSchema,
             Temperature = 0.3,
             MaxTokens = 1500,

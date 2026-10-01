@@ -15,11 +15,19 @@ using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Pages;
 
-public sealed record ProcVM(string Name, string CpuText, double CpuValue, string MemText, Brush RowBrush);
+public sealed record ProcVM(string Name, string CpuText, double CpuValue, string MemText, Brush RowBrush)
+{
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => $"{Name}, CPU {CpuText}, memory {MemText}";
+}
 public sealed record DiskVM(string Name, string Label, string Text, double Value, Brush Brush, string Note)
 {
-    public string OpenName => "Open " + Name;
-    public string CleanName => "Clean up " + Name;
+    public override string ToString() => $"{Drive}: {Text}";
+
+    // "Open C: drive" reads better aloud than "Open C colon backslash".
+    private string Drive => Name.TrimEnd('\\') + " drive";
+    public string OpenName => "Open " + Drive;
+    public string CleanName => "Clean up " + Drive;
 }
 public sealed record NameDetail(string Name, string Detail);
 public sealed record FindingVM(string Area, string Title, string Detail, string Fix, Brush Brush, string? ToolId, string ToolName)
@@ -27,7 +35,10 @@ public sealed record FindingVM(string Area, string Title, string Detail, string 
     public bool HasFix => Fix.Length > 0;
     public bool HasTool => ToolId is not null;
 }
-public sealed record ToolkitGroupVM(string Name, List<MaintenanceTools.Tool> Tools);
+public sealed record ToolkitGroupVM(string Name, List<MaintenanceTools.Tool> Tools)
+{
+    public override string ToString() => Name;
+}
 
 public sealed class SystemVM : ObservableObject
 {
@@ -201,22 +212,27 @@ public partial class SystemPage : UserControl, IPage
             _vm.DownHistory = h.Select(x => x.NetDown).ToArray();
             _vm.UpHistory = h.Select(x => x.NetUp).ToArray();
         }
-        // Hold the list still while the pointer is on it: rows don't jump away from a click.
-        if (!ProcessList.IsMouseOver)
+        // Hold the list still while the pointer or keyboard focus is on it: rows don't jump away from a click, and a
+        // keyboard or screen-reader user isn't thrown out of the list by a rebuild.
+        if (!ProcessList.IsMouseOver && !ProcessList.IsKeyboardFocusWithin)
         {
             var ordered = _vm.SortByMemory
                 ? s.TopProcesses.OrderByDescending(p => p.MemoryMb).ThenByDescending(p => p.Cpu)
                 : s.TopProcesses.OrderByDescending(p => Math.Round(p.Cpu, 1)).ThenByDescending(p => p.MemoryMb);
             var selected = Fmt.Res("B.AccentSoft");
-            _vm.Processes = ordered.Take(_vm.ShowMore ? 20 : 8).Select(p => new ProcVM(p.Name, $"{p.Cpu:0.0}%", Math.Min(1, p.Cpu / 25), Fmt.Bytes(p.MemoryMb * 1048576),
+            var processes = ordered.Take(_vm.ShowMore ? 20 : 8).Select(p => new ProcVM(p.Name, $"{p.Cpu:0.0}%", Math.Min(1, p.Cpu / 25), Fmt.Bytes(p.MemoryMb * 1048576),
                 _selected?.Name.Equals(p.Name, StringComparison.OrdinalIgnoreCase) == true ? selected : Brushes.Transparent)).ToList();
+            if (!processes.SequenceEqual(_vm.Processes)) _vm.Processes = processes;
         }
         if (_selected is { } sel) _vm.SelInfo = SelectedInfo(sel, s);
         var systemRoot = (Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\").TrimEnd('\\');
         var health = Hub.Health.Last?.Facts.PhysicalDisks;
-        _vm.Disks = s.Disks.Select(d => new DiskVM(d.Name, d.Label, $"{d.FreeGb:0} GB free of {d.TotalGb:0} GB", d.UsedPercent / 100,
+        // Only a changed drive list replaces the rows: a new list every 1.5 s rebuilds each row and its Open and
+        // Clean up buttons, which loses focus and leaves assistive tools chasing buttons that keep being replaced.
+        var disks = s.Disks.Select(d => new DiskVM(d.Name, d.Label, $"{d.FreeGb:0} GB free of {d.TotalGb:0} GB", Math.Round(d.UsedPercent / 100, 2),
             Fmt.Res(d.UsedPercent >= 90 ? "B.Down" : d.UsedPercent >= 75 ? "B.Warn" : "B.Info"),
             d.Name.Equals(systemRoot, StringComparison.OrdinalIgnoreCase) ? "Windows is on this drive" : "")).ToList();
+        if (!disks.SequenceEqual(_vm.Disks)) _vm.Disks = disks;
         _vm.StorageSub = health is { Count: > 0 }
             ? (health.All(h => h.Health == "Healthy") ? Plural.Of(health.Count, "drive") + " healthy at the last check" : "a drive reported trouble — see Health check")
             : "";

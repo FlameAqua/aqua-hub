@@ -91,10 +91,11 @@ public partial class FlyoutWindow : Window
         DateText.Text = now.ToString("dddd, d MMMM", CultureInfo.CurrentCulture);
     }
 
-    public void ShowAnimated()
+    /// <param name="fromTrayClick">A click on the tray icon while we're open first deactivates (hides) us; that same
+    /// click mustn't reopen us. The hotkey and the --flyout command always show.</param>
+    public void ShowAnimated(bool fromTrayClick = false)
     {
-        // A click on the tray icon while open first deactivates (hides) us; don't immediately reopen.
-        if (DateTime.UtcNow - _hiddenAt < TimeSpan.FromMilliseconds(350)) return;
+        if (fromTrayClick && DateTime.UtcNow - _hiddenAt < TimeSpan.FromMilliseconds(350)) return;
         Opacity = 0;
         Show();
         Attach();

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AquaHub.Core.Ai;
 using AquaHub.Core.Models;
+using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
 
 namespace AquaHub.Core.Agents;
@@ -130,7 +131,7 @@ public sealed class PulseAgent : Agent
         if (block is not null)
         {
             if (ctx.State.Pulse is not { IsAi: true } p || AiShelfLife.Expired(p.GeneratedAt, TimeSpan.FromHours(6)))
-                ctx.State.SetPulse(Fallbacks.Pulse(posts, new[] { ctx.S.Location.City, ctx.S.Location.Region }));
+                ctx.State.SetPulse(Fallbacks.Pulse(posts, PlaceWords(ctx.S.Location)));
             return AgentResult.Wait($"Keyword digest only · {block}", TimeSpan.FromMinutes(5));
         }
 
@@ -175,10 +176,13 @@ public sealed class PulseAgent : Agent
         }
         catch (FormatException)
         {
-            ctx.State.SetPulse(Fallbacks.Pulse(posts, new[] { ctx.S.Location.City, ctx.S.Location.Region }));
+            ctx.State.SetPulse(Fallbacks.Pulse(posts, PlaceWords(ctx.S.Location)));
             return AgentResult.Success("Model output unusable — keyword digest shown");
         }
     }
+
+    /// <summary>Your place's own name dominates local chatter, so the keyword digest leaves it out as a topic.</summary>
+    private static string[] PlaceWords(LocationSettings loc) => new[] { loc.City, loc.Region }.Where(x => x.Trim().Length > 0).ToArray();
 }
 
 /// <summary>Market analyst: overview, per-symbol stance with rationale and risks, and a few balanced ideas.</summary>

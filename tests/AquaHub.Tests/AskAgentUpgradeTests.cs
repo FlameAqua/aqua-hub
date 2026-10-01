@@ -667,6 +667,21 @@ public class AskAgentBehaviourTests
     }
 
     [Fact]
+    public async Task NearMeWithoutAPlaceSaysItDoesntKnowWhere()
+    {
+        using var server = new FakeOllama { Script = (_, _) => new[] { FakeOllama.Chunk("I don't know where you are yet.", done: true) } };
+        var (agent, _) = Build(server, new HubSettings());
+
+        await agent.RunAsync("What's happening near me today?", Array.Empty<LlmMessage>(), Array.Empty<AskAttachment>(),
+            new AskOptions(), new NullHost(), new StubPlatform(), new HashSet<string>(), CancellationToken.None);
+
+        var system = System(server.Chats[0]);
+        Assert.Contains("you don't know where the user is", system);
+        Assert.Contains("the user hasn't said where they are", system);
+        Assert.DoesNotContain("they are in", system);
+    }
+
+    [Fact]
     public async Task AnAttachedDocumentIsAnsweredWithoutSearchingThePc()
     {
         using var dir = new TempDir();

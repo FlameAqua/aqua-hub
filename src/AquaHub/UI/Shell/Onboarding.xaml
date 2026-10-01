@@ -39,21 +39,34 @@
                 <!-- Step 2: location -->
                 <StackPanel x:Name="Step2" Visibility="Collapsed">
                     <TextBlock Text="Where are you?" Style="{StaticResource T.Title}"/>
-                    <TextBlock Text="Used for weather, local news and what people nearby are talking about." Style="{StaticResource T.Body2}" Margin="0,6,0,18"/>
+                    <TextBlock Text="For weather, local news and what people nearby are talking about. Search for your town, or let Windows tell Aqua roughly where this PC is. You can skip this and choose later in Settings."
+                               Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,6,0,18"/>
                     <Grid>
-                        <TextBox x:Name="City" ui:UiProps.Placeholder="Search your city…" TextChanged="OnCityChanged" FontSize="15"/>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="City" ui:UiProps.Placeholder="Search your town or city…" TextChanged="OnCityChanged" FontSize="15"/>
                         <Popup x:Name="CityPopup" PlacementTarget="{Binding ElementName=City}" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" VerticalOffset="4">
-                            <Border Width="640" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="8" Padding="4">
+                            <Border Width="480" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="8" Padding="4">
                                 <ListBox x:Name="CityResults" Style="{StaticResource PlainList}" MaxHeight="260" MouseUp="OnPickCity"/>
                             </Border>
                         </Popup>
+                        <Button x:Name="LocateButton" Grid.Column="1" Style="{StaticResource Btn.Standard}" Margin="8,0,0,0" Click="OnLocate"
+                                ToolTip="Ask Windows roughly where this PC is (town level)"
+                                AutomationProperties.Name="Use my location" AutomationProperties.AutomationId="use-my-location">
+                            <StackPanel Orientation="Horizontal"><c:Icon Kind="location" Width="14" Height="14"/><TextBlock Text="Use my location" Margin="8,0,0,0"/></StackPanel>
+                        </Button>
                     </Grid>
                     <Border Style="{StaticResource CardInner}" Margin="0,14,0,0">
-                        <StackPanel Orientation="Horizontal">
-                            <c:Icon Kind="location" Width="16" Height="16" Foreground="{DynamicResource B.AccentText}"/>
-                            <TextBlock x:Name="CityChosen" Margin="10,0,0,0" FontWeight="SemiBold"/>
-                        </StackPanel>
+                        <DockPanel>
+                            <c:Icon DockPanel.Dock="Left" Kind="location" Width="16" Height="16" VerticalAlignment="Top" Margin="0,1,0,0" Foreground="{DynamicResource B.AccentText}"/>
+                            <TextBlock x:Name="CityChosen" Margin="10,0,0,0" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        </DockPanel>
                     </Border>
+                    <Button x:Name="LocationSettingsLink" Style="{StaticResource Btn.Link}" Content="Open Windows location settings" Click="OnLocationSettings"
+                            HorizontalAlignment="Left" Margin="0,8,0,0" Visibility="Collapsed"/>
+                    <TextBlock x:Name="PlaceCredit" Style="{StaticResource T.Caption}" Margin="0,6,0,0" Visibility="Collapsed"/>
                     <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
                         <RadioButton x:Name="Metric" Style="{StaticResource Chip}" Content="°C · km/h" GroupName="units" IsChecked="True"/>
                         <RadioButton x:Name="Imperial" Style="{StaticResource Chip}" Content="°F · mph" GroupName="units"/>

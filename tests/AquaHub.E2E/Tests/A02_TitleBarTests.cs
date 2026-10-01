@@ -33,7 +33,13 @@ public sealed class A02_TitleBarTests : E2ETestBase
     private int Unread() => Ui.Find(Main, Ui.Id("BellCount")) is { } c
         ? Ui.NameOf(c) is "9+" ? 10 : int.TryParse(Ui.NameOf(c), out var n) ? n : 0
         : 0;
-    private AutomationElement Dnd => Ui.WaitFind(Main, Ui.Id("DndButton"), "do-not-disturb button");
+    private AutomationElement Dnd => Ui.WaitFind(Main, Ui.Id("dnd-toggle"), "do-not-disturb button");
+
+    /// <summary>The list under the bell (rows are searched only there: an alert's corner banner has the same button).</summary>
+    private AutomationElement AlertsList => Ui.WaitFind(Main, Ui.Id("alerts-popup"), "alerts popup");
+    private AutomationElement? PriceRow() =>
+        Ui.Find(Main, Ui.Id("alerts-popup")) is { } list ? Ui.FindWhere(list, ControlType.Button, n => n.Contains("fell below", StringComparison.OrdinalIgnoreCase)) : null;
+    private static string DndName(bool on) => on ? "Do not disturb: on" : "Do not disturb: off";
 
     [Fact]
     public void T01_CommandBoxAndCtrlKOpenThePalette() => Run(() =>
@@ -65,7 +71,7 @@ public sealed class A02_TitleBarTests : E2ETestBase
         Check("Title bar", "Refresh everything runs collectors", () =>
         {
             var mark = App.Log.Mark();
-            Ui.Invoke(Ui.WaitFind(Main, Ui.Button("Refresh everything (F5)"), "refresh button"));
+            Ui.Invoke(Ui.WaitFind(Main, Ui.Id("RefreshButton"), "refresh button"));
             App.Log.WaitForLine(mark, l => l.Contains("[agents] weather:"), "a weather collector run", TimeSpan.FromSeconds(30));
             App.Log.WaitForLine(mark, l => l.Contains("[agents] news-scout:"), "a news-scout run", TimeSpan.FromSeconds(60));
         });
@@ -77,7 +83,7 @@ public sealed class A02_TitleBarTests : E2ETestBase
             App.Log.WaitForLine(mark, l => l.Contains("[agents] weather:") || l.Contains("[agents] market-watch:"), "a collector run after F5", TimeSpan.FromSeconds(60));
         });
         Check("Title bar", "sync status text updates", () =>
-            Wait.For(() => Ui.NameOf(Ui.WaitFind(Main, Ui.Id("SyncText"), "sync text")).StartsWith("Updated", StringComparison.Ordinal), "'Updated …' text"));
+            Wait.For(() => Ui.NameOf(Ui.WaitFind(Main, Ui.Id("sync-status"), "sync text")).Contains("updated", StringComparison.OrdinalIgnoreCase), "'News updated …' text"));
     });
 
     [Fact]
@@ -95,17 +101,17 @@ public sealed class A02_TitleBarTests : E2ETestBase
         Check("Alerts", "bell opens the alerts popup with rows", () =>
         {
             Ui.Invoke(Bell);
-            Button(Main, "Mark all read");
-            Button(Main, "Clear");
-            Wait.For(() => Ui.FindWhere(Main, ControlType.Button, n => n.Contains("fell below", StringComparison.OrdinalIgnoreCase)) is not null, "the price alert row");
+            Button(AlertsList, "Mark all read");
+            Button(AlertsList, "Clear");
+            Wait.For(() => PriceRow() is not null, "the price alert row");
         });
         Check("Alerts", "opening an alert marks it read (the unread count drops) and closes the list", () =>
         {
             var before = Unread();
-            var row = Wait.For(() => Ui.FindWhere(Main, ControlType.Button, n => n.Contains("fell below", StringComparison.OrdinalIgnoreCase)), "alert row");
+            var row = Wait.For(PriceRow, "alert row");
             Ui.Invoke(row);
             ExpectPage("markets");
-            Wait.For(() => Ui.Find(Main, Ui.Button("Mark all read")) is null, "alerts list closed after opening an alert");
+            Wait.For(() => Ui.Find(Main, Ui.Id("alerts-popup")) is null, "alerts list closed after opening an alert");
             // "9+" can't show a drop of one; the badge must still not grow.
             if (before < 10) Wait.For(() => Unread() < before, $"unread count below {before}");
             else Expect(Unread() <= before, "unread count did not grow");
@@ -115,40 +121,41 @@ public sealed class A02_TitleBarTests : E2ETestBase
         });
         Check("Alerts", "Mark all read clears the unread badge", () =>
         {
-            Ui.Invoke(Button(Main, "Mark all read"));
-            Wait.For(() => Ui.Find(Main, Ui.Button("Mark all read")) is null, "popup closed after Mark all read");
+            Ui.Invoke(Button(AlertsList, "Mark all read"));
+            Wait.For(() => Ui.Find(Main, Ui.Id("alerts-popup")) is null, "popup closed after Mark all read");
             Wait.For(() => Ui.Find(Main, Ui.Id("BellCount")) is null, "unread badge hidden");
         });
         Check("Alerts", "alert row opens its target (Markets, NVDA)", () =>
         {
             Ui.Invoke(Bell);
-            var row = Wait.For(() => Ui.FindWhere(Main, ControlType.Button, n => n.Contains("fell below", StringComparison.OrdinalIgnoreCase)), "alert row");
+            var row = Wait.For(PriceRow, "alert row");
             Ui.Invoke(row);
             ExpectPage("markets");
             var page = PageRoot("markets");
             Wait.For(() => Ui.Texts(page).Any(t => t.StartsWith("NVDA  ·", StringComparison.Ordinal)), "NVDA detail header");
         });
-        Check("Alerts", "Clear empties the list ('You're all caught up.')", () =>
+        Check("Alerts", "Clear empties the list ('You're all caught up.') and removes the alert's corner banner", () =>
         {
             GoTo("today");
             Ui.Invoke(Bell);
-            Ui.Invoke(Button(Main, "Clear"));
-            Wait.For(() => Ui.Find(Main, Ui.Button("Clear")) is null, "popup closed after Clear");
+            Ui.Invoke(Button(AlertsList, "Clear"));
+            Wait.For(() => Ui.Find(Main, Ui.Id("alerts-popup")) is null, "popup closed after Clear");
+            Expect(Ui.Find(Main, Ui.Id("alert-banner")) is null, "an alert banner is still showing after Clear");
             Ui.Invoke(Bell);
-            Ui.WaitFind(Main, Ui.Text("You're all caught up."), "empty state text");
-            Expect(Ui.FindWhere(Main, ControlType.Button, n => n.Contains("fell below", StringComparison.OrdinalIgnoreCase)) is null, "alert rows still listed after Clear");
+            Ui.WaitFind(AlertsList, Ui.Text("You're all caught up."), "empty state text");
+            Expect(PriceRow() is null, "alert rows still listed after Clear");
             // Close the popup again (the popup is modeless; Mark all read closes it).
-            Ui.Invoke(Button(Main, "Mark all read"));
+            Ui.Invoke(Button(AlertsList, "Mark all read"));
         });
         Check("Alerts", "Esc closes the alerts popup (keyboard users)", () =>
         {
             Ui.Invoke(Bell);
-            Button(Main, "Mark all read");
+            _ = AlertsList;
             PressInMain(VK.Escape);
-            var closed = Wait.Until(() => Ui.Find(Main, Ui.Name("Mark all read")) is null, TimeSpan.FromSeconds(3));
+            var closed = Wait.Until(() => Ui.Find(Main, Ui.Id("alerts-popup")) is null, TimeSpan.FromSeconds(3));
             if (!closed)
             {
-                Ui.Invoke(Button(Main, "Mark all read"));
+                Ui.Invoke(Button(AlertsList, "Mark all read"));
                 throw new Xunit.Sdk.XunitException("The alerts popup does not close with Esc");
             }
         });
@@ -166,14 +173,14 @@ public sealed class A02_TitleBarTests : E2ETestBase
         });
         Check("Title bar", "DND button tooltip/name reflects the state", () =>
         {
-            var expected = !initial ? "Do not disturb is on — click to turn off" : "Turn on do not disturb";
+            var expected = DndName(!initial);
             Wait.For(() => Ui.NameOf(Dnd) == expected, $"DND button named '{expected}' (now '{Ui.NameOf(Dnd)}')");
         });
         Check("Title bar", "DND button again → restored", () =>
         {
             Ui.Invoke(Dnd);
             App.Settings.WaitForBool("notifications.doNotDisturb", initial);
-            Wait.For(() => Ui.NameOf(Dnd) == (initial ? "Do not disturb is on — click to turn off" : "Turn on do not disturb"), "DND button name restored");
+            Wait.For(() => Ui.NameOf(Dnd) == DndName(initial), "DND button name restored");
         });
     });
 }

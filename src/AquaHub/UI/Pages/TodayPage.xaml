@@ -14,7 +14,8 @@
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <!-- Refresh lives in the title bar (and F5); the page's one primary action is listening to the brief. -->
-                    <Button Style="{StaticResource Btn.Accent}" Command="{Binding ReadBriefCommand}" AutomationProperties.AutomationId="read-brief">
+                    <Button Style="{StaticResource Btn.Accent}" Command="{Binding ReadBriefCommand}" AutomationProperties.AutomationId="read-brief"
+                            AutomationProperties.Name="{Binding ReadLabel}">
                         <StackPanel Orientation="Horizontal">
                             <c:Icon Kind="{Binding ReadIcon}" Width="15" Height="15"/>
                             <TextBlock Text="{Binding ReadLabel}" Margin="8,0,0,0"/>
@@ -143,9 +144,16 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </StackPanel>
-                        <StackPanel Visibility="{Binding HasWeather, Converter={StaticResource VisNot}}">
+                        <StackPanel Visibility="{Binding WeatherLoading, Converter={StaticResource Vis}}">
                             <c:Shimmer Height="60" Margin="0,0,0,10"/>
                             <c:Shimmer Height="120"/>
+                        </StackPanel>
+                        <StackPanel Visibility="{Binding NeedsPlace, Converter={StaticResource Vis}}">
+                            <TextBlock Text="Choose your town to see its weather here (and local news on the News page)." Style="{StaticResource T.Body2}" TextWrapping="Wrap"/>
+                            <Button Style="{StaticResource Btn.Standard}" Command="{Binding SetPlace}" HorizontalAlignment="Left" Margin="0,12,0,0"
+                                    AutomationProperties.Name="Choose a place" AutomationProperties.AutomationId="weather-set-place">
+                                <StackPanel Orientation="Horizontal"><c:Icon Kind="location" Width="14" Height="14"/><TextBlock Text="Choose a place" Margin="8,0,0,0"/></StackPanel>
+                            </Button>
                         </StackPanel>
                     </Grid>
                 </c:Card>
@@ -310,7 +318,7 @@
                                 <Button Style="{StaticResource Btn.Icon}" Command="{Binding MuteCommand}" Width="28" Height="28" ToolTip="Mute">
                                     <c:Icon Kind="{Binding VolumeIcon}" Width="15" Height="15"/>
                                 </Button>
-                                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume, Mode=TwoWay}" Margin="4,0,0,0" ToolTip="Volume"/>
+                                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume, Mode=TwoWay}" Margin="4,0,0,0" ToolTip="Volume" AutomationProperties.Name="Volume"/>
                             </Grid>
                         </Grid>
                     </StackPanel>

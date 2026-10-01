@@ -8,6 +8,9 @@ namespace AquaHub.UI.ViewModels;
 
 public sealed class ChatMessageVM : ObservableObject
 {
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => (IsUser ? "You: " : "Aqua: ") + AquaHub.Core.Util.HtmlText.OneLine(Text, 160);
+
     private string _text = "";
     private bool _thinking;
     private List<Citation> _citations = new();

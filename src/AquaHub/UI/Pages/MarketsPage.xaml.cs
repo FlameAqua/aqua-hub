@@ -13,9 +13,16 @@ using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Pages;
 
-public sealed record StatVM(string Label, string Value, Brush Brush);
+public sealed record StatVM(string Label, string Value, Brush Brush)
+{
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => $"{Label}: {Value}";
+}
 
-public sealed record IdeaVM(string Title, string Thesis, string KindLabel, string RiskLabel, Brush RiskBrush, Brush RiskSoft, string Horizon, string SymbolsText);
+public sealed record IdeaVM(string Title, string Thesis, string KindLabel, string RiskLabel, Brush RiskBrush, Brush RiskSoft, string Horizon, string SymbolsText)
+{
+    public override string ToString() => Title;
+}
 
 public sealed class MarketsVM : ObservableObject
 {

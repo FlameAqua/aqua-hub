@@ -37,8 +37,13 @@ public sealed class ActionExecutor
                 else await WakeMusicAsync();
                 return "Playing";
             case "media_pause":
-                // Without a session the only tool is the play/pause key, which would *start* playback — so do nothing.
-                if (!Hub.Media.HasSession) return "Nothing is playing";
+                // Without a session the only tool is the play/pause key, which would *start* playback — so do nothing
+                // (dry-run tests still see that the step ran).
+                if (!Hub.Media.HasSession)
+                {
+                    Sandbox.Record("media", "pause skipped: nothing playing");
+                    return "Nothing is playing";
+                }
                 await Hub.Media.PauseAsync();
                 return "Paused";
             case "media_toggle":

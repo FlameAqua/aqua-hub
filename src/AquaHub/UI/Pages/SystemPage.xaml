@@ -198,7 +198,7 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <!-- The selected app: what it is and what you can do -->
-                            <Border Style="{StaticResource CardInner}" Margin="0,10,0,0" Visibility="{Binding HasSelected, Converter={StaticResource Vis}}" AutomationProperties.AutomationId="procs-detail">
+                            <c:GroupBorder Style="{StaticResource CardInner}" Margin="0,10,0,0" Visibility="{Binding HasSelected, Converter={StaticResource Vis}}" AutomationProperties.AutomationId="procs-detail" AutomationProperties.Name="App details">
                                 <StackPanel>
                                     <Grid>
                                         <TextBlock Text="{Binding SelTitle}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,30,0"/>
@@ -223,7 +223,7 @@
                                     </WrapPanel>
                                     <TextBlock Text="{Binding SelStatus}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Visibility="{Binding HasSelStatus, Converter={StaticResource Vis}}"/>
                                 </StackPanel>
-                            </Border>
+                            </c:GroupBorder>
                         </StackPanel>
                     </c:Card>
                     <c:Card Title="Storage" Icon="disk" Margin="0,16,0,0" Subtitle="{Binding StorageSub}">

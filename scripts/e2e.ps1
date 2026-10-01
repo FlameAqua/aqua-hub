@@ -15,6 +15,9 @@
     Quit your own Aqua Hub first, and keep your hands off the mouse and keyboard while the suite runs: it clicks and
     types in real windows.
 
+    Windows PowerShell blocks scripts by default; run it as:
+      powershell -ExecutionPolicy Bypass -File .\scripts\e2e.ps1
+
 .PARAMETER Filter
     Run part of the suite, e.g. -Filter A11 (one class) or -Filter A11_SettingsTests.T02_General (one test).
 
@@ -35,12 +38,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+# A full path (relative to where you ran this), so the leftover-process check below compares like with like.
+$Root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Root)
 $bin = Join-Path $Root 'e2e-bin'
 $exe = Join-Path $bin 'AquaHub.exe'
 $pristine = Join-Path $Root 'e2e-profile-pristine'
 $runs = Join-Path $Root 'e2e-runs'
 
-function Test-SuiteProcess($p) { $p.Path -and $p.Path.StartsWith($bin, [StringComparison]::OrdinalIgnoreCase) }
+function Test-SuiteProcess($p) { $p.Path -and $p.Path.StartsWith($bin + '\', [StringComparison]::OrdinalIgnoreCase) }
+function Stop-SuiteProcess($p) { try { if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit(5000) | Out-Null } } catch { } }
 
 # Your own Aqua Hub would answer the suite's hotkeys and share the tray, so it has to be closed first.
 $own = @(Get-Process AquaHub -ErrorAction SilentlyContinue | Where-Object { -not (Test-SuiteProcess $_) })
@@ -51,7 +57,7 @@ if ($own.Count -gt 0) {
 # Test instances left behind by an interrupted run (only ones started from the suite's own build folder).
 Get-Process AquaHub -ErrorAction SilentlyContinue | Where-Object { Test-SuiteProcess $_ } | ForEach-Object {
     Write-Host "Closing a leftover test instance (pid $($_.Id))"
-    $_.Kill(); $_.WaitForExit(5000) | Out-Null
+    Stop-SuiteProcess $_
 }
 
 if (-not $NoBuild -or -not (Test-Path $exe)) {
@@ -60,6 +66,11 @@ if (-not $NoBuild -or -not (Test-Path $exe)) {
     if ($LASTEXITCODE -ne 0) { throw 'The app did not build (see the errors above).' }
 }
 
+# Compile the suite now, so a build error shows up before the (interactive) warm-profile step, not after it.
+Write-Host 'Building the test suite' -ForegroundColor Cyan
+dotnet build (Join-Path $repo 'tests\AquaHub.E2E\AquaHub.E2E.csproj') -c Release -nologo -v q
+if ($LASTEXITCODE -ne 0) { throw 'The test suite did not build (see the errors above).' }
+
 $settings = Join-Path $pristine 'settings.json'
 $ready = (Test-Path $settings) -and ((Get-Content $settings -Raw) -match '"onboardingComplete":\s*true')
 if ($Setup -or -not $ready) {
@@ -67,7 +78,8 @@ if ($Setup -or -not $ready) {
     New-Item -ItemType Directory $pristine | Out-Null
     Write-Host ''
     Write-Host 'Creating the warm test profile. Aqua Hub opens in its dry-run sandbox on a new, empty profile:' -ForegroundColor Cyan
-    Write-Host '  1. Finish onboarding. Any answers work; nothing you choose leaves this folder.'
+    Write-Host '  1. Finish onboarding. At "Where are you?" search for Dublin and pick Dublin, Ireland (the tests expect it;'
+    Write-Host '     a profile without a place gets Dublin anyway). Other answers can be anything; nothing leaves this folder.'
     Write-Host '  2. Optional: Settings > AI & models > Model, to pick the model the suite talks to (a fast one keeps it quick).'
     Write-Host '  3. Leave it on Today for a minute so news, markets and weather are cached.'
     Write-Host '  4. Come back here and press Enter (this closes that window).'
@@ -75,9 +87,12 @@ if ($Setup -or -not $ready) {
     Read-Host 'Press Enter when Today has loaded' | Out-Null
     if (-not $app.HasExited) {
         # Ask the running copy to quit (the same command the suite uses), then give it time to save.
-        $quit = Start-Process -FilePath $exe -ArgumentList @('--e2e', '--data-dir', "`"$pristine`"", 'quit') -PassThru
-        if (-not $quit.WaitForExit(15000)) { $quit.Kill() }
-        if (-not $app.WaitForExit(20000)) { $app.Kill() }
+        $quit = Start-Process -FilePath $exe -ArgumentList @('--e2e', '--data-dir', "`"$pristine`"", '--quit') -PassThru
+        if (-not $quit.WaitForExit(15000)) { Stop-SuiteProcess $quit }
+        if (-not $app.WaitForExit(20000)) {
+            Write-Host 'The warm-profile copy did not quit within 20 s; closing it.' -ForegroundColor Yellow
+            Stop-SuiteProcess $app
+        }
     }
     if (-not ((Test-Path $settings) -and ((Get-Content $settings -Raw) -match '"onboardingComplete":\s*true'))) {
         throw 'Onboarding was not finished, so there is no warm profile yet. Run this again to retry.'
@@ -88,7 +103,7 @@ if ($Setup -or -not $ready) {
 $env:AQUAHUB_E2E_EXE = $exe
 $env:AQUAHUB_E2E_PRISTINE = $pristine
 $env:AQUAHUB_E2E_RUNS = $runs
-$testArgs = @('test', (Join-Path $repo 'tests\AquaHub.E2E\AquaHub.E2E.csproj'), '-c', 'Release', '--logger', 'console;verbosity=normal')
+$testArgs = @('test', (Join-Path $repo 'tests\AquaHub.E2E\AquaHub.E2E.csproj'), '-c', 'Release', '--no-build', '--logger', 'console;verbosity=normal')
 if ($Filter) { $testArgs += @('--filter', "FullyQualifiedName~$Filter") }
 Write-Host ''
 Write-Host 'Running the suite: hands off the mouse and keyboard until it finishes.' -ForegroundColor Cyan

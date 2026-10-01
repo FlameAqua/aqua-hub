@@ -47,7 +47,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <Button Style="{StaticResource Btn.Icon}" Command="{Binding MuteCommand}" ToolTip="Mute"><c:Icon Kind="{Binding VolumeIcon}" Width="16" Height="16"/></Button>
-                            <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume, Mode=TwoWay}" Margin="6,0"/>
+                            <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume, Mode=TwoWay}" Margin="6,0" AutomationProperties.Name="Volume"/>
                             <TextBlock Grid.Column="2" Text="{Binding Volume, StringFormat={}{0}%}" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Width="36" TextAlignment="Right"/>
                         </Grid>
                         <Grid Margin="0,14,0,0">

@@ -239,6 +239,7 @@ public partial class MainWindow : Window
         var lines = FreshAreas.Select(a => $"{a.Label}: {(state.FreshAt(a.Area) is { } t ? TimeText.AgoPhrase(t) : "not fetched yet")}");
         SyncText.ToolTip = "Last successful update\n" + string.Join("\n", lines);
         RefreshButton.ToolTip = "Refresh everything (F5)\n" + string.Join("\n", lines);
+        System.Windows.Automation.AutomationProperties.SetHelpText(RefreshButton, "Last successful update: " + string.Join("; ", lines));
         if (!state.Online)
         {
             SyncText.Text = "Offline";
@@ -259,7 +260,8 @@ public partial class MainWindow : Window
     {
         _status.Request();
         if (!IsActive || Hub.S.Notifications.DoNotDisturb) return;
-        var banner = new Border
+        var vm = new AlertVM(alert);
+        var banner = new AquaHub.UI.Controls.GroupBorder
         {
             Style = (Style)FindResource("Card"),
             Background = Fmt.Res("B.Popup"),
@@ -267,8 +269,10 @@ public partial class MainWindow : Window
             Padding = new Thickness(14, 12, 14, 12),
             Cursor = Cursors.Hand,
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 4, Direction = 270, Opacity = 0.3 },
+            Tag = vm,
         };
-        var vm = new AlertVM(alert);
+        System.Windows.Automation.AutomationProperties.SetAutomationId(banner, "alert-banner");
+        System.Windows.Automation.AutomationProperties.SetName(banner, "New alert");
         var content = new ContentPresenter { Content = vm, ContentTemplate = (DataTemplate)FindResource("Tpl.AlertRow") };
         banner.Child = content;
         // Clicking it opens the alert (which marks it read); the banner has done its job.
@@ -277,9 +281,32 @@ public partial class MainWindow : Window
         banner.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
         timer.Tick += (_, _) => { timer.Stop(); Banners.Children.Remove(banner); };
+        PauseWhileInUse(banner, timer);
         timer.Start();
-        while (Banners.Children.Count > 3) Banners.Children.RemoveAt(0);
+        TrimBanners();
     });
+
+    /// <summary>A notice stays while the pointer is on it or it has keyboard focus (time to read it, or reach its buttons).</summary>
+    private static void PauseWhileInUse(FrameworkElement banner, DispatcherTimer timer)
+    {
+        banner.MouseEnter += (_, _) => timer.Stop();
+        banner.MouseLeave += (_, _) => { if (!banner.IsKeyboardFocusWithin) timer.Start(); };
+        banner.IsKeyboardFocusWithinChanged += (_, e) =>
+        {
+            if ((bool)e.NewValue) timer.Stop();
+            else if (!banner.IsMouseOver) timer.Start();
+        };
+    }
+
+    /// <summary>At most three notices in the corner; the oldest goes first.</summary>
+    private void TrimBanners()
+    {
+        while (Banners.Children.Count > 3)
+        {
+            if (ReferenceEquals(Banners.Children[0], _ollamaBanner)) _ollamaBanner = null;
+            Banners.Children.RemoveAt(0);
+        }
+    }
 
     private void OnBellClick(object sender, RoutedEventArgs e) => ShowAlerts();
 
@@ -302,13 +329,30 @@ public partial class MainWindow : Window
     private void OnMarkRead(object sender, RoutedEventArgs e)
     {
         Hub.State.MarkAlertsRead();
+        RemoveAlertBanners();
         AlertsPopup.IsOpen = false;
     }
 
     private void OnClearAlerts(object sender, RoutedEventArgs e)
     {
         Hub.State.ClearAlerts();
+        RemoveAlertBanners();
         AlertsPopup.IsOpen = false;
+    }
+
+    /// <summary>Alerts you've just dealt with in the list shouldn't linger in the corner.</summary>
+    private void RemoveAlertBanners()
+    {
+        foreach (var b in Banners.Children.OfType<FrameworkElement>().Where(b => b.Tag is AlertVM).ToList()) Banners.Children.Remove(b);
+    }
+
+    /// <summary>Esc inside the list closes it and puts the keyboard back on the bell.</summary>
+    private void OnAlertsKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        AlertsPopup.IsOpen = false;
+        BellButton.Focus();
+        e.Handled = true;
     }
 
     private void OnDndClick(object sender, RoutedEventArgs e) =>
@@ -402,7 +446,7 @@ public partial class MainWindow : Window
         row.Children.Add(new AquaHub.UI.Controls.Icon { Kind = icon, Width = 18, Height = 18, Foreground = Fmt.Res(iconBrush), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0) });
         Grid.SetColumn(text, 1);
         row.Children.Add(text);
-        var banner = new Border
+        var banner = new AquaHub.UI.Controls.GroupBorder
         {
             Style = (Style)FindResource("Card"),
             Background = Fmt.Res("B.Popup"),
@@ -411,6 +455,7 @@ public partial class MainWindow : Window
             Child = row,
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 4, Direction = 270, Opacity = 0.3 },
         };
+        System.Windows.Automation.AutomationProperties.SetName(banner, title);
         if (automationId is not null) System.Windows.Automation.AutomationProperties.SetAutomationId(banner, automationId);
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
         void Close()
@@ -421,8 +466,7 @@ public partial class MainWindow : Window
             onClosed?.Invoke(banner);
         }
         timer.Tick += (_, _) => Close();
-        banner.MouseEnter += (_, _) => timer.Stop();
-        banner.MouseLeave += (_, _) => timer.Start();
+        PauseWhileInUse(banner, timer);
         act.Click += async (_, _) =>
         {
             act.IsEnabled = false;
@@ -434,7 +478,7 @@ public partial class MainWindow : Window
         Banners.Children.Add(banner);
         banner.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
         timer.Start();
-        while (Banners.Children.Count > 3) Banners.Children.RemoveAt(0);
+        TrimBanners();
         return banner;
     }
 
@@ -453,6 +497,8 @@ public partial class MainWindow : Window
         var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
         if (ctrl && e.Key == Key.K) { Hub.Windows.ShowPalette(this); e.Handled = true; return; }
         if (e.Key == Key.F5) { OnRefreshClick(this, new RoutedEventArgs()); e.Handled = true; return; }
+        if (e.Key == Key.Escape && AlertsPopup.IsOpen) { AlertsPopup.IsOpen = false; e.Handled = true; return; }
+        if (e.Key == Key.Escape && AiPopup.IsOpen) { AiPopup.IsOpen = false; e.Handled = true; return; }
         if (e.Key == Key.Escape && Overlay.Visibility == Visibility.Visible && OverlayHost.Content is not Onboarding) { HideOverlay(); e.Handled = true; return; }
         if (ctrl && e.Key == Key.OemComma) { Navigate("settings"); e.Handled = true; return; }
         if (ctrl && e.Key is >= Key.D1 and <= Key.D9)

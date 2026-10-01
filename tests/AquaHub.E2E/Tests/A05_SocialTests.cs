@@ -27,8 +27,11 @@ public sealed class A05_SocialTests : E2ETestBase
                 Ui.Select(chip);
                 Wait.For(() => Ui.IsSelected(chip), "chip selected");
                 Thread.Sleep(400);
-                var rows = FeedRows();
+                // A platform with nothing to show (e.g. no Bluesky account) swaps the list for an explained empty state.
+                var rows = Ui.Find(PageRoot("social"), Ui.Id("Feed")) is null ? new List<AutomationElement>() : FeedRows();
                 if (label == "All") Expect(rows.Count > 0, "feed empty under All");
+                if (rows.Count == 0 && platform.Length > 0)
+                    Expect(Ui.Find(PageRoot("social"), Ui.Id("social-feed-empty-action")) is not null, $"no posts under {label} and no empty state saying why");
                 if (platform.Length > 0)
                 {
                     var wrong = rows.Take(6).Where(r => !Ui.Texts(r).Contains(platform)).Select(Ui.NameOf).ToList();

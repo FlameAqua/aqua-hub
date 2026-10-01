@@ -11,10 +11,16 @@ using AquaHub.Services;
 
 namespace AquaHub.UI.ViewModels;
 
-public sealed record SourceLink(string Name, string? Url, ICommand Open);
+public sealed record SourceLink(string Name, string? Url, ICommand Open)
+{
+    public override string ToString() => Name;
+}
 
 public sealed class StoryVM : ObservableObject
 {
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => Title;
+
     private bool _expanded;
     private bool _saved;
     private string _signature = "";
@@ -142,6 +148,8 @@ public sealed class StoryVMCache
 
 public sealed class PostVM
 {
+    public override string ToString() => HtmlText.OneLine(Title.Length > 0 ? Title : Body, 140);
+
     public PostVM(FeedItem p)
     {
         Title = p.Title;
@@ -181,6 +189,8 @@ public sealed class PostVM
 
 public sealed class QuoteVM
 {
+    public override string ToString() => $"{Name}, {PriceText}, {ChangeText}";
+
     public QuoteVM(Quote q, Indicators? ind, WatchInsight? insight = null, double? shares = null)
     {
         Symbol = q.Symbol;
@@ -236,6 +246,8 @@ public sealed class QuoteVM
 
 public sealed class EventVM
 {
+    public override string ToString() => $"{Title}, {When}";
+
     public EventVM(HubEvent e, bool use24)
     {
         Title = e.Title;
@@ -294,6 +306,8 @@ public sealed class EventVM
 
 public sealed record OutcomeVM(string Label, double Probability, string ProbText, string ChangeText, Brush ChangeBrush, bool IsLead)
 {
+    public override string ToString() => $"{Label}: {ProbText}";
+
     /// <summary>The crowd's favourite is drawn in the accent colour; the rest are muted.</summary>
     public Brush BarBrush => Fmt.Res(IsLead ? "B.Accent" : "B.Text3");
     public FontWeight LabelWeight => IsLead ? FontWeights.SemiBold : FontWeights.Normal;
@@ -301,6 +315,8 @@ public sealed record OutcomeVM(string Label, double Probability, string ProbText
 
 public sealed class PredictionVM
 {
+    public override string ToString() => $"{Title}: {LeadLabel} {LeadProbText}";
+
     public PredictionVM(PredictionMarket m)
     {
         Title = m.Title;
@@ -339,6 +355,8 @@ public sealed class PredictionVM
 
 public sealed class AgentVM : ObservableObject
 {
+    public override string ToString() => $"{Name}, {StateText}";
+
     private AgentStatus _s;
 
     public AgentVM(AgentStatus s)
@@ -398,6 +416,8 @@ public sealed class AgentVM : ObservableObject
 
 public sealed class AppVM : ObservableObject
 {
+    public override string ToString() => Name;
+
     private bool _running;
     private bool _editing;
 
@@ -445,6 +465,8 @@ public sealed class AppVM : ObservableObject
 
 public sealed class SceneVM
 {
+    public override string ToString() => Name;
+
     public SceneVM(Core.Settings.Scene scene)
     {
         Scene = scene;
@@ -502,9 +524,15 @@ public sealed class AlertVM
     public ICommand OpenCommand { get; }
 }
 
-public sealed record HourVM(string Time, int Code, bool IsDay, string Temp, string Rain);
+public sealed record HourVM(string Time, int Code, bool IsDay, string Temp, string Rain)
+{
+    public override string ToString() => $"{Time}: {Temp}" + (Rain.Length > 0 ? $", {Rain} rain" : "");
+}
 
-public sealed record DayVM(string Day, int Code, string Min, string Max, double BarStart, double BarWidth, string Rain);
+public sealed record DayVM(string Day, int Code, string Min, string Max, double BarStart, double BarWidth, string Rain)
+{
+    public override string ToString() => $"{Day}: {Min} to {Max}" + (Rain.Length > 0 ? $", {Rain} rain" : "");
+}
 
 public static class WeatherVM
 {

@@ -116,7 +116,10 @@ public sealed class Crawler
                 Record(surface, label, "skip", original.Enabled ? "skipped by rule" : "disabled");
                 continue;
             }
-            if (Destructive.IsMatch(original.Name) && !destructiveSeen.Add(original.Name.Split(' ')[0] + "|" + original.Signature))
+            // One of each kind per surface ("Remove …" in the watchlist once, not once per symbol): the key leaves out
+            // the item's own name.
+            if (Destructive.IsMatch(original.Name) &&
+                !destructiveSeen.Add(original.Name.Split(' ')[0] + "|" + original.Signature.Split('|')[0] + "|" + original.AutomationId))
             {
                 stats.Skipped++;
                 Record(surface, label, "skip", "destructive — one instance only");
@@ -187,7 +190,21 @@ public sealed class Crawler
     {
         var el = node.Element;
         if (node.CanInvoke) { ((InvokePattern)el.GetCurrentPattern(InvokePattern.Pattern)).Invoke(); return "Invoke"; }
-        if (node.CanToggle) { ((TogglePattern)el.GetCurrentPattern(TogglePattern.Pattern)).Toggle(); return "Toggle"; }
+        if (node.CanToggle)
+        {
+            // Flip and flip back, so the crawl leaves the profile's switches (close to tray, start with Windows…) as it
+            // found them for the tests that run after it.
+            var toggle = (TogglePattern)el.GetCurrentPattern(TogglePattern.Pattern);
+            var before = toggle.Current.ToggleState;
+            toggle.Toggle();
+            Thread.Sleep(300);
+            try
+            {
+                if (toggle.Current.ToggleState != before) toggle.Toggle();
+            }
+            catch (Exception ex) when (Wait.IsTransient(ex)) { return "Toggle (the switch was rebuilt; not toggled back)"; }
+            return "Toggle+back";
+        }
         if (node.CanExpand)
         {
             var p = (ExpandCollapsePattern)el.GetCurrentPattern(ExpandCollapsePattern.Pattern);

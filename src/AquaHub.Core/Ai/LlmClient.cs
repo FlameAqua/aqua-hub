@@ -64,6 +64,11 @@ public sealed record LlmRequest
     public IReadOnlyList<LlmTool>? Tools { get; init; }
     /// <summary>Reasoning on or off for this request; null = the Settings choice.</summary>
     public bool? Think { get; init; }
+    /// <summary>
+    /// The model to use (Ask's model picker); null, or one that isn't installed, means the active one (or the deep one
+    /// for <see cref="Deep"/> requests).
+    /// </summary>
+    public string? Model { get; init; }
     /// <summary>Context window for this request; null = Settings. A different size reloads the model, so only long jobs raise it.</summary>
     public int? ContextTokens { get; init; }
 }
@@ -321,11 +326,31 @@ public sealed partial class LlmClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether an installed model can reason step by step (Ollama's "thinking" capability): null when that can't be
+    /// told without waking the model server, or the server isn't Ollama. Doesn't start anything.
+    /// </summary>
+    public async Task<bool?> CanThinkAsync(string model, CancellationToken ct = default)
+    {
+        if (!IsOllama || !_health.Available || !_health.Models.Any(m => m.Name.Equals(model, StringComparison.OrdinalIgnoreCase))) return null;
+        var caps = await CapabilitiesAsync(model, ct).ConfigureAwait(false);
+        return caps.Count == 0 ? null : caps.Contains("thinking");
+    }
+
+    /// <summary>The model a request runs on: the one it names if that's installed, else the deep or the active one.</summary>
+    private string ModelFor(string? requested, bool deep)
+    {
+        if (!string.IsNullOrWhiteSpace(requested) &&
+            _health.Models.FirstOrDefault(m => m.Name.Equals(requested, StringComparison.OrdinalIgnoreCase)) is { } named) return named.Name;
+        return (deep ? _health.DeepModel : null) ?? _health.ActiveModel!;
+    }
+
     private async Task<HashSet<string>> CapabilitiesAsync(string model, CancellationToken ct)
     {
         lock (_capabilities)
             if (_capabilities.TryGetValue(model, out var cached)) return cached;
         var caps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var answered = false;
         try
         {
             var body = new JsonObject { ["model"] = model };
@@ -339,10 +364,12 @@ public sealed partial class LlmClient : IDisposable
                 using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false));
                 foreach (var c in doc.RootElement.Arr("capabilities"))
                     if (c.GetString() is { } s) caps.Add(s);
+                answered = true;
             }
         }
         catch { }
-        lock (_capabilities) _capabilities[model] = caps;
+        // Only a real answer is remembered: a server that was starting up is asked again next time.
+        if (answered) lock (_capabilities) _capabilities[model] = caps;
         return caps;
     }
 
@@ -350,11 +377,14 @@ public sealed partial class LlmClient : IDisposable
     /// What the active model can do. Ollama reports it per model; OpenAI-compatible servers are assumed to take tools
     /// and not images. Throws <see cref="LlmUnavailableException"/> when no model is available (it may start the server).
     /// </summary>
-    public async Task<LlmCapabilities> CapabilitiesAsync(bool deep = false, CancellationToken ct = default)
+    public Task<LlmCapabilities> CapabilitiesAsync(bool deep = false, CancellationToken ct = default) => CapabilitiesForAsync(null, deep, ct);
+
+    /// <summary>What <paramref name="model"/> can do (the active or deep one when it's null or not installed).</summary>
+    public async Task<LlmCapabilities> CapabilitiesForAsync(string? model, bool deep = false, CancellationToken ct = default)
     {
         if (!_settings().Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(wake: true, ct).ConfigureAwait(false);
-        var model = (deep ? _health.DeepModel : null) ?? _health.ActiveModel!;
+        model = ModelFor(model, deep);
         if (!IsOllama) return new LlmCapabilities(model, Tools: true, Vision: false, Thinking: false);
         var caps = await CapabilitiesAsync(model, ct).ConfigureAwait(false);
         return new LlmCapabilities(model, caps.Contains("tools"), caps.Contains("vision"), caps.Contains("thinking"));
@@ -382,7 +412,7 @@ public sealed partial class LlmClient : IDisposable
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(request.Priority == LlmPriority.Interactive || request.WakeServer, ct).ConfigureAwait(false);
-        var model = (request.Deep ? _health.DeepModel : null) ?? _health.ActiveModel!;
+        var model = ModelFor(request.Model, request.Deep);
 
         using var lease = await _gate.AcquireAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
         var sw = Stopwatch.StartNew();
@@ -421,7 +451,7 @@ public sealed partial class LlmClient : IDisposable
 
         Log.Warn("ai", $"{request.Purpose}: invalid JSON ({result.Text.Length} chars: {HtmlText.Truncate(result.Text.Replace('\n', ' '), 160)}) — retrying");
         LlmRequest retry;
-        var model = (request.Deep ? _health.DeepModel : null) ?? _health.ActiveModel ?? "";
+        var model = _health.ActiveModel is null ? "" : ModelFor(request.Model, request.Deep);
         if (IsOllama && !_settings().Think && (await CapabilitiesAsync(model, ct).ConfigureAwait(false)).Contains("thinking"))
         {
             // Last resort: reasoning mode makes Ollama enforce the JSON grammar (slower, but valid).
@@ -799,7 +829,7 @@ public sealed partial class LlmClient : IDisposable
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(wake: true, ct).ConfigureAwait(false);
-        var model = (request.Deep ? _health.DeepModel : null) ?? _health.ActiveModel!;
+        var model = ModelFor(request.Model, request.Deep);
         using var lease = reserved ? null : await _gate.AcquireAsync(interactive: true, ct).ConfigureAwait(false);
 
         HttpRequestMessage req;

@@ -64,16 +64,19 @@ public sealed class WindowManager
         _main?.Dispatcher.BeginInvoke(() => _main?.ShowAlerts(), DispatcherPriority.Loaded);
     }
 
-    public void ToggleFlyout()
+    public void ToggleFlyout() => ToggleFlyout(fromTrayClick: false);
+
+    /// <summary>Opens or closes the quick panel; see <see cref="FlyoutWindow.ShowAnimated"/> for tray clicks.</summary>
+    public void ToggleFlyout(bool fromTrayClick)
     {
         if (_flyout is { IsVisible: true }) HideFlyout();
-        else ShowFlyout();
+        else ShowFlyout(fromTrayClick);
     }
 
-    public void ShowFlyout()
+    public void ShowFlyout(bool fromTrayClick = false)
     {
         _flyout ??= new FlyoutWindow();
-        _flyout.ShowAnimated();
+        _flyout.ShowAnimated(fromTrayClick);
         UpdateVisibility();
     }
 

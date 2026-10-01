@@ -20,12 +20,15 @@ public sealed class TrayIcon : IDisposable
     private string _tooltip = "Aqua Hub";
     private bool _added;
     private Action? _balloonClick;
+    private int _shownSinceClick;
 
     public event Action<int, int>? LeftClick;
     public event Action<int, int>? RightClick;
     public event Action? DoubleClick;
     public event Action? MiddleClick;
     public event Action? BalloonClicked;
+    /// <summary>A notification was clicked, but several were shown since the last click, so it can't be told which.</summary>
+    public event Action? SeveralClicked;
     public event Action<int>? Hotkey;
     public event Action<string?>? SettingChanged;
     public event Action? PowerChanged;
@@ -61,14 +64,17 @@ public sealed class TrayIcon : IDisposable
         Native.Shell_NotifyIconW(Native.NIM_MODIFY, ref data);
     }
 
-    /// <summary>Shows a notification (rendered by Windows as a toast attributed to Aqua Hub).</summary>
-    /// <summary>Shows a notification. Clicking it runs <paramref name="onClick"/>, or raises <see cref="BalloonClicked"/>
-    /// when there's none. (Windows reports clicks for the icon's latest notification only.)</summary>
+    /// <summary>
+    /// Shows a notification (Windows renders it as a toast attributed to Aqua Hub). Clicking it runs
+    /// <paramref name="onClick"/>, or raises <see cref="BalloonClicked"/> when there's none. Windows reports a click
+    /// for the icon, not for a particular notification, so after several it raises <see cref="SeveralClicked"/>.
+    /// </summary>
     public void Notify(string title, string body, bool quiet = false, Action? onClick = null)
     {
         if (Sandbox.Intercept("toast", title)) return;
         if (!_added) return;
         _balloonClick = onClick;
+        _shownSinceClick++;
         var data = NewData(Native.NIF_INFO);
         data.szInfoTitle = Trim(title, 63);
         data.szInfo = Trim(string.IsNullOrWhiteSpace(body) ? " " : body, 255);
@@ -122,7 +128,10 @@ public sealed class TrayIcon : IDisposable
                     MiddleClick?.Invoke();
                     break;
                 case Native.NIN_BALLOONUSERCLICK:
-                    if (_balloonClick is { } click) click();
+                    var shown = _shownSinceClick;
+                    _shownSinceClick = 0;
+                    if (shown > 1 && SeveralClicked is { } several) several();
+                    else if (_balloonClick is { } click) click();
                     else BalloonClicked?.Invoke();
                     break;
             }

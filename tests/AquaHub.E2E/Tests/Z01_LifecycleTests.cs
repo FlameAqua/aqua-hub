@@ -14,16 +14,19 @@ public sealed class Z01_LifecycleTests : E2ETestBase
         GoTo("markets");
         Check("Lifecycle", "closing the main window keeps the process (tray) running", () =>
         {
+            // This session, not App: App would quietly start a fresh instance if this one had exited.
+            var app = App;
             CloseWindow(Main);
-            Wait.For(() => App.TryMain() is null, "main window gone");
+            Wait.For(() => app.TryMain() is null, "main window gone");
             Thread.Sleep(1500);
-            Expect(App.IsAlive, "process exited after closing the window");
+            Expect(app.IsAlive, "process exited after closing the window");
         });
-        Check("Lifecycle", "plain launch (activate) shows the main window again", () =>
+        Check("Lifecycle", "plain launch (activate) shows the main window again, on the page you left", () =>
         {
             App.Command("activate");
             Wait.For(() => App.TryMain() is not null, "main window back", TimeSpan.FromSeconds(15));
-            PageRoot("today", TimeSpan.FromSeconds(15));
+            // The window is kept while closed to the tray, so it comes back where you were.
+            PageRoot("markets", TimeSpan.FromSeconds(15));
         });
         Check("Lifecycle", "--flyout and --palette work while the main window is closed", () =>
         {
@@ -54,8 +57,10 @@ public sealed class Z01_LifecycleTests : E2ETestBase
             App.Settings.WaitForBool("general.closeToTray", false);
             GoTo("today");
             AllowsExit = true;
+            // Hold on to this session: reading App after the process ends would start a fresh instance.
+            var app = App;
             CloseWindow(Main);
-            var exited = Wait.Until(() => !App.IsAlive, TimeSpan.FromSeconds(10));
+            var exited = Wait.Until(() => !app.IsAlive, TimeSpan.FromSeconds(10));
             if (!exited)
             {
                 AllowsExit = false;
@@ -77,19 +82,21 @@ public sealed class Z01_LifecycleTests : E2ETestBase
         Run(() =>
     {
         AllowsExit = true;
-        var journalMark = App.Journal.Mark();
+        // Hold on to this session: reading App after the process ends would start a fresh instance.
+        var app = App;
+        var journalMark = app.Journal.Mark();
         Check("Lifecycle", "--quit exits with code 0 and no errors", () =>
         {
-            var mark = App.Log.Mark();
-            App.Command("quit");
-            Expect(App.Process.WaitForExit(15000), "process still running 15 s after --quit");
-            Expect(App.Process.ExitCode == 0, $"exit code {App.Process.ExitCode}");
-            var errors = App.Log.ErrorsSince(mark);
+            var mark = app.Log.Mark();
+            app.Command("quit");
+            Expect(app.Process.WaitForExit(15000), "process still running 15 s after --quit");
+            Expect(app.Process.ExitCode == 0, $"exit code {app.Process.ExitCode}");
+            var errors = app.Log.ErrorsSince(mark);
             Expect(errors.Count == 0, "errors logged during shutdown: " + string.Join(" | ", errors));
         });
         Check("Lifecycle", "quitting does not announce 'Aqua Hub is still running'", () =>
         {
-            var hint = App.Journal.Find(journalMark, "toast", d => d.Contains("still running", StringComparison.OrdinalIgnoreCase));
+            var hint = app.Journal.Find(journalMark, "toast", d => d.Contains("still running", StringComparison.OrdinalIgnoreCase));
             Expect(hint is null, "Quitting shows the 'Aqua Hub is still running' tray notification (the window-closed hint fires during shutdown)");
         });
     });
@@ -101,13 +108,13 @@ public sealed class Z01_LifecycleTests : E2ETestBase
         AllowsExit = true;
         Check("Lifecycle", "tray menu 'Quit Aqua Hub' exits the process", () =>
         {
-            var mark = App.Log.Mark();
-            App.Command("tray-menu");
-            var menu = Wait.For(() => AppWindows.Menu(Pid, "tray-menu"), "tray menu");
-            Ui.Invoke(MenuItem(menu, "Quit Aqua Hub"));
-            Expect(App.Process.WaitForExit(15000), "process still running 15 s after Quit");
-            Expect(App.Process.ExitCode == 0, $"exit code {App.Process.ExitCode}");
-            Expect(App.Log.CrashesSince(mark).Count == 0, "crash during quit");
+            // Hold on to this session: reading App after the process ends would start a fresh instance.
+            var app = App;
+            var mark = app.Log.Mark();
+            Ui.Invoke(MenuItem(TrayMenu(), "Quit Aqua Hub"));
+            Expect(app.Process.WaitForExit(15000), "process still running 15 s after Quit");
+            Expect(app.Process.ExitCode == 0, $"exit code {app.Process.ExitCode}");
+            Expect(app.Log.CrashesSince(mark).Count == 0, "crash during quit");
         });
     });
 }

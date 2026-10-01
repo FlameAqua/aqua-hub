@@ -51,6 +51,11 @@ public static partial class RssSource
         return $"https://news.google.com/rss/search?q={Uri.EscapeDataString(q)}&hl={hl}&gl={country}&ceid={ceid}";
     }
 
+    /// <summary>False for a search that names your place ("{city}", "{country}") while no place is chosen.</summary>
+    public static bool CanFetch(NewsSource src, LocationSettings loc) =>
+        (!src.Query.Contains("{city}", StringComparison.OrdinalIgnoreCase) || loc.IsSet) &&
+        (!src.Query.Contains("{country}", StringComparison.OrdinalIgnoreCase) || loc.Country.Trim().Length > 0);
+
     public static FeedSpec ToSpec(NewsSource src, LocationSettings loc) => new()
     {
         Id = src.Id,

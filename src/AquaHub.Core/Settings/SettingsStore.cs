@@ -303,6 +303,9 @@ public sealed partial class SettingsStore
         s.Ask.Voice = s.Ask.Voice is "offline" or "online" or "whisper" or "off" ? s.Ask.Voice : "offline";
         s.Ask.WhisperModel = Speech.WhisperCatalog.Choice(s.Ask.WhisperModel).Id;
         s.Ask.Microphone = (s.Ask.Microphone ?? "").Trim() is { Length: <= 200 } mic ? mic : "";
+        s.Ask.Model = (s.Ask.Model ?? "").Trim() is { Length: <= 200 } askModel ? askModel : "";
+        s.Ask.ModelModes = (s.Ask.ModelModes ?? new()).Where(kv => kv.Key.Trim().Length is > 0 and <= 200 && kv.Value is not null)
+            .DistinctBy(kv => kv.Key.Trim()).Take(AskSettings.MaxModelModes).ToDictionary(kv => kv.Key.Trim(), kv => kv.Value);
         s.Ask.OperateApps = s.Ask.OperateApps is "any" or "listed" ? s.Ask.OperateApps : "any";
         s.Ask.AllowedApps = Clean(s.Ask.AllowedApps ?? new())
             .Select(a => a.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? a[..^4] : a).Distinct(StringComparer.OrdinalIgnoreCase).Take(50).ToList();

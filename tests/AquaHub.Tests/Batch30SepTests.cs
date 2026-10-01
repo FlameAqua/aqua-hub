@@ -109,7 +109,15 @@ public class YouTubeChannelPageTests
     }
 }
 
+/// <summary>
+/// The log is one per process, so tests that point it at their own folder run on their own: alongside other tests,
+/// those tests' lines would land in (or be lost with) this test's folder.
+/// </summary>
+[CollectionDefinition(nameof(StaticLog), DisableParallelization = true)]
+public sealed class StaticLog;
+
 /// <summary>Logs: capped while the app runs, and a separate log of problems with their full details.</summary>
+[Collection(nameof(StaticLog))]
 public class LogFileTests
 {
     [Fact]

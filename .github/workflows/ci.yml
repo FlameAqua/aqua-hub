@@ -1,61 +1,52 @@
-# Build, unit/behaviour tests and a vulnerability audit on every push. The UI Automation end-to-end suite needs a
-# warm profile and an interactive desktop, so it runs on demand (Actions > ci > Run workflow); locally, scripts/e2e.ps1
-# sets it up and runs it. All of its side effects stay in the --e2e dry-run sandbox.
+# Build, unit/behaviour tests and a vulnerability audit on every push to a branch and every pull request; the UI
+# Automation suite is compiled too. It isn't run here: it needs a warm profile, an interactive desktop and (for Ask)
+# a local model, so it runs on a PC with scripts/e2e.ps1, every side effect kept in the --e2e dry-run sandbox.
 name: ci
 
 on:
   push:
+    branches: ['**']   # tags are the release workflow's
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  # Pinned so a newer SDK on the runner can't switch the target framework (the lock files are for .NET 9).
-  AQUA_NET: net9.0
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      # Actions are pinned to full commit SHAs (the release in the comment); Dependabot proposes updates.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          dotnet-version: 9.0.x
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
       - name: Restore (locked, signed packages only)
-        run: dotnet restore AquaHub.sln --locked-mode -p:AquaNet=${{ env.AQUA_NET }}
+        run: |
+          dotnet restore AquaHub.sln --locked-mode
+          dotnet restore tests/AquaHub.E2E/AquaHub.E2E.csproj --locked-mode
       - name: Build
-        run: dotnet build AquaHub.sln -c Release --no-restore -p:AquaNet=${{ env.AQUA_NET }}
+        run: |
+          dotnet build AquaHub.sln -c Release --no-restore
+          dotnet build tests/AquaHub.E2E/AquaHub.E2E.csproj -c Release --no-restore
       - name: Unit & behaviour tests
-        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build -p:AquaNet=${{ env.AQUA_NET }} --logger "trx;LogFileName=unit.trx"
-      - name: Vulnerability audit
-        run: dotnet list AquaHub.sln package --vulnerable --include-transitive
-      - uses: actions/upload-artifact@v4
+        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
+      - name: Vulnerability audit (fails on any known-vulnerable package)
+        shell: pwsh
+        run: |
+          $out = dotnet list AquaHub.sln package --vulnerable --include-transitive 2>&1 | Out-String
+          $out
+          if ($LASTEXITCODE -ne 0) { throw 'The audit could not run (see above).' }
+          if ($out -match 'has the following vulnerable packages') { throw 'Known-vulnerable packages (see above).' }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: unit-test-results
           path: tests/AquaHub.Tests/TestResults
-
-  e2e:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
-    needs: build-and-test
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-      - name: Publish the app under test
-        run: dotnet publish src/AquaHub/AquaHub.csproj -c Release -p:AquaNet=${{ env.AQUA_NET }} -o ${{ runner.temp }}/aquahub
-      - name: UI Automation end-to-end suite (dry-run sandbox, no local model on CI)
-        env:
-          AQUAHUB_E2E_EXE: ${{ runner.temp }}/aquahub/AquaHub.exe
-          AQUAHUB_E2E_ROOT: ${{ runner.temp }}/e2e
-        run: dotnet test tests/AquaHub.E2E/AquaHub.E2E.csproj -p:AquaNet=${{ env.AQUA_NET }} --logger "trx;LogFileName=e2e.trx"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: e2e-results
-          path: tests/AquaHub.E2E/TestResults

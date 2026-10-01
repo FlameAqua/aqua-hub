@@ -40,6 +40,8 @@ public sealed partial class MarkdownView : RichTextBox
     public MarkdownView()
     {
         IsReadOnly = true;
+        // Each render rewrites the document; with undo on, every streamed re-render would pile up in the undo stack.
+        IsUndoEnabled = false;
         IsDocumentEnabled = true;
         IsReadOnlyCaretVisible = false;
         Background = Brushes.Transparent;
@@ -53,6 +55,7 @@ public sealed partial class MarkdownView : RichTextBox
         SetResourceReference(ForegroundProperty, "B.Text");
         SetResourceReference(SelectionBrushProperty, "B.Accent");
         Document = new FlowDocument { PagePadding = new Thickness(0) };
+        Document.SetResourceReference(FlowDocument.ForegroundProperty, "B.Text");
         _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(80) };
         _timer.Tick += (_, _) => { _timer.Stop(); Render(); };
         Loaded += (_, _) => Render();
@@ -79,17 +82,16 @@ public sealed partial class MarkdownView : RichTextBox
         if (text == _rendered && ReferenceEquals(Citations, _renderedCitations)) return;
         _rendered = text;
         _renderedCitations = Citations;
-        var doc = new FlowDocument
-        {
-            PagePadding = new Thickness(0),
-            FontFamily = FontFamily,
-            FontSize = FontSize,
-            LineHeight = FontSize * 1.55,
-            TextAlignment = TextAlignment.Left,
-        };
-        doc.SetResourceReference(FlowDocument.ForegroundProperty, "B.Text");
+        // Re-render into the same document: a screen reader's text pattern stays bound to the document it first saw,
+        // so swapping in a new one would leave it reading an empty answer.
+        var doc = Document;
+        doc.PagePadding = new Thickness(0);
+        doc.FontFamily = FontFamily;
+        doc.FontSize = FontSize;
+        doc.LineHeight = FontSize * 1.55;
+        doc.TextAlignment = TextAlignment.Left;
+        doc.Blocks.Clear();
         Build(doc, text, Citations);
-        Document = doc;
     }
 
     // ───────────────────────────── Markdown → FlowDocument ─────────────────────────────

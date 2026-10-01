@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 namespace AquaHub.Core.Settings;
 
 /// <summary>
@@ -47,30 +48,50 @@ public sealed class GeneralSettings
     public bool CheckForUpdates { get; set; } = true;
 }
 
+/// <summary>
+/// Where you are: nothing until you pick a place (during onboarding or in Settings › Location), so a new profile
+/// isn't anyone else's city. Until then there's no weather or local news (<see cref="IsSet"/>). Choosing a place
+/// applies that country's defaults (<see cref="LocalePacks"/>).
+/// </summary>
 public sealed class LocationSettings
 {
-    public string City { get; set; } = "Dublin";
-    public string Region { get; set; } = "Ireland";
-    /// <summary>ISO 3166-1 alpha-2</summary>
-    public string Country { get; set; } = "IE";
-    public double Latitude { get; set; } = 53.3498;
-    public double Longitude { get; set; } = -6.2603;
-    public string Timezone { get; set; } = "Europe/Dublin";
+    public string City { get; set; } = "";
+    public string Region { get; set; } = "";
+    /// <summary>ISO 3166-1 alpha-2; empty until a place is chosen.</summary>
+    public string Country { get; set; } = "";
+    public double Latitude { get; set; }
+    public double Longitude { get; set; }
+    /// <summary>IANA time zone of the place; empty means Windows' own.</summary>
+    public string Timezone { get; set; } = "";
     /// <summary>metric | imperial</summary>
     public string Units { get; set; } = "metric";
-    /// <summary>BCP-47 language used for summaries and regional feeds.</summary>
-    public string Language { get; set; } = "en-IE";
+    /// <summary>BCP-47 language used for summaries and regional feeds (the place's English edition once chosen).</summary>
+    public string Language { get; set; } = "en-US";
     /// <summary>Words that mark a story as local.</summary>
-    public List<string> LocalKeywords { get; set; } = new()
-    {
-        "Ireland", "Irish", "Dublin", "Cork", "Galway", "Limerick", "Waterford", "Kilkenny", "Belfast",
-        "Taoiseach", "Tánaiste", "Dáil", "Oireachtas", "Seanad", "HSE", "Garda", "Gardaí", "RTÉ",
-        "Leinster", "Munster", "Connacht", "Ulster", "Stormont", "Fianna Fáil", "Fine Gael", "Sinn Féin",
-    };
+    public List<string> LocalKeywords { get; set; } = new();
+
+    /// <summary>A place has been chosen, so there's local news and a local section in the brief.</summary>
+    [JsonIgnore]
+    public bool IsSet => City.Trim().Length > 0;
+
+    /// <summary>The place has coordinates, so there's weather (a place from the picker always has them).</summary>
+    [JsonIgnore]
+    public bool HasCoordinates => IsSet && (Latitude != 0 || Longitude != 0);
+
+    /// <summary>"Galway, Ireland"; empty until a place is chosen.</summary>
+    [JsonIgnore]
+    public string Label => !IsSet ? "" : Region.Length > 0 && !Region.Equals(City, StringComparison.OrdinalIgnoreCase) ? $"{City}, {Region}" : City;
+
+    /// <summary>What the local section is called: the city, or "Local" before a place is chosen.</summary>
+    [JsonIgnore]
+    public string LocalTitle => IsSet ? City : "Local";
 }
 
 public sealed class NewsSource
 {
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => Name;
+
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     /// <summary>rss | google</summary>
@@ -101,11 +122,7 @@ public sealed class NewsSettings
         new() { Id = "bbc-world", Name = "BBC News", Url = "https://feeds.bbci.co.uk/news/world/rss.xml", Category = "world", Tier = 1 },
         new() { Id = "bbc-business", Name = "BBC Business", Url = "https://feeds.bbci.co.uk/news/business/rss.xml", Category = "business", Tier = 1 },
         new() { Id = "ft", Name = "Financial Times", Url = "https://www.ft.com/rss/home", Category = "business", Tier = 1 },
-        // Local (Ireland)
-        new() { Id = "rte", Name = "RTÉ News", Url = "https://www.rte.ie/feeds/rss/?index=/news/", Category = "local", Tier = 1, Local = true },
-        new() { Id = "irishtimes", Name = "The Irish Times", Url = "https://www.irishtimes.com/arc/outboundfeeds/feed-irish-news/?outputType=xml", Category = "local", Tier = 1, Local = true },
-        new() { Id = "thejournal", Name = "TheJournal.ie", Url = "https://www.thejournal.ie/feed/", Category = "local", Tier = 2, Local = true },
-        new() { Id = "independent-ie", Name = "Irish Independent", Url = "https://www.independent.ie/rss/", Category = "local", Tier = 2, Local = true },
+        // Local: your place in Google News (once a place is chosen; that country's own outlets come with its pack)
         new() { Id = "gnews-local", Name = "Local (Google News)", Kind = "google", Query = "{city} {country} when:1d", Category = "local", Tier = 3, Local = true },
         // Reputable international outlets (tier 2)
         new() { Id = "guardian-world", Name = "The Guardian", Url = "https://www.theguardian.com/world/rss", Category = "world", Tier = 2 },
@@ -117,7 +134,6 @@ public sealed class NewsSettings
         // Technology
         new() { Id = "ars", Name = "Ars Technica", Url = "https://feeds.arstechnica.com/arstechnica/index", Category = "tech", Tier = 2 },
         new() { Id = "verge", Name = "The Verge", Url = "https://www.theverge.com/rss/index.xml", Category = "tech", Tier = 2 },
-        new() { Id = "siliconrepublic", Name = "Silicon Republic", Url = "https://www.siliconrepublic.com/feed", Category = "tech", Tier = 2, Local = true },
         new() { Id = "gamersnexus", Name = "Gamers Nexus", Url = "https://gamersnexus.net/rss.xml", Category = "tech", Tier = 2 },
         new() { Id = "gnews-top", Name = "Top Stories (Google News)", Kind = "google", Query = "", Category = "world", Tier = 3, Enabled = false },
     };
@@ -125,6 +141,8 @@ public sealed class NewsSettings
 
 public sealed class ChannelRef
 {
+    public override string ToString() => Name.Length > 0 ? Name : Handle;
+
     public string Name { get; set; } = "";
     public string ChannelId { get; set; } = "";
     /// <summary>The channel's @handle, when known.</summary>
@@ -136,9 +154,10 @@ public sealed class ChannelRef
 public sealed class SocialSettings
 {
     public int RefreshMinutes { get; set; } = 15;
-    public List<string> Subreddits { get; set; } = new() { "ireland", "Dublin" };
-    public string MastodonInstance { get; set; } = "mastodon.ie";
-    public List<string> MastodonHashtags { get; set; } = new() { "dublin", "ireland" };
+    /// <summary>Your place's communities once it's chosen (e.g. r/ireland and r/Galway).</summary>
+    public List<string> Subreddits { get; set; } = new();
+    public string MastodonInstance { get; set; } = "mastodon.social";
+    public List<string> MastodonHashtags { get; set; } = new();
     public bool BlueskyTrending { get; set; } = true;
     /// <summary>Your handle for reading your own Following timeline (the app password lives in Credential Manager).</summary>
     public string BlueskyHandle { get; set; } = "";
@@ -164,6 +183,8 @@ public sealed class SocialSettings
 
 public sealed class WatchSymbol
 {
+    public override string ToString() => Name.Length > 0 ? $"{Symbol}, {Name}" : Symbol;
+
     public string Symbol { get; set; } = "";
     public string Name { get; set; } = "";
     /// <summary>index | equity | etf | fx | crypto | commodity</summary>
@@ -178,7 +199,8 @@ public sealed class MarketSettings
 {
     public int RefreshSeconds { get; set; } = 120;
     public double AlertMovePercent { get; set; } = 3.0;
-    public string BaseCurrency { get; set; } = "EUR";
+    /// <summary>For holdings values; set to your country's currency when you choose a place.</summary>
+    public string BaseCurrency { get; set; } = "USD";
     /// <summary>conservative | balanced | growth | aggressive — shapes AI idea generation.</summary>
     public string RiskProfile { get; set; } = "balanced";
     public string Horizon { get; set; } = "long-term";
@@ -188,7 +210,6 @@ public sealed class MarketSettings
         new() { Symbol = "^IXIC", Name = "Nasdaq", Kind = "index" },
         new() { Symbol = "^STOXX50E", Name = "Euro Stoxx 50", Kind = "index" },
         new() { Symbol = "^FTSE", Name = "FTSE 100", Kind = "index" },
-        new() { Symbol = "^ISEQ", Name = "ISEQ", Kind = "index" },
     };
     public List<WatchSymbol> Macro { get; set; } = new()
     {
@@ -202,7 +223,6 @@ public sealed class MarketSettings
         new() { Symbol = "NVDA", Name = "NVIDIA", Kind = "equity" },
         new() { Symbol = "MSFT", Name = "Microsoft", Kind = "equity" },
         new() { Symbol = "AAPL", Name = "Apple", Kind = "equity" },
-        new() { Symbol = "RYA.IR", Name = "Ryanair", Kind = "equity" },
         new() { Symbol = "IWDA.AS", Name = "iShares MSCI World", Kind = "etf" },
     };
 }
@@ -219,7 +239,8 @@ public sealed class CalendarSource
 public sealed class EventSettings
 {
     public List<CalendarSource> Calendars { get; set; } = new();
-    public List<string> HolidayCountries { get; set; } = new() { "IE" };
+    /// <summary>Your country's public holidays once a place is chosen.</summary>
+    public List<string> HolidayCountries { get; set; } = new();
     public bool Economic { get; set; } = true;
     public List<string> EconomicCurrencies { get; set; } = new() { "USD", "EUR", "GBP" };
     /// <summary>Low | Medium | High</summary>
@@ -336,10 +357,38 @@ public sealed class AskSettings
     public bool UseSkills { get; set; } = true;
     /// <summary>Let the model plan searches (better queries; adds a second or two). Off: rules only.</summary>
     public bool PlanWithModel { get; set; } = true;
+
+    /// <summary>The model Ask answers with (its picker); empty means the one set in Settings › AI.</summary>
+    public string Model { get; set; } = "";
+
+    /// <summary>Think and Research as you last left them with each model, so switching model brings its own back.</summary>
+    public Dictionary<string, AskModelModes> ModelModes { get; set; } = new();
+
+    /// <summary>Think and Research for <paramref name="model"/>: as last left with it, else the defaults.</summary>
+    public AskModelModes ModesFor(string model) =>
+        ModelModes.TryGetValue(model, out var m) ? m : new AskModelModes { Think = ThinkByDefault };
+
+    /// <summary>Remembers the switches for <paramref name="model"/> (a few dozen models at most are kept).</summary>
+    public void RememberModes(string model, bool think, bool research)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return;
+        ModelModes[model] = new AskModelModes { Think = think, Research = research };
+        foreach (var extra in ModelModes.Keys.Where(k => k != model).Skip(MaxModelModes - 1).ToList()) ModelModes.Remove(extra);
+    }
+
+    public const int MaxModelModes = 40;
+}
+
+public sealed class AskModelModes
+{
+    public bool Think { get; set; }
+    public bool Research { get; set; }
 }
 
 public sealed class AppEntry
 {
+    public override string ToString() => Name;
+
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     /// <summary>exe | shortcut | uwp | url</summary>

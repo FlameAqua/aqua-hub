@@ -41,7 +41,7 @@ public class ClusteringTests
             Item("a", "RTÉ News", "Dublin rents rise again as housing supply stalls", tier: 1, local: true, category: "local"),
             Item("b", "BBC News", "Mars rover finds ancient lake bed", tier: 1),
         };
-        var clusters = StoryClusterer.Build(items, settings, new LocationSettings());
+        var clusters = StoryClusterer.Build(items, settings, TestPlaces.Location());
         var local = clusters.Single(c => c.Items.Any(i => i.Id == "a"));
         Assert.True(local.IsLocal);
         Assert.Equal("local", local.Category);

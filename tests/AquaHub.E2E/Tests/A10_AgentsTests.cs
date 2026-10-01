@@ -58,11 +58,15 @@ public sealed class A10_AgentsTests : E2ETestBase
         });
         Check("Agents inspector", "an expanded output stays open (survives the periodic refresh)", () =>
         {
-            Ui.Expand(Wait.For(FirstOutput, "expander"));
+            // Follow this output by its id: newer outputs arrive on top while we wait.
+            var exp = Wait.For(FirstOutput, "expander");
+            var id = Ui.IdOf(exp);
+            Ui.Expand(exp);
             Thread.Sleep(17000);
-            var again = FirstOutput();
-            Expect(again is not null && Ui.ExpandStateOf(again) == ExpandCollapseState.Expanded,
-                "The inspector list is rebuilt every 15 s, collapsing whatever the user expanded");
+            var again = Ui.Find(Outputs(), Ui.Id(id));
+            if (again is null) { Step("   (the output left the latest 8 while waiting; nothing to check)"); return; }
+            Expect(Ui.ExpandStateOf(again) == ExpandCollapseState.Expanded, "The inspector refresh collapses whatever the user expanded");
+            Ui.Collapse(again);
         });
     });
 

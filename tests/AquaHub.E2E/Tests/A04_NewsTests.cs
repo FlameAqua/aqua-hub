@@ -143,7 +143,7 @@ public sealed class A04_NewsTests : E2ETestBase
             Ui.Invoke(Ui.WaitFind(ItemWithTitle(title), Ui.Button("Ask Aqua about this story"), "ask"));
             ExpectPage("ask");
             var ask = PageRoot("ask");
-            Wait.For(() => Ui.Texts(ask).Any(t => t.StartsWith("Tell me more about:", StringComparison.Ordinal)), "question in chat");
+            Wait.For(() => Ui.AllTexts(ask).Any(t => t.StartsWith("Tell me more about:", StringComparison.Ordinal)), "question in chat");
             if (Ui.Find(ask, Ui.Id("StopButton")) is { } stop) Ui.Invoke(stop);
         });
         GoTo("news");

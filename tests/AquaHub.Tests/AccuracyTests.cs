@@ -26,8 +26,11 @@ public class ClusteringAccuracyTests
         Published = Now.AddMinutes(-minutesAgo),
     };
 
+    // A reader in Dublin (these are Irish and American headline pairs).
+    private static readonly LocationSettings Dublin = TestPlaces.Location();
+
     private static List<StoryCluster> Cluster(params FeedItem[] items) =>
-        StoryClusterer.Build(items, new NewsSettings(), new LocationSettings(), Now);
+        StoryClusterer.Build(items, new NewsSettings(), Dublin, Now);
 
     [Fact]
     public void AShootingInDublinCaliforniaIsNotMergedWithShootingsInSouthAfrica()
@@ -146,45 +149,55 @@ public class LocalNewsTests
     public void AmericanCitiesAreNotFilteredByDomain() =>
         Assert.Null(LocalePacks.PublisherHints(new LocationSettings { City = "Dublin", Country = "US" }));
 
+    private static readonly string[] IrishOutlets = { "rte", "irishtimes", "thejournal", "independent-ie", "siliconrepublic" };
+
     [Fact]
     public void MovingToAnotherCountrySwapsTheIrishDefaults()
     {
-        var s = new HubSettings();
-        s.Location.City = "Berlin";
-        s.Location.Region = "Germany";
-        s.Location.Country = "DE";
-        var note = LocalePacks.Apply(s, "IE");
+        var s = TestPlaces.Settings();   // set up in Dublin
+        var note = LocalePacks.ChoosePlace(s, TestPlaces.Berlin);
 
-        Assert.Contains("Germany", note);
-        Assert.All(s.News.Sources.Where(x => x.Id is "rte" or "irishtimes" or "thejournal" or "independent-ie"), x => Assert.False(x.Enabled));
+        Assert.StartsWith("Switched to Germany", note);
+        var irish = s.News.Sources.Where(x => IrishOutlets.Contains(x.Id)).ToList();
+        Assert.Equal(IrishOutlets.Length, irish.Count);   // kept, so they can be turned back on…
+        Assert.All(irish, x => Assert.False(x.Enabled));   // …but off
         var national = Assert.Single(s.News.Sources, x => x.Id == "gnews-national");
         Assert.Equal("{country} when:1d", national.Query); // no English Google News edition for Germany
         Assert.DoesNotContain(s.Markets.Indices, i => i.Symbol == "^ISEQ");
         Assert.Contains(s.Markets.Indices, i => i.Symbol == "^GDAXI");
         Assert.Equal(new[] { "DE" }, s.Events.HolidayCountries);
         Assert.Equal(new[] { "germany", "Berlin" }, s.Social.Subreddits);
+        Assert.Equal("mastodon.social", s.Social.MastodonInstance);
+        Assert.Equal("EUR", s.Markets.BaseCurrency);
         Assert.DoesNotContain("Taoiseach", s.Location.LocalKeywords);
+        Assert.DoesNotContain("Dublin", s.Location.LocalKeywords);
         Assert.Contains("Berlin", s.Location.LocalKeywords);
 
         // …and back again restores the Irish outlets.
-        s.Location.City = "Dublin";
-        s.Location.Region = "Ireland";
-        s.Location.Country = "IE";
-        LocalePacks.Apply(s, "DE");
-        Assert.All(s.News.Sources.Where(x => x.Id == "rte"), x => Assert.True(x.Enabled));
+        LocalePacks.ChoosePlace(s, TestPlaces.Dublin);
+        Assert.All(s.News.Sources.Where(x => IrishOutlets.Contains(x.Id)), x => Assert.True(x.Enabled));
         Assert.DoesNotContain(s.News.Sources, x => x.Id == "gnews-national");
         Assert.Contains(s.Markets.Indices, i => i.Symbol == "^ISEQ");
+        Assert.Equal("mastodon.ie", s.Social.MastodonInstance);
+        Assert.Contains("Taoiseach", s.Location.LocalKeywords);
     }
 
     [Fact]
     public void YourOwnSubredditsAreKept()
     {
-        var s = new HubSettings();
-        s.Social.Subreddits = new() { "ireland", "Dublin", "irishpersonalfinance" };
-        s.Location.City = "London";
-        s.Location.Country = "GB";
-        LocalePacks.Apply(s, "IE");
+        var s = TestPlaces.Settings();
+        s.Social.Subreddits.Add("irishpersonalfinance");
+        LocalePacks.ChoosePlace(s, TestPlaces.London);
         Assert.Contains("irishpersonalfinance", s.Social.Subreddits);
+    }
+
+    [Fact]
+    public void ACurrencyYouChoseIsKept()
+    {
+        var s = TestPlaces.Settings();
+        s.Markets.BaseCurrency = "CHF";
+        LocalePacks.ChoosePlace(s, TestPlaces.London);
+        Assert.Equal("CHF", s.Markets.BaseCurrency);
     }
 }
 
@@ -370,22 +383,18 @@ public class LocalePackLeftoverTests
     [Fact]
     public void EveryIrishDefaultOutletIsSwitchedOffAbroad()
     {
-        var s = new HubSettings();
-        s.Location.City = "Paris";
-        s.Location.Country = "FR";
-        LocalePacks.Apply(s, "IE");
+        var s = TestPlaces.Settings();
+        LocalePacks.ChoosePlace(s, TestPlaces.Paris);
         Assert.False(s.News.Sources.Single(x => x.Id == "siliconrepublic").Enabled);
     }
 
     [Fact]
     public void AnIndexYouAddedYourselfIsKept()
     {
-        var s = new HubSettings();
+        var s = TestPlaces.Settings();
         s.Markets.Indices.RemoveAll(i => i.Symbol == "^ISEQ");
         s.Markets.Indices.Add(new WatchSymbol { Symbol = "^ISEQ", Name = "ISEQ All Share Index", Kind = "index" });
-        s.Location.City = "Paris";
-        s.Location.Country = "FR";
-        LocalePacks.Apply(s, "IE");
+        LocalePacks.ChoosePlace(s, TestPlaces.Paris);
         Assert.Contains(s.Markets.Indices, i => i.Symbol == "^ISEQ");
         Assert.Contains(s.Markets.Indices, i => i.Symbol == "^FCHI");
     }

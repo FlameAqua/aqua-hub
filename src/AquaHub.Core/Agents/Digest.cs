@@ -70,7 +70,7 @@ public static class Digest
         foreach (var c in state.Stories.Where(c => !c.IsLocal).Take(6))
             sb.Append("- ").Append(c.Summary?.Headline is { Length: > 0 } h ? h : c.Title)
               .Append(" — ").Append(c.Summary?.Tldr ?? "").Append(" (").Append(c.SourceCount).Append(" sources)\n");
-        sb.Append("\nLOCAL (").Append(s.Location.City).Append("):\n");
+        sb.Append("\nLOCAL").Append(s.Location.IsSet ? " (" + s.Location.City + ")" : "").Append(":\n");
         foreach (var c in state.Stories.Where(c => c.IsLocal).Take(4))
             sb.Append("- ").Append(c.Summary?.Headline is { Length: > 0 } h ? h : c.Title).Append(" — ").Append(c.Summary?.Tldr ?? "").Append('\n');
 
@@ -102,7 +102,8 @@ public static class Digest
     public static string Situation(HubState state, HubSettings s, bool brief = true)
     {
         var sb = new StringBuilder();
-        sb.Append(Inv, $"Now: {DateTimeOffset.Now:dddd d MMMM yyyy HH:mm}, location {s.Location.City}, {s.Location.Region}.\n");
+        sb.Append(Inv, $"Now: {DateTimeOffset.Now:dddd d MMMM yyyy HH:mm}")
+          .Append(s.Location.IsSet ? $", location {s.Location.Label}.\n" : " (the user hasn't set their location).\n");
         var w = Weather(state.Weather);
         if (w.Length > 0) sb.Append("Weather: ").Append(w).Append('\n');
         var m = Markets(state, s.Markets);
@@ -273,7 +274,7 @@ public static class Fallbacks
         if (world.Count > 0) sections.Add(new BriefSection { Title = "Top stories", Icon = "news", Bullets = world });
 
         var local = state.Stories.Where(c => c.IsLocal).Take(3).Select(c => c.Title).ToList();
-        if (local.Count > 0) sections.Add(new BriefSection { Title = s.Location.City, Icon = "local", Bullets = local });
+        if (local.Count > 0) sections.Add(new BriefSection { Title = s.Location.LocalTitle, Icon = "local", Bullets = local });
 
         var markets = MarketBullets(state, s.Markets, DateTimeOffset.Now);
         if (markets.Count > 0) sections.Add(new BriefSection { Title = "Markets", Icon = "markets", Bullets = markets });

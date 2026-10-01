@@ -48,6 +48,51 @@ public static class AppWindows
 
     public static int ForegroundPid() => Win32.PidOf(Win32.GetForegroundWindow());
 
+    /// <summary>
+    /// Top-level windows of the process plus the windows they own (message boxes, file dialogs), which UI Automation
+    /// lists under their owner rather than under the desktop.
+    /// </summary>
+    public static List<AutomationElement> WithOwned(int pid)
+    {
+        var all = new List<AutomationElement>();
+        foreach (var w in TopLevel(pid))
+        {
+            all.Add(w);
+            all.AddRange(Ui.FindAll(w, Ui.Type(ControlType.Window), TreeScope.Children));
+        }
+        return all;
+    }
+
+    /// <summary>
+    /// A window of the process by title wherever UI Automation puts it: an owned window (a modal file dialog) is a
+    /// child of its owner rather than of the desktop, and a just-opened one may only be visible to Win32 yet.
+    /// </summary>
+    public static AutomationElement? AnyWindow(int pid, string title)
+    {
+        foreach (var w in TopLevel(pid))
+        {
+            if (Ui.NameOf(w) == title) return w;
+            if (Ui.Find(w, Ui.And(Ui.Type(ControlType.Window), Ui.Name(title)), TreeScope.Children) is { } owned) return owned;
+        }
+        var hwnd = IntPtr.Zero;
+        Win32.EnumWindows((h, _) =>
+        {
+            if (Win32.PidOf(h) != pid || Win32.TitleOf(h) != title || !Win32.IsWindowVisible(h)) return true;
+            hwnd = h;
+            return false;
+        }, IntPtr.Zero);
+        try { return hwnd == IntPtr.Zero ? null : AutomationElement.FromHandle(hwnd); }
+        catch (Exception ex) when (Wait.IsTransient(ex)) { return null; }
+    }
+
+    /// <summary>Asks every window of the process with this title to close (e.g. a dialog a failed check left open).</summary>
+    public static void CloseWin32Windows(int pid, string title) =>
+        Win32.EnumWindows((h, _) =>
+        {
+            if (Win32.PidOf(h) == pid && Win32.TitleOf(h) == title) Win32.PostMessage(h, Win32.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            return true;
+        }, IntPtr.Zero);
+
     /// <summary>Counts every window (visible or hidden) of the process with the given title.</summary>
     public static int CountWin32Windows(int pid, string title, bool includeHidden)
     {

@@ -1,11 +1,12 @@
 <Project>
   <!--
-    Target framework selection: build on .NET 10 (LTS) automatically when a .NET 10 SDK is present
-    (MSBuild 18+), otherwise fall back to .NET 9. Override with /p:AquaNet=net10.0.
+    One target framework: .NET 10 (LTS). It's fixed rather than chosen from the installed SDK, because the
+    packages.lock.json files are for this framework and the locked restore (CI, release, scripts/build.ps1) fails
+    for any other. global.json picks the SDK; changing framework means regenerating the lock files
+    (dotnet restore -force-evaluate) and the release's vpk framework in one commit.
   -->
   <PropertyGroup>
-    <AquaNet Condition="'$(AquaNet)' == '' and $([MSBuild]::VersionGreaterThanOrEquals('$(MSBuildVersion)', '18.0'))">net10.0</AquaNet>
-    <AquaNet Condition="'$(AquaNet)' == ''">net9.0</AquaNet>
+    <AquaNet>net10.0</AquaNet>
     <AquaWindowsTfm>$(AquaNet)-windows10.0.19041.0</AquaWindowsTfm>
   </PropertyGroup>
 

@@ -82,7 +82,8 @@ All AI runs on your PC.
 
 ## Why it's light
 
-Native WPF on .NET — no Chromium, no Node, no local web server. One runtime dependency (SQLite).
+Native WPF on .NET 10 — no Chromium, no Node, no local web server. Three runtime dependencies: SQLite, Windows'
+offline speech recognizer (for dictation) and Velopack (Setup and updates).
 The dashboard and quick panel are created on first use and hidden (not destroyed) when you close them, so
 reopening is instant and memory can't grow with every open and close; when nothing is on screen the idle
 trim hands the working set back to Windows. Agents batch their requests, use conditional downloads and pause
@@ -102,7 +103,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SEC
 ## Requirements
 
 - Windows 10 19041+ (Windows 11 22H2+ for Mica/Acrylic)
-- .NET 9 SDK (builds on .NET 10 automatically when installed — recommended, it's the LTS)
+- The .NET 10 Desktop Runtime (Setup installs it if it's missing); to build from source, the .NET 10 SDK
+  (`global.json` picks it)
 - Optional but recommended: [Ollama](https://ollama.com) with a model, e.g.
   ```
   ollama pull qwen3.5:9b
@@ -113,19 +115,21 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SEC
 ## Install
 
 Download `AquaHub.App-win-Setup.exe` from the repository's **Releases** page and run it: it installs for your
-Windows account only, without administrator rights, and adds Start menu and desktop shortcuts (it also offers the
-.NET 9 Desktop Runtime if it's missing). The installer isn't code-signed, so Windows SmartScreen may say it
-"protected your PC": choose *More info* → *Run anyway*.
+Windows account only, without administrator rights, and adds Start menu and desktop shortcuts. If the .NET 10
+Desktop Runtime is missing, Setup installs it first, and Windows asks you to approve that one step. The installer
+isn't code-signed, so Windows SmartScreen may say it "protected your PC": choose *More info* → *Run anyway*.
 
-Installed copies keep themselves up to date. About once a day Aqua Hub checks the releases and, when there's a
-new version, says so; Settings › About shows what's new, *Download* fetches it, and *Restart now* installs it (or
-it installs itself the next time Aqua Hub starts). Your settings and history stay where they are, in
+Installed copies tell you about new versions and update when you say so. About once a day Aqua Hub checks the
+releases and, when there's a new version, says so (again after ten days or more if it's still not installed);
+Settings › About shows what's new, *Download* fetches it, and *Restart now* installs it (or it installs itself the
+next time Aqua Hub starts). Aqua Hub 1.0.0 ran on .NET 9; later versions run on .NET 10, so the first update to one
+of them installs the .NET 10 Desktop Runtime first if it's missing (with the same approval prompt). Your settings and history stay where they are, in
 `%LOCALAPPDATA%\AquaHub`. To uninstall, use Windows Settings › Apps.
 
 ## Build & run
 
 ```powershell
-./scripts/build.ps1            # restore (locked), build, run unit tests
+./scripts/build.ps1            # restore (locked), build, unit tests, package audit (stops at the first failure)
 ./scripts/publish.ps1          # framework-dependent Release build → ./publish/AquaHub.exe
 ./publish/AquaHub.exe
 ```
@@ -164,9 +168,10 @@ AquaHub.exe --e2e --data-dir p           dry-run sandbox for UI tests: side effe
 
 ### Releasing
 
-Push a version tag, and `.github/workflows/release.yml` builds, tests, packages the app with
-[Velopack](https://velopack.io) (Setup, a portable zip, and full and delta update packages) and publishes the
-GitHub release that installed copies update from. The repository has to be public for that.
+Push a version tag on a commit that's on `main`, and `.github/workflows/release.yml` builds, tests, packages the
+app with [Velopack](https://velopack.io) (Setup, a portable zip, the full update package and, from the second
+release on, a delta from the previous one) and publishes the GitHub release that installed copies update from. The
+repository has to be public for that.
 
 ```powershell
 git tag v1.1.0
@@ -192,7 +197,7 @@ Not supported by design: X/Twitter, Facebook, Instagram (no public feeds). Any R
 ## Tests
 
 ```powershell
-dotnet test tests/AquaHub.Tests                      # 538 unit & behaviour tests (parsers, security, analysis, AI plumbing,
+dotnet test tests/AquaHub.Tests                      # 550+ unit & behaviour tests (parsers, security, analysis, AI plumbing,
                                                      # settings merge, notification policy, scheduling, fact checks,
                                                      # clustering and fact-check regressions on real data, locale
                                                      # packs, brief sections, offline answers, Ollama policy, Ask:
@@ -208,7 +213,8 @@ dotnet test tests/AquaHub.Tests                      # 538 unit & behaviour test
 $env:AQUAHUB_LIVE=1; dotnet test tests/AquaHub.Tests # + 23 live runs against real sources and Ollama (set
                                                      # AQUAHUB_ASK_PROFILE to a profile for the Ask scenarios, and
                                                      # AQUAHUB_WHISPER to a profile's whisper folder for Whisper)
-./scripts/e2e.ps1                                    # UI Automation end-to-end suite: drives every page, button and
+powershell -ExecutionPolicy Bypass -File scripts/e2e.ps1
+                                                     # UI Automation end-to-end suite: drives every page, button and
                                                      # window of the real app in a sandboxed dry-run profile
 ```
 
@@ -216,7 +222,8 @@ The end-to-end suite takes over the mouse and keyboard for 30–60 minutes, so q
 leave the PC alone while it runs. `scripts/e2e.ps1` builds a separate copy of the app, and on its first run opens it
 on an empty test profile for you to finish onboarding (that becomes the warm profile every test copies). Its build,
 profiles and results (`run.log`, screenshots, findings) live in `%LOCALAPPDATA%\AquaHub.E2E`. `-Filter A11` runs one
-class, `-Setup` redoes the warm profile, and `-NoBuild` reuses the last build.
+class, `-Setup` redoes the warm profile, and `-NoBuild` reuses the last build. CI compiles the suite on every push
+but doesn't run it: it needs a desktop session, the warm profile and a local model.
 
 ## Project status
 

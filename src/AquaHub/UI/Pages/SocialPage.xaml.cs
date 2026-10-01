@@ -10,7 +10,11 @@ using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Pages;
 
-public sealed record TopicVM(string Title, string Summary, string Sentiment, Brush SentimentBrush, double HeatValue, List<PostVM> Posts);
+public sealed record TopicVM(string Title, string Summary, string Sentiment, Brush SentimentBrush, double HeatValue, List<PostVM> Posts)
+{
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => Title;
+}
 
 public sealed class SocialVM : ObservableObject
 {

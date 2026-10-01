@@ -129,10 +129,25 @@ public class AlertReadTests
         var alert = UpdatePolicy.Available("1.2.0", 1, DateTimeOffset.Now);
         Assert.True(t.Ctx.RaiseAlert(alert, alert.Id));
         Assert.False(t.Ctx.RaiseAlert(alert, alert.Id));
-        // Even after the bell was cleared, the same version isn't announced again.
+        // Clearing the bell doesn't bring it back while the key is remembered (keys expire after 10 days, so a
+        // version that's still not installed is announced again after that).
         t.Ctx.State.ClearAlerts();
         Assert.False(t.Ctx.RaiseAlert(alert, alert.Id));
         Assert.Single(t.Platform.Delivered);
+    }
+
+    [Fact]
+    public void AKeyIsOnlyUsedUpWhenItsAlertIsStored()
+    {
+        using var t = new TestContext();
+        var alert = UpdatePolicy.Available("1.2.0", 1, DateTimeOffset.Now);
+        Assert.True(t.Ctx.RaiseAlert(alert));
+        // The same alert again under a new key isn't stored (it's already there), so the key stays unused.
+        Assert.False(t.Ctx.RaiseAlert(alert, "update-reminder:1.2.0"));
+        Assert.False(t.Ctx.Db.HasSeen("update-reminder:1.2.0"));
+        t.Ctx.State.ClearAlerts();
+        Assert.True(t.Ctx.RaiseAlert(alert, "update-reminder:1.2.0"));
+        Assert.True(t.Ctx.Db.HasSeen("update-reminder:1.2.0"));
     }
 }
 
@@ -172,6 +187,36 @@ public class ContextWindowTests
         Assert.Equal(98304, AskAgent.ContextFor(new string('x', 250_000), question, s));
         Assert.Equal(131072, AskAgent.ContextFor(new string('x', 320_000), question, s));
         Assert.Equal(131072, AskAgent.ContextFor(new string('x', 900_000), question, s));
+    }
+
+    [Fact]
+    public void AutomaticStopsAt64KUnlessTheGraphicsCardHas24GB()
+    {
+        Assert.Equal(65536, AskAgent.AutomaticLimit(0));   // unknown card
+        Assert.Equal(65536, AskAgent.AutomaticLimit(12));
+        Assert.Equal(131072, AskAgent.AutomaticLimit(24));
+        var s = new HubSettings();
+        var question = new List<LlmMessage> { new("user", "hi") };
+        Assert.Equal(65536, AskAgent.ContextFor(new string('x', 320_000), question, s, limit: 65536));
+        Assert.Equal(49152, AskAgent.ContextFor(new string('x', 120_000), question, s, limit: 65536));
+    }
+
+    [Fact]
+    public void PastTheLimitAutomaticTrimsInsteadOfOverflowing()
+    {
+        var s = new HubSettings();
+        var messages = new List<LlmMessage> { new("user", new string('a', 50_000)), new("assistant", new string('b', 50_000)), new("user", "and now?") };
+        var (window, dropped, context) = AskAgent.FitToWindow("instructions", new string('c', 400_000), messages, s, 1800, automaticLimit: 65536);
+        Assert.Equal(65536, window);
+        Assert.Equal(2, dropped);   // the oldest messages go first…
+        Assert.Contains("left out to fit the context window", context);   // …then the end of the material
+        Assert.True(("instructions".Length + context.Length + "and now?".Length) / 3.2 + 1800 <= 65536 * 0.92);
+
+        // Within the limit nothing is cut.
+        var (smallWindow, none, whole) = AskAgent.FitToWindow("instructions", new string('c', 100_000), new List<LlmMessage> { new("user", "hi") }, s, 1800, automaticLimit: 65536);
+        Assert.Equal(49152, smallWindow);
+        Assert.Equal(0, none);
+        Assert.Equal(100_000, whole.Length);
     }
 
     [Fact]

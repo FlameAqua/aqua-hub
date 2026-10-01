@@ -20,7 +20,11 @@ using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Pages;
 
-public sealed record SectionVM(string Id, string Name, string Icon);
+public sealed record SectionVM(string Id, string Name, string Icon)
+{
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => Name;
+}
 
 public partial class SettingsPage : UserControl, IPage
 {
@@ -200,7 +204,7 @@ public partial class SettingsPage : UserControl, IPage
         AccentCombo.SelectedValue = accent is "aqua" or "system" ? accent : "custom";
         AccentHex.Visibility = accent.StartsWith('#') ? Visibility.Visible : Visibility.Collapsed;
         AccentHex.Text = accent.StartsWith('#') ? accent : "";
-        CityCurrent.Text = $"Currently {_s.Location.City}, {_s.Location.Region} ({_s.Location.Latitude:0.###}, {_s.Location.Longitude:0.###})";
+        CityCurrent.Text = CurrentPlace();
         FillModels();
         ShowHotkeyErrors();
         FinnhubKey.Password = Hub.Core.Secrets.Get(SecretKeys.FinnhubApiKey) ?? "";
@@ -340,29 +344,49 @@ public partial class SettingsPage : UserControl, IPage
         catch (OperationCanceledException) { }
     }
 
+    private string CurrentPlace() => _s.Location.IsSet
+        ? string.Create(CultureInfo.InvariantCulture, $"Currently {_s.Location.Label} ({_s.Location.Latitude:0.###}, {_s.Location.Longitude:0.###})")
+        : "Not set yet: there's no weather or local news until you choose a place.";
+
     private void OnPickCity(object sender, MouseButtonEventArgs e)
     {
         if (CityResults.SelectedItem is not GeoPlace p) return;
-        var previousCountry = _s.Location.Country;
-        _s.Location.City = p.Name;
-        _s.Location.Region = string.IsNullOrWhiteSpace(p.Country) ? p.Region : p.Country;
-        _s.Location.Country = p.CountryCode.ToUpperInvariant();
-        _s.Location.Latitude = p.Latitude;
-        _s.Location.Longitude = p.Longitude;
-        if (!string.IsNullOrEmpty(p.Timezone)) _s.Location.Timezone = p.Timezone;
-        if (!_s.Location.LocalKeywords.Contains(p.Name)) _s.Location.LocalKeywords.Add(p.Name);
         CityPopup.IsOpen = false;
         CitySearch.Text = "";
-        var switched = LocalePacks.Apply(_s, previousCountry);
-        Save();
-        if (switched.Length > 0)
+        ChoosePlace(p, located: false);
+    }
+
+    private async void OnLocate(object sender, RoutedEventArgs e)
+    {
+        LocateButton.IsEnabled = false;
+        LocationSettingsLink.Visibility = Visibility.Collapsed;
+        CityCurrent.Text = "Asking Windows where this PC is…";
+        try
         {
-            // Local sources, subreddits, holidays and the index changed too: show them.
-            var offset = Scroller.VerticalOffset;
-            Load();
-            Scroller.ScrollToVerticalOffset(offset);
+            var outcome = await WindowsLocation.FindTownAsync(Hub.Core.Http, CancellationToken.None);
+            if (outcome.Place is { } p)
+            {
+                ChoosePlace(p, located: true);
+                return;
+            }
+            CityCurrent.Text = outcome.Problem + (_s.Location.IsSet ? " " + CurrentPlace() + "." : "");
+            LocationSettingsLink.Visibility = outcome.LocationOff ? Visibility.Visible : Visibility.Collapsed;
         }
-        CityCurrent.Text = switched.Length > 0 ? $"Currently {p}. {switched}" : $"Currently {p}";
+        finally { LocateButton.IsEnabled = true; }
+    }
+
+    private void OnLocationSettings(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl(WindowsLocation.SettingsUri, allowAppProtocols: true);
+
+    private void ChoosePlace(GeoPlace p, bool located)
+    {
+        var switched = LocalePacks.ChoosePlace(_s, p);
+        Save();
+        // Local keywords always change; with a new country, local sources, subreddits, holidays and the index too.
+        var offset = Scroller.VerticalOffset;
+        Load();
+        Scroller.ScrollToVerticalOffset(offset);
+        LocationSettingsLink.Visibility = Visibility.Collapsed;
+        CityCurrent.Text = $"Currently {p}." + (switched.Length > 0 ? " " + switched : "") + (located ? " " + WeatherSource.PlaceAttribution + "." : "");
         Hub.Core.Agents.RunNow("weather");
         Hub.Core.Agents.RunNow("news-scout");
         Hub.Core.Agents.RunNow("social-scout");
@@ -683,9 +707,13 @@ public partial class SettingsPage : UserControl, IPage
         DeepModelCombo.Items.Add(new ComboBoxItem { Content = "Same as main model", Tag = "" });
         foreach (var m in installed) DeepModelCombo.Items.Add(new ComboBoxItem { Content = m, Tag = m });
         DeepModelCombo.SelectedItem = DeepModelCombo.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == _s.Ai.DeepModel) ?? DeepModelCombo.Items[0];
-        var ai = Hub.State.Ai;
-        AiTest.Text = ai is null ? "" : ai.Available ? $"Connected · {ai.Models.Count} models · using {ai.ActiveModel}" : ai.Error ?? "Not connected";
+        AiTest.Text = AiStatus(Hub.State.Ai);
     }
+
+    /// <summary>"Connected to Ollama 0.12.3 · 3 models · using qwen3.5:9b", or why not — for the Connection row.</summary>
+    private static string AiStatus(Core.Ai.LlmHealth? h) => h is null ? "" : !h.Available ? h.Error ?? "Not connected"
+        : $"Connected to {(h.Provider == "ollama" ? "Ollama" : "an OpenAI-compatible server")}{(string.IsNullOrEmpty(h.Version) ? "" : " " + h.Version)}"
+          + $" · {Plural.Of(h.Models.Count, "model")} · using {h.ActiveModel}";
 
     private void OnModelChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -704,10 +732,11 @@ public partial class SettingsPage : UserControl, IPage
         Save();
         AiTest.Text = "Testing…";
         var h = await Hub.Core.Llm.CheckAsync();
-        AiTest.Text = h.Available ? $"Connected to {h.Provider} {h.Version} · {h.Models.Count} models · using {h.ActiveModel}" : h.Error ?? "Not connected";
         _loading = true;
         FillModels();
         _loading = false;
+        // After FillModels, which shows the last known state: this is the answer to the button.
+        AiTest.Text = AiStatus(h);
     }
 
     // ───────────── Apps & scenes ─────────────
@@ -726,13 +755,19 @@ public partial class SettingsPage : UserControl, IPage
         Save();
     }
 
+    /// <summary>Scenes whose editor is open (by id): rebuilding the list after an edit keeps them open.</summary>
+    private readonly HashSet<string> _openScenes = new();
+
     private void BuildScenes(bool expandLast = false)
     {
         ScenesHost.Children.Clear();
         for (var i = 0; i < _s.Scenes.Count; i++)
         {
             var scene = _s.Scenes[i];
-            var exp = new Expander { IsExpanded = expandLast && i == _s.Scenes.Count - 1, Margin = new Thickness(0, 0, 0, 6) };
+            if (expandLast && i == _s.Scenes.Count - 1) _openScenes.Add(scene.Id);
+            var exp = new Expander { IsExpanded = _openScenes.Contains(scene.Id), Margin = new Thickness(0, 0, 0, 6) };
+            exp.Expanded += (_, _) => _openScenes.Add(scene.Id);
+            exp.Collapsed += (_, _) => _openScenes.Remove(scene.Id);
             exp.Header = new TextBlock { Text = $"{scene.Name}  ·  {scene.Steps.Count} steps", FontSize = 13.5 };
             var body = new StackPanel { Margin = new Thickness(20, 6, 0, 8) };
 

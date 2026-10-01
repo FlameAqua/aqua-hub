@@ -34,6 +34,16 @@ public sealed class A12_OnboardingTests : E2ETestBase
             Ui.WaitFind(Main, Ui.Text("Welcome to Aqua Hub"), "still on welcome");
         });
         Check("Onboarding", "Get started → step 2 (location)", () => GoNext("Where are you?"));
+        Check("Onboarding", "a new profile has no place until one is chosen", () =>
+        {
+            var chosen = Ui.NameOf(Ui.WaitFind(Main, Ui.Id("CityChosen"), "chosen city"));
+            Expect(chosen.StartsWith("No place yet", StringComparison.Ordinal), $"a new profile already has a place: '{chosen}'");
+        });
+        Check("Onboarding", "'Use my location' (simulated in dry runs) → a town is chosen", () =>
+        {
+            ExpectJournal("locate", () => Ui.Invoke(Ui.WaitFind(Main, Ui.Id("use-my-location"), "Use my location button")));
+            Wait.For(() => Ui.NameOf(Ui.WaitFind(Main, Ui.Id("CityChosen"), "chosen city")).StartsWith("Cork", StringComparison.Ordinal), "CityChosen = Cork…");
+        });
 
         AutomationElement? Result(string city) =>
             Ui.FindAll(Ui.Find(Main, Ui.Id("CityResults")) ?? Main, Ui.Type(ControlType.ListItem)).FirstOrDefault(li => Ui.NameOf(li).StartsWith(city, StringComparison.Ordinal));
@@ -68,12 +78,13 @@ public sealed class A12_OnboardingTests : E2ETestBase
             if (Ui.ToggleStateOf(ai) == ToggleState.On) Ui.Toggle(ai);
             Expect(Ui.ToggleStateOf(Ui.WaitFind(Main, Ui.And(Ui.Type(ControlType.Button), Ui.Name("sport")), "sport")) == ToggleState.On, "sport not on");
         });
-        Check("Onboarding", "subreddit chip editor adds 'galway'", () =>
+        Check("Onboarding", "the chosen place brings its communities; the chip editor adds 'connacht'", () =>
         {
+            Ui.WaitFind(Main, Ui.Button("Remove Galway"), "the place's own subreddit (r/Galway)");
             var box = Ui.WaitFind(Ui.WaitFind(Main, Ui.Id("Subs"), "subs editor"), Ui.Type(ControlType.Edit), "subs input");
-            Ui.SetValue(box, "r/galway");
+            Ui.SetValue(box, "r/connacht");
             FocusAndPress(Main, box, VK.Enter);
-            Ui.WaitFind(Main, Ui.Button("Remove galway"), "galway chip");
+            Ui.WaitFind(Main, Ui.Button("Remove connacht"), "connacht chip");
         });
         Check("Onboarding", "watch chip editor adds 'TSLA'", () =>
         {
@@ -112,7 +123,9 @@ public sealed class A12_OnboardingTests : E2ETestBase
             Expect(s.GetString("location.city") == "Galway", "city " + s.GetString("location.city"));
             Expect(s.GetString("location.units") == "imperial", "units " + s.GetString("location.units"));
             Expect(s.GetStrings("news.interests").Contains("sport") && !s.GetStrings("news.interests").Contains("AI"), "interests " + string.Join(",", s.GetStrings("news.interests")));
-            Expect(s.GetStrings("social.subreddits").Contains("galway"), "subreddits " + string.Join(",", s.GetStrings("social.subreddits")));
+            var subs = s.GetStrings("social.subreddits");
+            Expect(subs.Contains("connacht") && subs.Contains("Galway") && subs.Contains("ireland"), "subreddits " + string.Join(",", subs));
+            Expect(s.GetString("location.country") == "IE" && s.GetString("location.timezone") == "Europe/Dublin", "the place's country and time zone");
             Expect(s.Symbols("markets.watchlist").Contains("TSLA"), "watchlist " + string.Join(",", s.Symbols("markets.watchlist")));
             Expect(s.GetBool("ai.pauseWhenFullscreen") == false, "pauseWhenFullscreen");
             Expect(s.GetBool("general.launchAtStartup") == true, "launchAtStartup");

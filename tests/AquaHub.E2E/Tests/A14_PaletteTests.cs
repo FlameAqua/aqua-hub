@@ -119,18 +119,18 @@ public sealed class A14_PaletteTests : E2ETestBase
             var p = Type("Focus");
             Wait.For(() => ResultTitles(p).FirstOrDefault() == "Focus", "Focus scene first");
             var mark = App.Journal.Mark();
+            var logMark = App.Log.Mark();
             Keys(p, VK.Enter);
             App.Journal.WaitFor(mark, "volume", d => d == "25");
             App.Journal.WaitFor(mark, "launch", d => d == "vscode");
             App.Settings.WaitForBool("notifications.doNotDisturb", true);
+            // The (hidden) palette stays alive until the scene finishes; let it go before opening the next one.
+            App.Log.WaitForLine(logMark, l => l.Contains("Ran scene Focus"), "scene finished", TimeSpan.FromSeconds(20));
         });
         Check("Palette", "'Do not disturb' toggle item → DND off again", () =>
         {
-            var p = Type("notifications");
-            Wait.For(() => ResultTitles(p).Contains("Turn notifications back on"), "'Turn notifications back on'");
-            var list = Ui.WaitFind(p, Ui.Id("Results"), "results");
-            var item = Ui.FindAll(list, Ui.Type(ControlType.ListItem), TreeScope.Children).First(li => Ui.Texts(li).FirstOrDefault() == "Turn notifications back on");
-            Ui.Select(item);
+            var p = Type("turn notifications back on");
+            Wait.For(() => ResultTitles(p).FirstOrDefault() == "Turn notifications back on", "'Turn notifications back on' first");
             Keys(p, VK.Enter);
             App.Settings.WaitForBool("notifications.doNotDisturb", false);
         });
@@ -169,7 +169,7 @@ public sealed class A14_PaletteTests : E2ETestBase
             Ui.Invoke(Ui.WaitButtonWithText(p, "Continue in Ask"));
             Wait.For(() => App.TryPalette() is null, "palette closed");
             ExpectPage("ask");
-            Wait.For(() => Ui.Texts(PageRoot("ask")).Contains(q), "question in the Ask chat");
+            Wait.For(() => Ui.AllTexts(PageRoot("ask")).Contains(q), "question in the Ask chat");
             if (Ui.Find(PageRoot("ask"), Ui.Id("StopButton")) is { } stop) Ui.Invoke(stop);
         });
     });

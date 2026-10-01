@@ -95,6 +95,7 @@ public partial class AskPage : UserControl, IPage
         Hub.Core.Settings.Changed -= OnSettings;
         Hub.Core.Settings.Changed += OnSettings;
         OnBusyChanged();
+        FillModelPicker();
         SyncModes();
         UpdateContext();
         UpdateRetention();
@@ -199,7 +200,7 @@ public partial class AskPage : UserControl, IPage
 
     private void OnState(string topic)
     {
-        if (topic == Core.Agents.Topics.Ai) Hub.OnUi(UpdateSubtitle);
+        if (topic == Core.Agents.Topics.Ai) Hub.OnUi(() => { FillModelPicker(); UpdateSubtitle(); });
     }
 
     private void OnSettings(Core.Settings.HubSettings s) => Hub.OnUi(() => { SyncModes(); UpdateRetention(); UpdateContext(); });
@@ -211,7 +212,7 @@ public partial class AskPage : UserControl, IPage
         TurnOnAi.Visibility = ai?.Available != true && !Hub.Core.Llm.UserPaused && OllamaManager.IsLocalOllama && OllamaManager.Installed && !Hub.Ollama.Transitioning
             ? Visibility.Visible : Visibility.Collapsed;
         Subtitle.Text = Hub.Core.Llm.UserPaused ? "AI is paused — answers list what your agents collected, with sources. Resume AI from the tray."
-            : ai?.Available == true ? $"Private answers from your agents, the web and your PC when you allow it · {ai.ActiveModel} on this PC"
+            : ai?.Available == true ? $"Private answers from your agents, the web and your PC when you allow it · {Session.Model ?? ai.ActiveModel} on this PC"
             : Hub.Ollama.UserTurnedOff ? "You turned the local model off — answers list what your agents collected, with sources."
             : "The local model is offline — answers list what your agents collected, with sources. Start Ollama for written answers.";
     }
@@ -744,6 +745,64 @@ public partial class AskPage : UserControl, IPage
         }
     }
 
+    // ───────────────────────────── Model ─────────────────────────────
+
+    private bool _fillingModels;
+    /// <summary>The picked model can't reason step by step (no thinking mode, e.g. Gemma 3), so Think is greyed out.</summary>
+    private bool _cannotThink;
+
+    /// <summary>Embedding, OCR and similar models can't hold a conversation.</summary>
+    [System.Text.RegularExpressions.GeneratedRegex("embed|ocr|rerank", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex NotForChat();
+
+    /// <summary>The installed models that can chat, with Ask's one selected (shown once the model server has listed them).</summary>
+    private void FillModelPicker()
+    {
+        var ai = Hub.State.Ai;
+        var models = ai?.Models.Select(m => m.Name).Where(n => !NotForChat().IsMatch(n)).ToList() ?? new List<string>();
+        ModelPicker.Visibility = models.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (models.Count == 0) return;
+        var chosen = models.FirstOrDefault(m => m.Equals(Hub.S.Ask.Model, StringComparison.OrdinalIgnoreCase))
+                     ?? models.FirstOrDefault(m => m.Equals(ai!.ActiveModel, StringComparison.OrdinalIgnoreCase)) ?? models[0];
+        _fillingModels = true;
+        if (ModelPicker.ItemsSource is not IEnumerable<string> shown || !shown.SequenceEqual(models)) ModelPicker.ItemsSource = models;
+        ModelPicker.SelectedItem = chosen;
+        _fillingModels = false;
+        if (Session.Model != chosen) UseModel(chosen);
+    }
+
+    private void OnModelPicked(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingModels || ModelPicker.SelectedItem is not string model || model == Session.Model) return;
+        UseModel(model);
+        Hub.Core.Settings.Update(s => s.Ask.Model = model);
+    }
+
+    /// <summary>Switches Ask to a model and brings back the Think and Research switches you last used with it.</summary>
+    private void UseModel(string model)
+    {
+        Session.Model = model;
+        var modes = Hub.S.Ask.ModesFor(model);
+        Session.Think = modes.Think;
+        Session.Research = modes.Research && Hub.S.Ask.Web;
+        if (Session.Research) Session.Web = true;
+        _cannotThink = false;
+        SyncModes();
+        UpdateSubtitle();
+        _ = CheckThinkingAsync(model);
+    }
+
+    private async Task CheckThinkingAsync(string model)
+    {
+        bool? canThink;
+        try { canThink = await Hub.Core.Llm.CanThinkAsync(model); }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or OperationCanceledException) { canThink = null; }
+        if (Session.Model != model) return;
+        _cannotThink = canThink == false;
+        if (_cannotThink) Session.Think = false;
+        SyncModes();
+    }
+
     // ───────────────────────────── Switches ─────────────────────────────
 
     private void SyncModes()
@@ -756,7 +815,11 @@ public partial class AskPage : UserControl, IPage
         if (!s.Computer) Session.Computer = false;
         WebToggle.IsChecked = Session.Web || Session.Research;
         ResearchToggle.IsChecked = Session.Research;
-        ThinkToggle.IsChecked = Session.Think;
+        ThinkToggle.IsChecked = Session.Think && !_cannotThink;
+        ThinkToggle.IsEnabled = !_cannotThink;
+        ThinkToggle.ToolTip = _cannotThink
+            ? $"{Session.Model} can't reason step by step (it has no thinking mode), so Think is off with it. Pick another model to use Think."
+            : "Think: the model reasons step by step before answering — slower, better for tricky questions";
         ComputerToggle.IsChecked = Session.Computer;
         WebToggle.ToolTip = s.Web ? "Web: Aqua may search the internet and read pages when your feeds don't have the answer"
                                   : "The web is turned off for Ask in Settings › Ask Aqua";
@@ -774,6 +837,12 @@ public partial class AskPage : UserControl, IPage
         Session.Research = ResearchToggle.IsChecked == true;
         Session.Think = ThinkToggle.IsChecked == true;
         Session.Computer = ComputerToggle.IsChecked == true;
+        // Think and Research belong to the model: switching back to it brings them back.
+        if (Session.Model is { } model && (sender == ThinkToggle || sender == ResearchToggle || sender == WebToggle))
+        {
+            var (think, research) = (Session.Think, Session.Research);
+            Hub.Core.Settings.Update(s => s.Ask.RememberModes(model, think, research));
+        }
         UpdateModeHint();
     }
 

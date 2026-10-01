@@ -70,8 +70,13 @@ public sealed class A13_FlyoutTests : E2ETestBase
                 ExpectFlyoutGoneAndPage("markets");
             });
         }
-        var headlines = Ui.FindAll(Ui.WaitFind(Open(), Ui.Id("Headlines"), "headlines"), Ui.Type(ControlType.Button)).Select(Ui.NameOf).ToList();
-        Check("Quick panel", "3 headlines listed", () => Expect(headlines.Count >= 1, "no headlines"));
+        var headlines = new List<string>();
+        Check("Quick panel", "headlines listed", () =>
+        {
+            // A just-opened panel fills its lists a moment later.
+            headlines = Wait.For(() => Ui.FindAll(Ui.WaitFind(Open(), Ui.Id("Headlines"), "headlines"), Ui.Type(ControlType.Button)).Select(Ui.NameOf).ToList() is { Count: > 0 } l ? l : null,
+                "headlines", TimeSpan.FromSeconds(15));
+        });
         foreach (var h in headlines)
             Check("Quick panel", $"headline '{(h.Length > 40 ? h[..40] + "…" : h)}' → journal open-url", () =>
                 ExpectJournal("open-url", () => Ui.Invoke(Ui.WaitFind(Ui.WaitFind(Open(), Ui.Id("Headlines"), "headlines"), Ui.Button(h), h)), d => d.StartsWith("http", StringComparison.Ordinal)));
@@ -127,7 +132,8 @@ public sealed class A13_FlyoutTests : E2ETestBase
             var mark = App.Journal.Mark();
             Command("pause");
             App.Journal.WaitForAny(mark, MediaActions);
-            Wait.For(() => App.TryFlyout() is { } f && Ui.Find(f, Ui.Id("CommandResult")) is { } r && Ui.NameOf(r) is "Paused", "result 'Paused'");
+            // With nothing playing on the test PC the step is skipped (pressing play/pause would start playback instead).
+            Wait.For(() => App.TryFlyout() is { } f && Ui.Find(f, Ui.Id("CommandResult")) is { } r && Ui.NameOf(r) is "Paused" or "Nothing is playing", "result 'Paused'");
         });
         Check("Quick panel command", "'go to markets' + Enter → Markets page", () =>
         {
@@ -137,10 +143,10 @@ public sealed class A13_FlyoutTests : E2ETestBase
         });
         Check("Quick panel command", "a question + Enter → Ask page with the question", () =>
         {
-            const string q = "what is happening in Dublin today?";
+            const string q = "what is happening near me today?";
             Command(q);
             ExpectFlyoutGoneAndPage("ask");
-            Wait.For(() => Ui.Texts(PageRoot("ask")).Any(t => t.Equals(q, StringComparison.OrdinalIgnoreCase)), "question in the chat");
+            Wait.For(() => Ui.AllTexts(PageRoot("ask")).Any(t => t.Equals(q, StringComparison.OrdinalIgnoreCase)), "question in the chat");
             if (Ui.Find(PageRoot("ask"), Ui.Id("StopButton")) is { } stop) Ui.Invoke(stop);
         });
     });

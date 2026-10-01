@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -139,6 +140,31 @@ public sealed class Shimmer : Border
         if (SystemParameters.ClientAreaAnimation)
             shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(-1, 1, TimeSpan.FromSeconds(1.4)) { RepeatBehavior = RepeatBehavior.Forever });
     }
+}
+
+/// <summary>
+/// Borders and panels have no automation peer, so their AutomationProperties.Name/AutomationId are dropped and
+/// their contents look like loose controls. <see cref="GroupBorder"/> and <see cref="GroupGrid"/> are seen as a
+/// named group (a popup, a panel, a banner) whose children are announced as part of it.
+/// </summary>
+internal sealed class GroupPeer(FrameworkElement owner) : FrameworkElementAutomationPeer(owner)
+{
+    protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Group;
+    protected override string GetClassNameCore() => Owner.GetType().Name;
+    // The base keeps hidden (collapsed) groups out of the control view; named, visible groups are content too.
+    protected override bool IsContentElementCore() => base.IsControlElementCore() && !string.IsNullOrEmpty(GetNameCore());
+}
+
+/// <summary>A Border that screen readers and UI Automation see as a group (see <see cref="GroupPeer"/>).</summary>
+public sealed class GroupBorder : Border
+{
+    protected override AutomationPeer OnCreateAutomationPeer() => new GroupPeer(this);
+}
+
+/// <summary>A Grid that screen readers and UI Automation see as a group (see <see cref="GroupPeer"/>).</summary>
+public sealed class GroupGrid : Grid
+{
+    protected override AutomationPeer OnCreateAutomationPeer() => new GroupPeer(this);
 }
 
 /// <summary>Illustrated weather glyph for WMO weather codes (day/night aware).</summary>

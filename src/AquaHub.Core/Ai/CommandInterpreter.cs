@@ -50,7 +50,8 @@ public sealed partial class CommandInterpreter
     private static partial Regex TickerRx();
     [GeneratedRegex(@"^play\s+(.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex PlayRx();
-    [GeneratedRegex(@"^(?:what|who|why|how|when|where|which|is|are|was|were|will|should|could|can|do|does|did|summari[sz]e|explain|tell me|give me)\b", RegexOptions.IgnoreCase)]
+    // "could you make it quieter" is a polite request, not a question: without a "?" it goes to the command agent.
+    [GeneratedRegex(@"^(?!(?:can|could|would|will)\s+you\b)(?:what|who|why|how|when|where|which|is|are|was|were|will|should|could|can|do|does|did|summari[sz]e|explain|tell me|give me)\b", RegexOptions.IgnoreCase)]
     private static partial Regex QuestionRx();
     [GeneratedRegex(@"^(?:research|investigate|deep ?dive(?: into)?|dig into)\s+(.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex ResearchRx();

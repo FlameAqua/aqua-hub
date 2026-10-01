@@ -102,7 +102,9 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock x:Name="SyncText" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,6,0" Background="Transparent"
                                AutomationProperties.AutomationId="sync-status"/>
-                    <Button x:Name="RefreshButton" Style="{StaticResource Btn.Icon}" WindowChrome.IsHitTestVisibleInChrome="True" Click="OnRefreshClick" ToolTip="Refresh everything (F5)">
+                    <!-- The tooltip also lists when each area last updated, so the accessible name is fixed here -->
+                    <Button x:Name="RefreshButton" Style="{StaticResource Btn.Icon}" WindowChrome.IsHitTestVisibleInChrome="True" Click="OnRefreshClick" ToolTip="Refresh everything (F5)"
+                            AutomationProperties.Name="Refresh everything" AutomationProperties.AcceleratorKey="F5">
                         <c:Icon Kind="refresh" Width="16" Height="16"/>
                     </Button>
                     <Button x:Name="BellButton" Style="{StaticResource Btn.Icon}" WindowChrome.IsHitTestVisibleInChrome="True" Click="OnBellClick" ToolTip="Alerts" Margin="2,0,0,0">
@@ -129,8 +131,8 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <!-- Offline notice: the hub keeps working from what it already collected -->
-                    <Border x:Name="OfflineBar" Background="{DynamicResource B.WarnSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
-                            AutomationProperties.AutomationId="offline-bar">
+                    <c:GroupBorder x:Name="OfflineBar" Background="{DynamicResource B.WarnSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
+                            AutomationProperties.AutomationId="offline-bar" AutomationProperties.Name="Offline">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
@@ -141,7 +143,7 @@
                             <TextBlock x:Name="OfflineText" Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13"/>
                             <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Padding="12,4" FontSize="12.5" Click="OnRefreshClick" Content="Try again"/>
                         </Grid>
-                    </Border>
+                    </c:GroupBorder>
                     <ContentControl x:Name="PageHost" Grid.Row="1" Focusable="False">
                         <ContentControl.RenderTransform>
                             <TranslateTransform x:Name="PageShift"/>
@@ -156,8 +158,8 @@
         <!-- Local AI: status and the Ollama server on/off switch (click the model status in the sidebar) -->
         <Popup x:Name="AiPopup" PlacementTarget="{Binding ElementName=AiStatus}" Placement="Top" VerticalOffset="-6"
                AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade">
-            <Border Margin="10,16,10,10" Width="320" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="10"
-                    AutomationProperties.AutomationId="ai-popup">
+            <c:GroupBorder Margin="10,16,10,10" Width="320" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="10"
+                    AutomationProperties.AutomationId="ai-popup" AutomationProperties.Name="Local AI">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="22" ShadowDepth="5" Direction="270" Opacity="0.32" Color="Black"/>
                 </Border.Effect>
@@ -171,12 +173,13 @@
                         <Button Style="{StaticResource Btn.Standard}" Margin="8,0,0,0" Content="Settings" Click="OnAiPopupSettings"/>
                     </StackPanel>
                 </StackPanel>
-            </Border>
+            </c:GroupBorder>
         </Popup>
 
         <Popup x:Name="AlertsPopup" PlacementTarget="{Binding ElementName=BellButton}" Placement="Bottom" HorizontalOffset="-330" VerticalOffset="6"
                AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade">
-            <Border Margin="10,0,10,16" Width="400" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="10">
+            <c:GroupBorder Margin="10,0,10,16" Width="400" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="10"
+                           AutomationProperties.AutomationId="alerts-popup" AutomationProperties.Name="Alerts" PreviewKeyDown="OnAlertsKey">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="22" ShadowDepth="5" Direction="270" Opacity="0.32" Color="Black"/>
                 </Border.Effect>
@@ -193,7 +196,7 @@
                         <ItemsControl x:Name="AlertList" ItemTemplate="{StaticResource Tpl.AlertRow}"/>
                     </ScrollViewer>
                 </DockPanel>
-            </Border>
+            </c:GroupBorder>
         </Popup>
 
         <!-- Modal overlay (onboarding / dialogs) -->

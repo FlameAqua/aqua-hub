@@ -17,6 +17,8 @@ public sealed record AskOptions
     public string? SkillId { get; init; }
     /// <summary>Answer the message even if it reads like "remember …" / "forget …" (the chat's "Answer it instead").</summary>
     public bool AsQuestion { get; init; }
+    /// <summary>The model picked in Ask (null: the one set in Settings › AI). Planning, reading and writing all use it.</summary>
+    public string? Model { get; init; }
 
     public bool UsesWeb => Web || Research;
 }

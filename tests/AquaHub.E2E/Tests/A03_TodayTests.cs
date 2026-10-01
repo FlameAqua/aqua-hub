@@ -34,16 +34,11 @@ public sealed class A03_TodayTests : E2ETestBase
         });
     });
 
+    /// <summary>Refreshing everything lives in the title bar now (A02 covers it); the brief keeps its own Regenerate.</summary>
     [Fact]
-    public void T02_RefreshAndRegenerateBrief() => Run(() =>
+    public void T02_RegenerateBrief() => Run(() =>
     {
-        var page = Today();
-        Check("Today", "Refresh button runs collectors", () =>
-        {
-            var mark = App.Log.Mark();
-            Ui.Invoke(Ui.WaitButtonWithText(page, "Refresh"));
-            App.Log.WaitForLine(mark, l => l.Contains("[agents] weather:") || l.Contains("[agents] news-scout:"), "collector run", TimeSpan.FromSeconds(60));
-        });
+        Today();
         Check("Today", "Regenerate ('Write a fresh brief now') runs the Chief of Staff", () =>
         {
             var mark = App.Log.Mark();
@@ -79,12 +74,20 @@ public sealed class A03_TodayTests : E2ETestBase
                         d => d.StartsWith("http", StringComparison.Ordinal)));
                 Check("Today story", "Ask Aqua → Ask page with the question", () =>
                 {
-                    Ui.Invoke(Ui.WaitButtonWithText(Button(PageRoot("today"), title), "Ask Aqua"));
-                    ExpectPage("ask");
-                    var ask = PageRoot("ask");
-                    Wait.For(() => Ui.Texts(ask).Any(t => t.StartsWith("Tell me more about:", StringComparison.Ordinal)), "the story question in the chat");
-                    if (Ui.Find(ask, Ui.Id("StopButton")) is { } stop) Ui.Invoke(stop);
-                    GoTo("today");
+                    try
+                    {
+                        Ui.Invoke(Ui.WaitButtonWithText(Button(PageRoot("today"), title), "Ask Aqua"));
+                        ExpectPage("ask");
+                        var ask = PageRoot("ask");
+                        // Questions are selectable read-only text boxes, so look beyond plain text elements.
+                        Wait.For(() => Ui.AllTexts(ask).Any(t => t.StartsWith("Tell me more about:", StringComparison.Ordinal)), "the story question in the chat");
+                        if (Ui.Find(ask, Ui.Id("StopButton")) is { } stop) Ui.Invoke(stop);
+                    }
+                    finally
+                    {
+                        // The remaining rows are on Today, whatever happened here.
+                        GoTo("today");
+                    }
                 });
             }
             else

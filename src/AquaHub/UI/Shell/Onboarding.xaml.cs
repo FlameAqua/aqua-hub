@@ -31,8 +31,9 @@ public partial class Onboarding : UserControl
         _original = SettingsStore.DeepCopy(_s);
         HotkeyHint.Text = $"{_s.General.HotkeyFlyout} opens the quick panel · {_s.General.HotkeyPalette} asks Aqua anything.";
         Shortcuts.Text = $"{_s.General.HotkeyFlyout}  —  quick panel above the taskbar\n{_s.General.HotkeyPalette}  —  ask or command from anywhere\nCtrl + K  —  command palette inside the app\nCtrl + 1…9  —  jump between pages";
-        CityChosen.Text = $"{_s.Location.City}, {_s.Location.Region}";
+        CityChosen.Text = _s.Location.IsSet ? _s.Location.Label : NoPlace;
         Imperial.IsChecked = _s.Location.Units == "imperial";
+        PlaceCredit.Text = WeatherSource.PlaceAttribution;
 
         foreach (var interest in SuggestedInterests)
         {
@@ -72,7 +73,11 @@ public partial class Onboarding : UserControl
                 Fill = Fmt.Res(i == _step ? "B.Accent" : "B.Track"),
             });
         if (_step == 4) _ = CheckAiAsync();
+        // The place chosen in step 2 brings its country's communities; show them.
+        if (_step == 3) Subs.SetItems(_s.Social.Subreddits);
     }
+
+    private const string NoPlace = "No place yet. Until you choose one there's no weather or local news.";
 
     private async Task CheckAiAsync()
     {
@@ -119,20 +124,42 @@ public partial class Onboarding : UserControl
     private void OnPickCity(object sender, MouseButtonEventArgs e)
     {
         if (CityResults.SelectedItem is not GeoPlace p) return;
-        var previousCountry = _s.Location.Country;
-        _s.Location.City = p.Name;
-        _s.Location.Region = string.IsNullOrWhiteSpace(p.Country) ? p.Region : p.Country;
-        _s.Location.Country = p.CountryCode.ToUpperInvariant();
-        _s.Location.Latitude = p.Latitude;
-        _s.Location.Longitude = p.Longitude;
-        if (!string.IsNullOrEmpty(p.Timezone)) _s.Location.Timezone = p.Timezone;
-        if (!_s.Location.LocalKeywords.Contains(p.Name)) _s.Location.LocalKeywords.Add(p.Name);
-        var switched = LocalePacks.Apply(_s, previousCountry);
-        CityChosen.Text = switched.Length > 0 ? $"{p}\n{switched}" : p.ToString();
-        CityChosen.TextWrapping = TextWrapping.Wrap;
         CityPopup.IsOpen = false;
         City.Text = "";
+        Choose(p, located: false);
     }
+
+    private void Choose(GeoPlace p, bool located)
+    {
+        var switched = LocalePacks.ChoosePlace(_s, p);
+        // The country's units (°F in the US) unless you pick otherwise below.
+        Imperial.IsChecked = _s.Location.Units == "imperial";
+        Metric.IsChecked = Imperial.IsChecked != true;
+        CityChosen.Text = switched.Length > 0 ? $"{p}\n{switched}" : p.ToString();
+        LocationSettingsLink.Visibility = Visibility.Collapsed;
+        PlaceCredit.Visibility = located ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void OnLocate(object sender, RoutedEventArgs e)
+    {
+        LocateButton.IsEnabled = false;
+        LocationSettingsLink.Visibility = Visibility.Collapsed;
+        CityChosen.Text = "Asking Windows where this PC is…";
+        try
+        {
+            var outcome = await WindowsLocation.FindTownAsync(Hub.Core.Http, CancellationToken.None);
+            if (outcome.Place is { } p)
+            {
+                Choose(p, located: true);
+                return;
+            }
+            CityChosen.Text = outcome.Problem + (_s.Location.IsSet ? $"\nStill {_s.Location.Label}." : "");
+            LocationSettingsLink.Visibility = outcome.LocationOff ? Visibility.Visible : Visibility.Collapsed;
+        }
+        finally { LocateButton.IsEnabled = true; }
+    }
+
+    private void OnLocationSettings(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl(WindowsLocation.SettingsUri, allowAppProtocols: true);
 
     private void OnTaskbarSettings(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl("ms-settings:taskbar", allowAppProtocols: true);
 

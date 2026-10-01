@@ -49,8 +49,10 @@ public sealed class HubContext
     /// </summary>
     public bool RaiseAlert(HubAlert alert, string? onceKey = null)
     {
-        if (onceKey is not null && !Db.TryMarkSeen(onceKey)) return false;
+        // The key is recorded only once the alert is stored, so a failed write doesn't swallow the alert for good.
+        if (onceKey is not null && Db.HasSeen(onceKey)) return false;
         if (!Db.AddAlert(alert)) return false;
+        if (onceKey is not null) Db.TryMarkSeen(onceKey);
         State.ReloadAlerts();
         Platform.Notify(alert);
         return true;

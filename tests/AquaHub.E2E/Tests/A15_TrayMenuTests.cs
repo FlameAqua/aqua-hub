@@ -5,11 +5,7 @@ public sealed class A15_TrayMenuTests : E2ETestBase
 {
     public A15_TrayMenuTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }
 
-    private AutomationElement Menu()
-    {
-        App.Command("tray-menu");
-        return Wait.For(() => AppWindows.Menu(Pid, "tray-menu"), "tray menu (#tray-menu)");
-    }
+    private AutomationElement Menu() => TrayMenu();
 
     private void Choose(string item) => Ui.Invoke(MenuItem(Menu(), item));
 

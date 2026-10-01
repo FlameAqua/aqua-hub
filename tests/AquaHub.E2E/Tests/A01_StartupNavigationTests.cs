@@ -29,9 +29,11 @@ public sealed class A01_StartupNavigationTests : E2ETestBase
         Check("Startup", "title bar controls present", () =>
         {
             Ui.WaitFind(Main, Ui.Id("CommandBox"), "command box");
-            Ui.WaitFind(Main, Ui.Button("Refresh everything (F5)"), "refresh");
+            var refresh = Ui.WaitFind(Main, Ui.Id("RefreshButton"), "refresh");
+            // Its tooltip lists each area's freshness; the accessible name must stay short and stable.
+            Expect(Ui.NameOf(refresh) == "Refresh everything", $"refresh button announced as '{Ui.NameOf(refresh)}'");
             Ui.WaitFind(Main, Ui.Id("BellButton"), "bell");
-            Ui.WaitFind(Main, Ui.Id("DndButton"), "dnd");
+            Ui.WaitFind(Main, Ui.Id("dnd-toggle"), "dnd");
             Ui.WaitFind(Main, Ui.Id("AiStatus"), "AI status");
         });
     });

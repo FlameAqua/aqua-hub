@@ -1,0 +1,15 @@
+# Weekly pull requests for newer GitHub Actions (they're pinned to commit SHAs) and NuGet packages (pinned in
+# Directory.Packages.props, locked in packages.lock.json). Review each one like any other change.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      test-packages:
+        patterns: ['xunit*', 'Microsoft.NET.Test.Sdk']

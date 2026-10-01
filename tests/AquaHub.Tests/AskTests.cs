@@ -463,6 +463,10 @@ internal sealed class FakeOllama : IDisposable
     public List<JsonNode> JsonChats { get; } = new();
     public Func<JsonNode, string> Json { get; set; } = _ => "{}";
     public string[] Capabilities { get; set; } = { "completion", "tools", "thinking", "vision" };
+    /// <summary>Installed models (the first is what "auto" picks when none is preferred).</summary>
+    public string[] Models { get; set; } = { "qwen3.5:9b" };
+    /// <summary>Per-model capabilities; null uses <see cref="Capabilities"/> for every model.</summary>
+    public Func<string, string[]>? CapabilitiesFor { get; set; }
 
     public FakeOllama()
     {
@@ -511,9 +515,22 @@ internal sealed class FakeOllama : IDisposable
             while (read < length) read += await reader.ReadAsync(body, read, length - read);
             var path = requestLine.Split(' ')[1];
             string payload;
-            if (path.EndsWith("/api/tags")) payload = """{"models":[{"name":"qwen3.5:9b","size":6594462816,"details":{"family":"qwen35","parameter_size":"9.7B","quantization_level":"Q4_K_M"}}]}""";
+            if (path.EndsWith("/api/tags"))
+                payload = new JsonObject
+                {
+                    ["models"] = new JsonArray(Models.Select(m => (JsonNode)new JsonObject
+                    {
+                        ["name"] = m, ["size"] = 6594462816L,
+                        ["details"] = new JsonObject { ["family"] = m.Split(':')[0], ["parameter_size"] = "9.7B", ["quantization_level"] = "Q4_K_M" },
+                    }).ToArray()),
+                }.ToJsonString();
             else if (path.EndsWith("/api/version")) payload = """{"version":"0.30.5"}""";
-            else if (path.EndsWith("/api/show")) payload = new JsonObject { ["capabilities"] = new JsonArray(Capabilities.Select(c => (JsonNode)c).ToArray()) }.ToJsonString();
+            else if (path.EndsWith("/api/show"))
+            {
+                var model = JsonNode.Parse(new string(body))?["model"]?.GetValue<string>() ?? "";
+                var caps = CapabilitiesFor?.Invoke(model) ?? Capabilities;
+                payload = new JsonObject { ["capabilities"] = new JsonArray(caps.Select(c => (JsonNode)c).ToArray()) }.ToJsonString();
+            }
             else if (path.EndsWith("/api/chat") && JsonNode.Parse(new string(body)) is { } json && json["format"] is not null)
             {
                 lock (JsonChats) JsonChats.Add(json);

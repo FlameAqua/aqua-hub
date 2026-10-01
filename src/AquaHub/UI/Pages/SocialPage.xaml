@@ -76,16 +76,18 @@
                         <WrapPanel x:Name="Platforms" Margin="0,10,0,0"/>
                     </StackPanel>
                     <!-- Nothing to show: say why, and offer the fix -->
-                    <StackPanel x:Name="FeedEmpty" DockPanel.Dock="Top" Margin="18,28,18,24" HorizontalAlignment="Center" MaxWidth="340" Visibility="Collapsed"
-                                AutomationProperties.AutomationId="social-feed-empty">
-                        <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource B.Subtle}" HorizontalAlignment="Center">
-                            <c:Icon x:Name="FeedEmptyIcon" Kind="social" Width="20" Height="20" Foreground="{DynamicResource B.Text2}"/>
-                        </Border>
-                        <TextBlock x:Name="FeedEmptyTitle" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="0,12,0,4"/>
-                        <TextBlock x:Name="FeedEmptyBody" Style="{StaticResource T.Body2}" TextAlignment="Center" TextWrapping="Wrap"/>
-                        <Button x:Name="FeedEmptyAction" Style="{StaticResource Btn.Accent}" HorizontalAlignment="Center" Margin="0,14,0,0" Padding="14,6" Click="OnFeedEmptyAction"
-                                AutomationProperties.AutomationId="social-feed-empty-action"/>
-                    </StackPanel>
+                    <c:GroupBorder x:Name="FeedEmpty" DockPanel.Dock="Top" Margin="18,28,18,24" HorizontalAlignment="Center" MaxWidth="340" Visibility="Collapsed"
+                                   AutomationProperties.AutomationId="social-feed-empty" AutomationProperties.Name="{Binding Text, ElementName=FeedEmptyTitle}">
+                        <StackPanel>
+                            <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource B.Subtle}" HorizontalAlignment="Center">
+                                <c:Icon x:Name="FeedEmptyIcon" Kind="social" Width="20" Height="20" Foreground="{DynamicResource B.Text2}"/>
+                            </Border>
+                            <TextBlock x:Name="FeedEmptyTitle" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="0,12,0,4"/>
+                            <TextBlock x:Name="FeedEmptyBody" Style="{StaticResource T.Body2}" TextAlignment="Center" TextWrapping="Wrap"/>
+                            <Button x:Name="FeedEmptyAction" Style="{StaticResource Btn.Accent}" HorizontalAlignment="Center" Margin="0,14,0,0" Padding="14,6" Click="OnFeedEmptyAction"
+                                    AutomationProperties.AutomationId="social-feed-empty-action"/>
+                        </StackPanel>
+                    </c:GroupBorder>
                     <ListBox x:Name="Feed" Style="{StaticResource PlainList}" ItemTemplate="{StaticResource Tpl.PostRow}" Padding="18,0,18,12"
                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.ScrollUnit="Pixel" ScrollViewer.CanContentScroll="True">
                         <ListBox.ItemContainerStyle>

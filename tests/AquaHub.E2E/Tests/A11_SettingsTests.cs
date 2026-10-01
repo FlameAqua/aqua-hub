@@ -11,9 +11,29 @@ public sealed class A11_SettingsTests : E2ETestBase
 {
     public A11_SettingsTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }
 
+    /// <summary>
+    /// The data these checks edit (NVDA and IWDA.AS on the watchlist, at least two apps), whatever the warm profile
+    /// was given during onboarding.
+    /// </summary>
+    protected override SessionOptions Options => new()
+    {
+        EditSettings = root =>
+        {
+            if (root["markets"]?["watchlist"] is JsonArray watch)
+                foreach (var (symbol, name, kind) in new[] { ("NVDA", "NVIDIA", "equity"), ("IWDA.AS", "iShares MSCI World", "etf") })
+                    if (!watch.OfType<JsonObject>().Any(w => (string?)w["symbol"] == symbol))
+                        watch.Add(new JsonObject { ["symbol"] = symbol, ["name"] = name, ["kind"] = kind });
+            if (root["apps"] is not JsonArray apps) root["apps"] = apps = new JsonArray();
+            foreach (var (id, name, target) in new[] { ("calculator", "Calculator", "calc.exe"), ("notepad", "Notepad", "notepad.exe") })
+                if (apps.Count < 2 && !apps.OfType<JsonObject>().Any(a => (string?)a["id"] == id))
+                    apps.Add(new JsonObject { ["id"] = id, ["name"] = name, ["kind"] = "exe", ["target"] = target, ["pinned"] = true });
+        },
+    };
+
     private static readonly string[] SectionNames =
     {
-        "General", "Location & weather", "News", "Social", "Markets", "Agenda", "Predictions", "AI & models", "Apps & scenes", "Notifications", "Privacy & data", "About",
+        "General", "Location & weather", "News", "Social", "Markets", "Agenda", "Predictions", "AI & models", "Ask Aqua", "Apps & scenes", "Notifications", "Privacy & data",
+        "Debug", "About",
     };
 
     // ───────────── helpers ─────────────
@@ -215,9 +235,28 @@ public sealed class A11_SettingsTests : E2ETestBase
         });
         Combo("Settings general", Field("Accent colour", ControlType.ComboBox), "Aqua", "general.accent", "aqua");
 
-        TypeAndBlur("Settings general", "General", "Quick panel hotkey", "Ctrl+Alt+Shift+F9", "general.hotkeyFlyout");
-        TypeAndBlur("Settings general", "General", "Command palette hotkey", "Ctrl+Alt+Shift+F10", "general.hotkeyPalette");
+        RecordHotkey("Quick panel hotkey", VK.F9, "general.hotkeyFlyout");
+        RecordHotkey("Command palette hotkey", VK.F10, "general.hotkeyPalette");
     });
+
+    /// <summary>
+    /// A hotkey box records the keys pressed while it has focus (it can't be typed into). Backspace (restore the
+    /// default) isn't exercised: the default is a real system-wide shortcut, which test sessions never register.
+    /// </summary>
+    private void RecordHotkey(string fieldName, VK key, string path)
+    {
+        var gesture = "Ctrl+Alt+Shift+" + key;
+        Check("Settings general", $"'{fieldName}': pressing {gesture} records it → {path}", () =>
+        {
+            Section("General");
+            App.EnsureForeground(Main);
+            Wait.Retry(Field(fieldName, ControlType.Edit).SetFocus, "focus the hotkey box");
+            Thread.Sleep(120);
+            Input.Chord(Pid, VK.Control, VK.Alt, VK.Shift, key);
+            App.Settings.WaitForString(path, gesture);
+            Expect(Ui.ValueOf(Field(fieldName, ControlType.Edit)) == gesture, "the box doesn't show the recorded shortcut");
+        });
+    }
 
     [Fact]
     public void T03_LocationAndWeather() => Run(() =>
@@ -349,22 +388,20 @@ public sealed class A11_SettingsTests : E2ETestBase
     public void T06_MarketsHoldingsAndLists() => Run(() =>
     {
         Section("Markets");
+        // A watchlist row is announced as "NVDA, NVIDIA"; the class seeds NVDA and IWDA.AS (see Options).
+        AutomationElement Row(string symbol) => Wait.For(() => Ui.FindWhere(Ui.WaitFind(Page, Ui.Id("WatchList"), "watchlist"), ControlType.DataItem,
+            n => n == symbol || n.StartsWith(symbol + ",", StringComparison.Ordinal)), $"{symbol} row");
         Check("Settings markets", "NVDA holdings fields → shares / costBasis / alertAbove / alertBelow", () =>
         {
-            var row = Wait.For(() => Ui.FindAll(Ui.WaitFind(Page, Ui.Id("WatchList"), "watchlist"), Ui.Type(ControlType.DataItem))
-                .FirstOrDefault(d => Ui.Texts(d).Any(t => t.StartsWith("NVDA", StringComparison.Ordinal))), "NVDA row");
-            var edits = Ui.FindAll(row, Ui.Type(ControlType.Edit));
-            Expect(edits.Count == 4, $"{edits.Count} edit boxes in the row");
-            var values = new[] { "10", "150.5", "300", "100" };
-            for (var i = 0; i < 4; i++) Ui.SetValue(edits[i], values[i]);
+            var row = Row("NVDA");
+            foreach (var (field, value) in new[] { ("Shares", "10"), ("Cost per share", "150.5"), ("Alert above", "300"), ("Alert below", "100") })
+                Ui.SetValue(Ui.WaitFind(row, Ui.And(Ui.Type(ControlType.Edit), Ui.Name(field)), field), value);
             Wait.For(() => WatchRow("NVDA") is { } w && (double?)w["shares"] == 10 && (double?)w["costBasis"] == 150.5 && (double?)w["alertAbove"] == 300 && (double?)w["alertBelow"] == 100,
                 "holdings saved", E2EConfig.PersistTimeout);
         });
         Check("Settings markets", "remove IWDA.AS from the watchlist", () =>
         {
-            var row = Wait.For(() => Ui.FindAll(Ui.WaitFind(Page, Ui.Id("WatchList"), "watchlist"), Ui.Type(ControlType.DataItem))
-                .FirstOrDefault(d => Ui.Texts(d).Any(t => t.StartsWith("IWDA.AS", StringComparison.Ordinal))), "IWDA.AS row");
-            Ui.Invoke(Ui.WaitFind(row, Ui.Button("Remove"), "remove"));
+            Ui.Invoke(Ui.WaitFind(Row("IWDA.AS"), Ui.Button("Remove"), "remove"));
             Wait.For(() => WatchRow("IWDA.AS") is null, "IWDA.AS removed", E2EConfig.PersistTimeout);
         });
         AddChip("Settings markets", "Indices", "^gdaxi", "^GDAXI", "markets.indices");
@@ -415,13 +452,17 @@ public sealed class A11_SettingsTests : E2ETestBase
                 Expect(!HasCalendar(bad), $"'{bad}' was saved");
             }
         });
-        Check("Settings agenda", "calendar switch → events.calendars[0].enabled", () =>
+        Check("Settings agenda", "a calendar's switch → its enabled flag in events.calendars", () =>
         {
-            var sw = Ui.FindAll(Ui.WaitFind(Page, Ui.Id("CalendarList"), "calendar list"), Ui.Type(ControlType.CheckBox)).First();
-            Ui.Toggle(sw);
-            App.Settings.WaitForBool("events.calendars[0].enabled", false);
-            Ui.Toggle(Ui.FindAll(Ui.WaitFind(Page, Ui.Id("CalendarList"), "calendar list"), Ui.Type(ControlType.CheckBox)).First());
-            App.Settings.WaitForBool("events.calendars[0].enabled", true);
+            // The list is sorted by name, so find the row (and the settings entry) by URL rather than by position.
+            bool? Enabled() => (App.Settings.Get("events.calendars") as JsonArray)!.OfType<JsonObject>().FirstOrDefault(c => (string?)c["url"] == https)?["enabled"]?.GetValue<bool>();
+            AutomationElement Switch() => Ui.WaitFind(
+                Wait.For(() => Ui.FindAll(Ui.WaitFind(Page, Ui.Id("CalendarList"), "calendar list"), Ui.Type(ControlType.DataItem)).FirstOrDefault(d => Ui.Texts(d).Contains(https)), "E2E Web row"),
+                Ui.Type(ControlType.CheckBox), "its switch");
+            Ui.Toggle(Switch());
+            Wait.For(() => Enabled() == false, "E2E Web turned off in settings.json", E2EConfig.PersistTimeout);
+            Ui.Toggle(Switch());
+            Wait.For(() => Enabled() == true, "E2E Web turned on again", E2EConfig.PersistTimeout);
         });
         Check("Settings agenda", "remove calendars", () =>
         {
@@ -434,21 +475,27 @@ public sealed class A11_SettingsTests : E2ETestBase
         });
         Check("Settings agenda", "Browse… opens a file dialog; picking the .ics fills the fields", () =>
         {
+            const string title = "Choose a calendar file";
             App.EnsureForeground(Main);
             Ui.Invoke(Ui.WaitFind(Page, Ui.Button("Browse…"), "Browse…"));
-            var dialog = Wait.For(() => AppWindows.TopLevel(Pid).FirstOrDefault(w => Ui.NameOf(w) == "Choose a calendar file"), "file dialog", TimeSpan.FromSeconds(15));
             try
             {
+                // A modal dialog is owned by the main window, so UI Automation lists it under that window.
+                var dialog = Wait.For(() => AppWindows.AnyWindow(Pid, title), "file dialog", TimeSpan.FromSeconds(15));
                 var nameBox = Wait.For(() => Ui.Find(dialog, Ui.And(Ui.Type(ControlType.Edit), Ui.Id("1148"))) ?? Ui.Find(dialog, Ui.Type(ControlType.Edit)), "file name box");
                 Ui.SetValue(nameBox, ics);
                 var open = Wait.For(() => Ui.Find(dialog, Ui.And(Ui.Type(ControlType.Button), Ui.Id("1"))), "Open button");
                 Ui.Invoke(open);
-                Wait.For(() => AppWindows.TopLevel(Pid).All(w => Ui.NameOf(w) != "Choose a calendar file"), "dialog closed");
+                Wait.For(() => AppWindows.AnyWindow(Pid, title) is null, "dialog closed");
             }
             finally
             {
-                if (AppWindows.TopLevel(Pid).FirstOrDefault(w => Ui.NameOf(w) == "Choose a calendar file") is { } still)
-                    try { ((WindowPattern)still.GetCurrentPattern(WindowPattern.Pattern)).Close(); } catch { }
+                // Never leave a modal dialog behind: it would block every later check in this class.
+                if (AppWindows.AnyWindow(Pid, title) is not null)
+                {
+                    AppWindows.CloseWin32Windows(Pid, title);
+                    Wait.Until(() => AppWindows.AnyWindow(Pid, title) is null, TimeSpan.FromSeconds(5));
+                }
             }
             Wait.For(() => Ui.ValueOf(Ui.WaitFind(Page, Ui.Id("NewCalUrl"), "url")) == ics, "URL box filled with the file path");
             Expect(Ui.ValueOf(Ui.WaitFind(Page, Ui.Id("NewCalName"), "name")).Length > 0, "name box filled from the file name");
@@ -538,25 +585,29 @@ public sealed class A11_SettingsTests : E2ETestBase
     public void T10_AppsAndScenesEditor() => Run(() =>
     {
         Section("Apps & scenes");
+        // The list is rebuilt after every change, so each lookup waits for the fresh rows rather than taking a snapshot.
+        AutomationElement AppsList() => Ui.WaitFind(Page, Ui.Id("AppsList"), "apps list");
+        AutomationElement FirstSwitch(string name) =>
+            Wait.For(() => Ui.FindAll(AppsList(), Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name(name))).FirstOrDefault(), $"first '{name}' switch in the apps list");
         Check("Settings apps", "Pinned / Music switches → apps[0]", () =>
         {
-            var list = Ui.WaitFind(Page, Ui.Id("AppsList"), "apps list");
             var pinned0 = App.Settings.GetBool("apps[0].pinned") ?? true;
-            Ui.Toggle(Ui.FindAll(list, Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Pinned"))).First());
+            Ui.Toggle(FirstSwitch("Pinned"));
             App.Settings.WaitForBool("apps[0].pinned", !pinned0);
-            Ui.Toggle(Ui.FindAll(Ui.WaitFind(Page, Ui.Id("AppsList"), "apps list"), Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Pinned"))).First());
+            Ui.Toggle(FirstSwitch("Pinned"));
             App.Settings.WaitForBool("apps[0].pinned", pinned0);
             var music0 = App.Settings.GetBool("apps[0].isMusicPlayer") ?? false;
-            Ui.Toggle(Ui.FindAll(Ui.WaitFind(Page, Ui.Id("AppsList"), "apps list"), Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Music"))).First());
+            Ui.Toggle(FirstSwitch("Music"));
             App.Settings.WaitForBool("apps[0].isMusicPlayer", !music0);
-            Ui.Toggle(Ui.FindAll(Ui.WaitFind(Page, Ui.Id("AppsList"), "apps list"), Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Music"))).First());
+            Ui.Toggle(FirstSwitch("Music"));
             App.Settings.WaitForBool("apps[0].isMusicPlayer", music0);
         });
         Check("Settings apps", "remove the last app", () =>
         {
             var before = App.Settings.Count("apps");
-            var rows = Ui.FindAll(Ui.WaitFind(Page, Ui.Id("AppsList"), "apps list"), Ui.Type(ControlType.DataItem));
-            Ui.Invoke(Ui.FindAll(rows.Last(), Ui.Type(ControlType.Button)).Last());
+            var row = Wait.For(() => Ui.FindAll(AppsList(), Ui.Type(ControlType.DataItem)).LastOrDefault(), "the last app row");
+            var remove = Wait.For(() => Ui.FindAll(row, Ui.Type(ControlType.Button)).LastOrDefault(), "the last app's remove button");
+            Ui.Invoke(remove);
             Wait.For(() => App.Settings.Count("apps") == before - 1, "apps count -1", E2EConfig.PersistTimeout);
         });
 
@@ -651,8 +702,8 @@ public sealed class A11_SettingsTests : E2ETestBase
             Flip("Settings notifications", name, path);
         AddChip("Settings notifications", "Keywords", "e2e-keyword", "e2e-keyword", "notifications.keywords");
         RemoveChip("Settings notifications", "Keywords", "e2e-keyword", "notifications.keywords");
-        TypeAndBlur("Settings notifications", "Notifications", "Quiet hours", "22:00", "notifications.quietStart");
-        TypeAndBlur("Settings notifications", "Notifications", "Quiet hours (2)", "06:30", "notifications.quietEnd");
+        Combo("Settings notifications", Field("Quiet hours start", ControlType.ComboBox), "22:00", "notifications.quietStart", "22:00");
+        Combo("Settings notifications", Field("Quiet hours end", ControlType.ComboBox), "06:30", "notifications.quietEnd", "06:30");
     });
 
     [Fact]
@@ -663,8 +714,6 @@ public sealed class A11_SettingsTests : E2ETestBase
         Number("Settings privacy", "Keep items for (days)", "14", "privacy.retentionDays", 14);
         Check("Settings privacy", "Open data folder → journal open-folder", () =>
             ExpectJournal("open-folder", () => Ui.Invoke(Ui.ButtonWithText(Page, "Open data folder") ?? Field("Local database", ControlType.Button)), d => d.Contains(App.ProfileDir, StringComparison.OrdinalIgnoreCase)));
-        Check("Settings privacy", "Open log → journal open-log", () =>
-            ExpectJournal("open-log", () => Ui.Invoke(Ui.ButtonWithText(Page, "Open log") ?? Field("Diagnostics log", ControlType.Button)), d => d.EndsWith("aquahub.log", StringComparison.OrdinalIgnoreCase)));
         Check("Settings privacy", "Clear caches → confirmation + agents rerun", () =>
         {
             var mark = App.Log.Mark();
@@ -674,6 +723,9 @@ public sealed class A11_SettingsTests : E2ETestBase
         });
         Check("Settings privacy", "Edit JSON → journal edit-json", () =>
             ExpectJournal("edit-json", () => Ui.Invoke(Ui.WaitFind(Page, Ui.Button("Open settings.json in Notepad (power users)"), "Edit JSON")), d => d.EndsWith("settings.json", StringComparison.OrdinalIgnoreCase)));
+        Section("Debug");
+        Check("Settings debug", "Diagnostics log › Open log → journal open-log", () =>
+            ExpectJournal("open-log", () => Ui.Invoke(Ui.WaitFind(Page, Ui.Id("debug-open-log"), "Open log")), d => d.EndsWith("aquahub.log", StringComparison.OrdinalIgnoreCase)));
         Section("About");
         Check("Settings about", "version and profile path shown", () =>
         {
@@ -696,24 +748,24 @@ public sealed class A11_SettingsTests : E2ETestBase
         {
             Section("General");
             var before = App.Settings.GetBool("notifications.doNotDisturb") ?? false;
-            Ui.Invoke(Ui.WaitFind(Main, Ui.Id("DndButton"), "DND button"));
+            Ui.Invoke(Ui.WaitFind(Main, Ui.Id("dnd-toggle"), "DND button"));
             App.Settings.WaitForBool("notifications.doNotDisturb", !before);
             GoTo("today");
             Thread.Sleep(2000);
             var after = App.Settings.GetBool("notifications.doNotDisturb");
             if (after != !before)
             {
-                Ui.Invoke(Ui.WaitFind(Main, Ui.Id("DndButton"), "DND button"));
+                Ui.Invoke(Ui.WaitFind(Main, Ui.Id("dnd-toggle"), "DND button"));
                 throw new Xunit.Sdk.XunitException(
                     $"Leaving Settings wrote its stale copy back: doNotDisturb reverted from {!before} to {after} (title-bar/tray/scene changes are lost)");
             }
-            Ui.Invoke(Ui.WaitFind(Main, Ui.Id("DndButton"), "DND button"));
+            Ui.Invoke(Ui.WaitFind(Main, Ui.Id("dnd-toggle"), "DND button"));
             App.Settings.WaitForBool("notifications.doNotDisturb", before);
         });
         Check("Settings consistency", "Settings page reflects a change made elsewhere when reopened", () =>
         {
             var before = App.Settings.GetBool("notifications.doNotDisturb") ?? false;
-            Ui.Invoke(Ui.WaitFind(Main, Ui.Id("DndButton"), "DND button"));
+            Ui.Invoke(Ui.WaitFind(Main, Ui.Id("dnd-toggle"), "DND button"));
             App.Settings.WaitForBool("notifications.doNotDisturb", !before);
             Section("Notifications");
             var sw = Field("Do not disturb", ControlType.CheckBox);
@@ -723,22 +775,8 @@ public sealed class A11_SettingsTests : E2ETestBase
         });
     });
 
-    [Fact]
-    public void T14_InvalidQuietHoursAreNormalised() => Run(() =>
-    {
-        Check("Settings notifications", "quiet hours '99:99' falls back to a valid time", () =>
-        {
-            Section("Notifications");
-            App.EnsureForeground(Main);
-            var box = Field("Quiet hours", ControlType.Edit);
-            Wait.Retry(box.SetFocus, "focus");
-            Ui.SetValue(box, "99:99");
-            Wait.Retry(() => Ui.WaitFind(Page, Ui.Id("Sections"), "sections").SetFocus(), "blur");
-            GoTo("today");
-            Wait.For(() => App.Settings.GetString("notifications.quietStart") is { } s && TimeOnly.TryParseExact(s, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
-                "a valid HH:mm quietStart", E2EConfig.PersistTimeout);
-        });
-    });
+    // Quiet hours are picked from a list now, so an invalid time can only come from a hand-edited settings.json:
+    // SettingsTests.InvalidQuietHoursFallBackToDefaults covers that.
 
     [Fact]
     public void T15_VoiceInputAndWhisper() => Run(() =>

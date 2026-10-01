@@ -113,7 +113,8 @@
                         <ItemsControl x:Name="Outputs">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Expander Margin="0,0,0,6" Foreground="{DynamicResource B.Text}" IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                                    <Expander Margin="0,0,0,6" Foreground="{DynamicResource B.Text}" IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                              AutomationProperties.Name="{Binding Purpose}" AutomationProperties.AutomationId="{Binding Key, StringFormat=output-{0}}">
                                         <Expander.Header>
                                             <TextBlock FontSize="12.5"><Run Text="{Binding Purpose, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="{Binding Meta, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/></TextBlock>
                                         </Expander.Header>

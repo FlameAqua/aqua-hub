@@ -130,7 +130,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Command="{Binding MuteCommand}" ToolTip="Mute"><c:Icon Kind="{Binding VolumeIcon}" Width="14" Height="14"/></Button>
-                        <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume, Mode=TwoWay}" Margin="4,0,0,0"/>
+                        <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume, Mode=TwoWay}" Margin="4,0,0,0" AutomationProperties.Name="Volume"/>
                     </Grid>
 
                     <Rectangle Style="{StaticResource Divider}" Margin="0,8"/>

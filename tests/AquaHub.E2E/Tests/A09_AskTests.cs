@@ -35,7 +35,9 @@ public sealed class A09_AskTests : E2ETestBase
         var last = Items().Last();
         var texts = Ui.AllTexts(last);
         var footer = texts.LastOrDefault(t => t.EndsWith("on-device", StringComparison.Ordinal) || t == "Stopped.") ?? "";
-        var answer = texts.Where(t => t != footer).OrderByDescending(t => t.Length).FirstOrDefault() ?? "";
+        // The answer is the message's rich text (a Document). Plan lines, captions and buttons around it are not, so
+        // they can't stand in for an answer that is missing or unreadable.
+        var answer = Ui.DocumentTexts(last).OrderByDescending(t => t.Length).FirstOrDefault() ?? "";
         Step($"   answer ({answer.Length} chars): {(answer.Length > 140 ? answer[..140] + "…" : answer)}");
         Step($"   footer: {footer}");
         return (answer, footer, last);
@@ -279,6 +281,25 @@ public sealed class A09_AskTests : E2ETestBase
             Ui.WaitFind(answer, Ui.Id("ask-memory-answer"), "Answer it instead");
             Ui.Invoke(Ui.WaitFind(answer, Ui.Id("ask-memory-undo"), "Undo"));
             Wait.For(() => Ui.AllTexts(Items().Last()).Any(t => t.Contains("won't remember", StringComparison.Ordinal)), "the answer saying it won't remember");
+        });
+    });
+
+    [Fact]
+    public void T10_TheModelPickerNamesTheModelThatAnswers() => Run(() =>
+    {
+        Ask();
+        Check("Ask", "the composer's model picker shows a model, and the answer's footer names the same one", () =>
+        {
+            var picker = Ui.WaitFind(PageRoot("ask"), Ui.Id("ask-model"), "model picker (shown once the model server lists its models)", E2EConfig.AiTimeout);
+            var model = Ui.SelectedComboItem(picker);
+            Expect(model.Length > 0, "the model picker has nothing selected");
+            NewChat();
+            const string q = "In five words, what is a haiku?";
+            var input = Ui.WaitFind(PageRoot("ask"), Ui.Id("Input"), "input");
+            Ui.SetValue(input, q);
+            FocusAndPress(Main, input, VK.Enter);
+            var (_, footer, _) = WaitForAnswer(q);
+            Expect(footer.StartsWith(model + " ·", StringComparison.Ordinal), $"picked {model}, but the answer says '{footer}'");
         });
     });
 }

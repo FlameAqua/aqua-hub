@@ -103,9 +103,14 @@ public sealed class TrayController
 
     private static string Shorten(string s, int max) => s.Length <= max ? s : s[..(max - 1)].TrimEnd() + "…";
 
+    private ContextMenu? _menu;
+
     public void ShowMenu()
     {
+        // One menu at a time: another right-click (or --tray-menu) replaces the open one.
+        if (_menu is { IsOpen: true } previous) previous.IsOpen = false;
         var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
+        _menu = menu;
         System.Windows.Automation.AutomationProperties.SetAutomationId(menu, "tray-menu");
         MenuItem Item(ItemsControl parent, string header, string icon, Action action, string? gesture = null, string? id = null)
         {
@@ -160,11 +165,11 @@ public sealed class TrayController
         Item(menu, "Settings", "settings", () => Hub.Windows.ShowMain("settings"), id: "tray-settings");
         Item(menu, "Quit Aqua Hub", "power", Hub.Quit, id: "tray-quit");
 
-        menu.Opened += (_, _) =>
-        {
-            // Make the menu foreground so it closes when clicking elsewhere.
-            if (PresentationSource.FromVisual(menu) is HwndSource src) Native.SetForegroundWindow(src.Handle);
-        };
+        menu.Closed += (_, _) => { if (ReferenceEquals(_menu, menu)) _menu = null; };
+        // The menu needs its app in the foreground to keep the mouse (and close when you click elsewhere), as Windows
+        // asks of notification-area menus. A right-click on the icon allows that; --tray-menu from another process
+        // doesn't, so switch first. Activating the menu's own popup instead would take the mouse back and close it.
+        WindowEffects.ForceForeground(Hub.Tray.Handle);
         menu.IsOpen = true;
     }
 

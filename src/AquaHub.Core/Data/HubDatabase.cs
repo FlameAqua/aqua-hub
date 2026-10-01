@@ -411,6 +411,16 @@ public sealed class HubDatabase
         Exec(c, "DELETE FROM alerts;");
     }
 
+    /// <summary>Whether a de-duplication key is recorded (see <see cref="TryMarkSeen"/>); keys expire after 10 days.</summary>
+    public bool HasSeen(string key)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM seen WHERE key=$k;";
+        cmd.Parameters.AddWithValue("$k", key);
+        return cmd.ExecuteScalar() is not null;
+    }
+
     /// <summary>Returns true the first time a key is seen (used to de-duplicate alerts).</summary>
     public bool TryMarkSeen(string key)
     {

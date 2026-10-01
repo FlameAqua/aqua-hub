@@ -264,12 +264,14 @@ public sealed class VolumeController
 public sealed class SpeechService
 {
     private MediaPlayer? _player;
+    private int _generation;
     public bool IsSpeaking { get; private set; }
     public event Action? StateChanged;
 
     public async Task SpeakAsync(string text, string language)
     {
         Stop();
+        var generation = _generation;
         if (Sandbox.Intercept("speak", text.Length > 80 ? text[..80] : text))
         {
             IsSpeaking = true;
@@ -286,6 +288,8 @@ public sealed class SpeechService
             if (voice is not null) synth.Voice = voice;
             synth.Options.SpeakingRate = 1.05;
             var stream = await synth.SynthesizeTextToStreamAsync(text);
+            // Stopped (or replaced) while the voice was being prepared: don't start talking now.
+            if (generation != _generation) { stream.Dispose(); return; }
             _player = new MediaPlayer { Source = MediaSource.CreateFromStream(stream, stream.ContentType) };
             _player.MediaEnded += (_, _) => { IsSpeaking = false; StateChanged?.Invoke(); };
             _player.Play();
@@ -300,11 +304,14 @@ public sealed class SpeechService
         }
     }
 
+    /// <summary>Stops speaking — also when nothing is playing yet (being prepared, or dry-run mode, which has no player).</summary>
     public void Stop()
     {
-        if (_player is null) return;
-        try { _player.Pause(); _player.Dispose(); } catch { }
+        _generation++;
+        var player = _player;
         _player = null;
+        if (player is not null) try { player.Pause(); player.Dispose(); } catch { }
+        if (!IsSpeaking) return;
         IsSpeaking = false;
         StateChanged?.Invoke();
     }

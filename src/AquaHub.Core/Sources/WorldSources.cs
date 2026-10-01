@@ -103,6 +103,58 @@ public static class WeatherSource
         return list;
     }
 
+    /// <summary>
+    /// "Use my location": the town or city at an approximate position from Windows. The position is rounded to about a
+    /// kilometre before it leaves the PC and goes to OpenStreetMap's Nominatim, once per click (as its usage policy
+    /// asks); Open-Meteo's entry for the same town then supplies its time zone and the name a search would show.
+    /// </summary>
+    public static async Task<GeoPlace?> PlaceNearAsync(HttpFetcher http, double latitude, double longitude, CancellationToken ct)
+    {
+        var (lat, lon) = (Rounded(latitude), Rounded(longitude));
+        using var doc = await http.GetJsonAsync(ReverseUrl(lat, lon), ct: ct).ConfigureAwait(false);
+        if (doc is null || ParseReverse(doc.RootElement, lat, lon) is not { } near) return null;
+        var matches = await SearchPlacesAsync(http, near.Name, ct).ConfigureAwait(false);
+        return SamePlace(matches, near) ?? near;
+    }
+
+    /// <summary>Shown wherever a place found this way appears (OpenStreetMap's data licence asks for it).</summary>
+    public const string PlaceAttribution = "Place names © OpenStreetMap contributors";
+
+    /// <summary>Two decimals: about a kilometre, enough for the town and its weather.</summary>
+    public static double Rounded(double degrees) => Math.Round(degrees, 2, MidpointRounding.AwayFromZero);
+
+    public static string ReverseUrl(double lat, double lon) => string.Create(CultureInfo.InvariantCulture,
+        $"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat:0.##}&lon={lon:0.##}&zoom=10&addressdetails=1&accept-language=en");
+
+    /// <summary>The town or city in a Nominatim reverse result; null when there's none (open sea, an error).</summary>
+    public static GeoPlace? ParseReverse(JsonElement root, double lat, double lon)
+    {
+        if (!root.TryProp("address", out var a) || a.ValueKind != JsonValueKind.Object) return null;
+        var name = new[] { "city", "town", "village", "municipality", "suburb", "county" }
+            .Select(k => a.Str(k)?.Trim()).FirstOrDefault(v => !string.IsNullOrEmpty(v));
+        var cc = a.Str("country_code")?.Trim() ?? "";
+        if (name is null || cc.Length != 2) return null;
+        var region = (a.Str("state") ?? a.Str("county") ?? "").Trim();
+        return new GeoPlace(name, region.Equals(name, StringComparison.OrdinalIgnoreCase) ? "" : region, a.Str("country")?.Trim() ?? "",
+            cc.ToUpperInvariant(), lat, lon, "");
+    }
+
+    /// <summary>The search result for the same town: same country and within 30 km, nearest first.</summary>
+    public static GeoPlace? SamePlace(IEnumerable<GeoPlace> candidates, GeoPlace near) =>
+        candidates.Where(c => c.CountryCode.Equals(near.CountryCode, StringComparison.OrdinalIgnoreCase))
+            .Select(c => (Place: c, Km: DistanceKm(c.Latitude, c.Longitude, near.Latitude, near.Longitude)))
+            .Where(x => x.Km <= 30).OrderBy(x => x.Km).Select(x => x.Place).FirstOrDefault();
+
+    /// <summary>Great-circle distance.</summary>
+    public static double DistanceKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        static double Rad(double d) => d * Math.PI / 180;
+        var dLat = Rad(lat2 - lat1);
+        var dLon = Rad(lon2 - lon1);
+        var h = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) + Math.Cos(Rad(lat1)) * Math.Cos(Rad(lat2)) * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return 2 * 6371 * Math.Asin(Math.Min(1, Math.Sqrt(h)));
+    }
+
     /// <summary>WMO weather interpretation codes → short description.</summary>
     public static string Describe(int code) => code switch
     {

@@ -10,8 +10,15 @@ using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Pages;
 
-public sealed record DayGroupVM(string Label, List<EventVM> Events);
-public sealed record ForesightVM(string Title, string When, string Detail, string Icon, Brush Brush);
+public sealed record DayGroupVM(string Label, List<EventVM> Events)
+{
+    // Screen readers announce a list item by its ToString, so rows say what they show.
+    public override string ToString() => Label;
+}
+public sealed record ForesightVM(string Title, string When, string Detail, string Icon, Brush Brush)
+{
+    public override string ToString() => $"{Title}, {When}";
+}
 
 public sealed class UpcomingVM : ObservableObject
 {

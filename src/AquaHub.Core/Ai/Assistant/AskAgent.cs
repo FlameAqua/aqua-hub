@@ -70,7 +70,9 @@ public sealed partial class AskAgent
             Computer = options.Computer && s.Ask.Computer,
         };
         host.Status("Getting ready…");
-        var caps = await _llm.CapabilitiesAsync(ct: ct).ConfigureAwait(false);
+        var caps = await _llm.CapabilitiesForAsync(options.Model, ct: ct).ConfigureAwait(false);
+        // From here on the model is the one actually answering (the picked one may have been uninstalled since).
+        options = options with { Model = caps.Model };
         Func<string, string?>? known = platform is null ? null : platform.KnownFolder;
         var files = options.Computer
             ? new LocalFiles(() => LocalFiles.ExpandFolders(_settings().Ask.Folders, known), () => LocalFiles.ExpandFolders(LocalFiles.UserFolderTokens, known))
@@ -159,8 +161,12 @@ public sealed partial class AskAgent
             foreach (var c in _state.Stories.Where(c => c.IsLocal).OrderByDescending(c => c.Importance).Take(6))
                 if (!hits.Any(h => h.Id == c.Id)) hits.Add(HubSearch.StoryHit(c, 1));
             hits = hits.OrderByDescending(h => h.Local).ThenByDescending(h => h.Score).Take(10).ToList();
-            sb.Append("NEAR THE USER: they are in ").Append(s.Location.City).Append(". Only items marked \"local\" are about their area; ")
-              .Append("if you mention anything else, say where it happened.\n");
+            if (s.Location.IsSet)
+                sb.Append("NEAR THE USER: they are in ").Append(s.Location.City).Append(". Only items marked \"local\" are about their area; ")
+                  .Append("if you mention anything else, say where it happened.\n");
+            else
+                sb.Append("NEAR THE USER: you don't know where the user is (they haven't chosen a place; Settings > Location & weather). ")
+                  .Append("Don't guess; say so, and answer what you can.\n");
         }
         if (hits.Count > 0)
         {
@@ -298,7 +304,7 @@ public sealed partial class AskAgent
                     Attachments = attachments.Select(a => a.Name + (a.Kind == AttachmentKind.Image ? " (picture)" : "")).ToList(),
                     Research = o.Research,
                 }, run.Now);
-                var (doc, _) = await _llm.CompleteJsonAsync(request, timeout.Token).ConfigureAwait(false);
+                var (doc, _) = await _llm.CompleteJsonAsync(request with { Model = o.Model }, timeout.Token).ConfigureAwait(false);
                 using (doc) plan = AskPlanner.Merge(doc.RootElement, rules, question, o, run.Skills.Select(k => k.Name).ToList(), history);
                 run.Host.StepFinished(step, "Plan: " + plan.Describe());
             }
@@ -324,6 +330,14 @@ public sealed partial class AskAgent
 
     // ───────────────────────────── Prompts ─────────────────────────────
 
+    /// <summary>The place's time zone, or Windows' own (as an IANA name where there is one) before a place is chosen.</summary>
+    internal static string TimeZoneName(LocationSettings loc)
+    {
+        if (loc.Timezone.Trim().Length > 0) return loc.Timezone;
+        var local = TimeZoneInfo.Local;
+        return TimeZoneInfo.TryConvertWindowsIdToIanaId(local.Id, out var iana) ? iana : local.StandardName;
+    }
+
     /// <summary>
     /// The system prompt: who Aqua is, what it can and can't do right now (so it never claims it can't open a link it
     /// can open), how to answer, what the user asked it to remember and any skill it's following.
@@ -333,8 +347,8 @@ public sealed partial class AskAgent
     {
         var sb = new StringBuilder();
         sb.Append("You are Aqua, the user's private assistant, running on their own PC. ").Append(Prompts.StyleFor(s)).Append(' ');
-        sb.Append("Today is ").Append(now.ToString("dddd d MMMM yyyy, HH:mm", Inv)).Append(" (").Append(s.Location.Timezone).Append("); the user is in ")
-          .Append(s.Location.City).Append(", ").Append(s.Location.Region).Append(".\n");
+        sb.Append("Today is ").Append(now.ToString("dddd d MMMM yyyy, HH:mm", Inv)).Append(" (").Append(TimeZoneName(s.Location)).Append("); ")
+          .Append(s.Location.IsSet ? "the user is in " + s.Location.Label + ".\n" : "the user hasn't said where they are.\n");
 
         sb.Append("WHAT YOU CAN DO RIGHT NOW:\n");
         sb.Append("- The user's feeds (news stories with every outlet, social posts, markets, predictions, their agenda): the matches are in the CONTEXT")
@@ -440,7 +454,7 @@ public sealed partial class AskAgent
         messages.Add(user);
         var instructions = SystemPrompt(s, run.Options, run.Plan, caps.Tools, hasImages, run.Now, caps.Tools ? byName.Keys.ToList() : Array.Empty<string>(), run.Memories, run.Skill);
         var answerTokens = run.Options.Think ? 4500 : 2000;
-        var (window, dropped, fitted) = FitToWindow(instructions, context, messages, s, answerTokens + (caps.Tools ? 2500 : 0));
+        var (window, dropped, fitted) = FitToWindow(instructions, context, messages, s, answerTokens + (caps.Tools ? 2500 : 0), AutomaticLimitNow);
         var system = instructions + "\n\nCONTEXT:\n<<<DATA\n" + fitted + "DATA>>>";
 
         // Holds the model between steps (background agents wait); let go while the user is asked for an OK.
@@ -453,7 +467,7 @@ public sealed partial class AskAgent
         {
             var offerTools = caps.Tools && step < MaxSteps;
             if (!offerTools && step > 0) messages.Add(new LlmMessage("user", "Write your final answer now from what you found, citing sources as [n]."));
-            window = Grow(window, system, messages, s, answerTokens);
+            window = Grow(window, system, messages, s, answerTokens, AutomaticLimitNow);
             var request = new LlmRequest
             {
                 Purpose = run.Options.Think ? "ask-think" : "ask",
@@ -553,7 +567,7 @@ public sealed partial class AskAgent
         var start = thinking.Length;
         var lastCheck = 0;
         var cut = false;
-        await foreach (var delta in _llm.ChatStreamAsync(request, reserved, ct).ConfigureAwait(false))
+        await foreach (var delta in _llm.ChatStreamAsync(request with { Model = run.Options.Model }, reserved, ct).ConfigureAwait(false))
         {
             switch (delta)
             {
@@ -612,7 +626,7 @@ public sealed partial class AskAgent
             Think = false,
             Temperature = 0.3,
             MaxTokens = 1600,
-            ContextTokens = Grow(usage?.ContextTokens is > 0 and var c ? c : null, system, final, run.Settings, 1600),
+            ContextTokens = Grow(usage?.ContextTokens is > 0 and var c ? c : null, system, final, run.Settings, 1600, AutomaticLimitNow),
         };
         var output = await StreamStepAsync(request, reserved, run, new StringBuilder(), int.MaxValue, ct).ConfigureAwait(false);
         var (answer, notes) = AnswerText.Split(output.Text);
@@ -1117,6 +1131,7 @@ public sealed partial class AskAgent
             {
                 var result = await _llm.CompleteAsync(new LlmRequest
                 {
+                    Model = run.Options.Model,
                     Purpose = "ask-read-part",
                     Priority = LlmPriority.Interactive,
                     System = "You take notes on one part of a long page, for someone who will answer a question about the whole page. " + Prompts.UntrustedNotice,
@@ -1349,7 +1364,7 @@ public sealed partial class AskAgent
                 MaxTokens = 120 + 70 * batch.Count,
                 Think = false,
             };
-            var (doc, _) = await _llm.CompleteJsonAsync(request, ct).ConfigureAwait(false);
+            var (doc, _) = await _llm.CompleteJsonAsync(request with { Model = run.Options.Model }, ct).ConfigureAwait(false);
             using (doc)
             {
                 var items = doc.RootElement.TryGetProperty("images", out var arr) && arr.ValueKind == JsonValueKind.Array ? arr.EnumerateArray().ToList() : new();
@@ -1412,14 +1427,27 @@ public sealed partial class AskAgent
     /// A larger context window only when this prompt needs it (a different size makes Ollama reload the model).
     /// Roughly 3.2 characters per token, plus room for the answer.
     /// </summary>
-    internal static int? ContextFor(string system, IReadOnlyList<LlmMessage> messages, HubSettings s, int answerTokens = 1800)
+    internal static int? ContextFor(string system, IReadOnlyList<LlmMessage> messages, HubSettings s, int answerTokens = 1800, int limit = MaxAutomatic)
     {
         var need = Need(system.Length, messages, answerTokens);
         if (need <= s.Ai.ContextTokens * 0.92) return null;
         foreach (var size in new[] { 12288, 16384, 24576, 32768, 49152, 65536, 98304 })
-            if (need <= size * 0.92) return Math.Max(size, s.Ai.ContextTokens);
-        return 131072;
+            if (size < limit && need <= size * 0.92) return Math.Max(size, s.Ai.ContextTokens);
+        return Math.Max(limit, s.Ai.ContextTokens);
     }
+
+    /// <summary>The largest window Automatic ever asks for (a fixed size in Settings › Ask Aqua can't go past it either).</summary>
+    internal const int MaxAutomatic = 131072;
+
+    /// <summary>
+    /// How far Automatic may grow the window on this PC. The model's memory for the conversation grows with the window,
+    /// and once it no longer fits in graphics memory the model spills into system RAM and slows to a crawl (or fails to
+    /// load), so 128K is only automatic on a card with 24 GB or more. Choosing 128K in Settings › Ask Aqua still works
+    /// for setups that can take it.
+    /// </summary>
+    internal static int AutomaticLimit(double vramGb) => vramGb >= 24 ? MaxAutomatic : 65536;
+
+    private int AutomaticLimitNow => AutomaticLimit(_state.System?.Gpu?.VramTotalGb ?? 0);
 
     private static int Need(int systemChars, IReadOnlyList<LlmMessage> messages, int answerTokens) =>
         (int)((systemChars + messages.Sum(m => m.Content.Length + (m.Images?.Count ?? 0) * 3000)) / 3.2) + answerTokens;
@@ -1429,10 +1457,18 @@ public sealed partial class AskAgent
     /// (Settings › Ask Aqua): the oldest messages are left out first, then the end of the gathered material. Returns the
     /// window (null = the model's default), how many messages were left out and the context that fits.
     /// </summary>
-    internal static (int? Window, int Dropped, string Context) FitToWindow(string instructions, string context, List<LlmMessage> messages, HubSettings s, int answerTokens)
+    internal static (int? Window, int Dropped, string Context) FitToWindow(string instructions, string context, List<LlmMessage> messages, HubSettings s, int answerTokens,
+        int automaticLimit = MaxAutomatic)
     {
         var fixedSize = s.Ask.ContextWindow;
-        if (fixedSize <= 0) return (ContextFor(instructions + context, messages, s, answerTokens), 0, context);
+        if (fixedSize <= 0)
+        {
+            // Automatic: the smallest window that holds it, up to the limit. Past that it's trimmed like a fixed
+            // window rather than sent whole (Ollama would silently cut the start of the prompt: the instructions).
+            if (Need(instructions.Length + context.Length + 40, messages, answerTokens) <= automaticLimit * 0.92)
+                return (ContextFor(instructions + context, messages, s, answerTokens, automaticLimit), 0, context);
+            fixedSize = automaticLimit;
+        }
         var limit = fixedSize * 0.92;
         var dropped = 0;
         while (messages.Count > 1 && Need(instructions.Length + context.Length + 40, messages, answerTokens) > limit)
@@ -1440,17 +1476,18 @@ public sealed partial class AskAgent
             messages.RemoveAt(0);
             dropped++;
         }
+        const string cut = "\n[… the rest was left out to fit the context window (Settings › Ask Aqua) …]\n";
         var room = (int)((limit - answerTokens) * 3.2) - instructions.Length - 40 - messages.Sum(m => m.Content.Length + (m.Images?.Count ?? 0) * 3000);
         if (context.Length > room)
-            context = (room > 400 ? context[..room] : "") + "\n[… the rest was left out to fit the context window (Settings › Ask Aqua) …]\n";
+            context = (room - cut.Length > 400 ? context[..(room - cut.Length)] : "") + cut;
         return (fixedSize, dropped, context);
     }
 
     /// <summary>The window for the next turn: the fixed one, or on automatic whatever the grown conversation now needs (never smaller).</summary>
-    private static int? Grow(int? window, string system, IReadOnlyList<LlmMessage> messages, HubSettings s, int answerTokens)
+    private static int? Grow(int? window, string system, IReadOnlyList<LlmMessage> messages, HubSettings s, int answerTokens, int automaticLimit)
     {
         if (s.Ask.ContextWindow > 0) return s.Ask.ContextWindow;
-        var need = ContextFor(system, messages, s, answerTokens);
+        var need = ContextFor(system, messages, s, answerTokens, automaticLimit);
         return need is { } n && (window is null || n > window) ? n : window;
     }
 
@@ -1510,7 +1547,7 @@ public sealed partial class AskAgent
         var instructions = SystemPrompt(s, run.Options, plan, tools: false, caps.Vision && attachments.Any(a => a.Image is not null), run.Now, Array.Empty<string>(), run.Memories, run.Skill) + format;
         var messages = HistoryFor(history, Math.Min(4, s.Ask.HistoryMessages));
         messages.Add(UserMessage(question, attachments, caps.Vision));
-        var (window, dropped, fitted) = FitToWindow(instructions, material.ToString(), messages, s, 2600);
+        var (window, dropped, fitted) = FitToWindow(instructions, material.ToString(), messages, s, 2600, AutomaticLimitNow);
         var system = instructions + "\n\nCONTEXT:\n<<<DATA\n" + fitted + "DATA>>>";
         var request = new LlmRequest
         {

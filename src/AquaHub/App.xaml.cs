@@ -85,6 +85,7 @@ public partial class App : Application
 
         Hub.Theme = new ThemeService();
         Hub.Theme.Apply(Hub.S.General);
+        UI.AccessibleNames.Register();
         Hub.Launcher = new AppLauncher();
         Hub.Catalog = new AppCatalog();
         MediaController.CatalogLookup = Hub.Catalog.NameFor;
@@ -97,6 +98,13 @@ public partial class App : Application
         Hub.Ask = new AskSession();
         Hub.Ollama = new OllamaManager();
         Hub.Updates = new UpdateService(Sandbox.Enabled, args.DataDir is null ? Array.Empty<string>() : new[] { "--data-dir", paths.Root });
+        // A version downloaded earlier ("Later") installs now, before anything opens: Velopack's updater waits for this
+        // process to end, swaps versions and starts the new one (in the background again if that's how we started).
+        if (!Hub.SnapshotMode && Hub.Updates.ApplyPendingAtStartup(args.Background))
+        {
+            Shutdown();
+            return;
+        }
         Img.Init(paths.ImageCache, Hub.Core.Http, () => Hub.S.Privacy.LoadRemoteImages);
         Hub.System.Sampled += snap =>
         {
@@ -120,12 +128,14 @@ public partial class App : Application
         Hub.Hotkeys = new HotkeyManager(Hub.Tray);
         var firstIcon = IconFactory.CreateTrayIcon();
         Hub.Tray.Show(firstIcon, IconFactory.CreateLargeIcon(), "Aqua Hub");
-        Hub.Tray.LeftClick += (_, _) => Hub.OnUi(Hub.Windows.ToggleFlyout);
+        Hub.Tray.LeftClick += (_, _) => Hub.OnUi(() => Hub.Windows.ToggleFlyout(fromTrayClick: true));
         Hub.Tray.DoubleClick += () => Hub.OnUi(() => Hub.Windows.ShowMain());
         Hub.Tray.MiddleClick += () => _ = Hub.Media.PlayPauseAsync();
         // A Windows notification opens what it was about (and marks that alert read); one without an alert opens Aqua.
         Hub.Platform.ToastClicked += alert => Hub.OnUi(() => Hub.Windows.OpenAlert(alert));
         Hub.Tray.BalloonClicked += () => Hub.OnUi(() => Hub.Windows.ShowMain());
+        // Any of several notifications could have been clicked: show them all (the alerts list) rather than guess.
+        Hub.Tray.SeveralClicked += () => Hub.OnUi(() => Hub.Windows.OpenAlert(null));
         Hub.Tray.SettingChanged += area =>
         {
             if (area is "ImmersiveColorSet" && Hub.S.General.Theme == "system") Hub.OnUi(() => Hub.Theme.Apply(Hub.S.General));

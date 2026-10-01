@@ -95,17 +95,28 @@
                     <!-- ═══ Location ═══ -->
                     <StackPanel x:Name="P_location" Visibility="Collapsed">
                         <TextBlock Text="Location &amp; weather" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
-                        <c:SettingRow Icon="location" Title="Your city" Description="Drives weather, local news and what counts as 'local'.">
-                            <StackPanel>
-                                <Grid Width="300">
+                        <c:SettingRow Icon="location" Title="Your city" Description="Drives weather, local news and what counts as 'local'. Search for it, or let Windows say roughly where this PC is.">
+                            <StackPanel Width="300">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
                                     <TextBox x:Name="CitySearch" ui:UiProps.Placeholder="Search a city…" TextChanged="OnCitySearch"/>
                                     <Popup x:Name="CityPopup" PlacementTarget="{Binding ElementName=CitySearch}" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" VerticalOffset="4">
                                         <Border Width="300" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="8" Padding="4">
                                             <ListBox x:Name="CityResults" Style="{StaticResource PlainList}" MaxHeight="280" MouseUp="OnPickCity"/>
                                         </Border>
                                     </Popup>
+                                    <Button x:Name="LocateButton" Grid.Column="1" Style="{StaticResource Btn.Icon}" Margin="6,0,0,0" Click="OnLocate"
+                                            ToolTip="Use my location (asks Windows roughly where this PC is)"
+                                            AutomationProperties.Name="Use my location" AutomationProperties.AutomationId="use-my-location">
+                                        <c:Icon Kind="location" Width="16" Height="16"/>
+                                    </Button>
                                 </Grid>
-                                <TextBlock x:Name="CityCurrent" Style="{StaticResource T.Caption}" Margin="2,6,0,0"/>
+                                <TextBlock x:Name="CityCurrent" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="2,6,0,0"/>
+                                <Button x:Name="LocationSettingsLink" Style="{StaticResource Btn.Link}" Content="Open Windows location settings" Click="OnLocationSettings"
+                                        HorizontalAlignment="Left" Margin="2,4,0,0" Visibility="Collapsed"/>
                             </StackPanel>
                         </c:SettingRow>
                         <c:SettingRow Icon="thermometer" Title="Units">
@@ -121,6 +132,15 @@
                                 <ComboBoxItem Content="English (US)" Tag="en-US"/>
                                 <ComboBoxItem Content="English (Australia)" Tag="en-AU"/>
                                 <ComboBoxItem Content="English (Canada)" Tag="en-CA"/>
+                                <ComboBoxItem Content="English (New Zealand)" Tag="en-NZ"/>
+                                <ComboBoxItem Content="English (India)" Tag="en-IN"/>
+                                <ComboBoxItem Content="English (Singapore)" Tag="en-SG"/>
+                                <ComboBoxItem Content="English (South Africa)" Tag="en-ZA"/>
+                                <ComboBoxItem Content="English (Nigeria)" Tag="en-NG"/>
+                                <ComboBoxItem Content="English (Kenya)" Tag="en-KE"/>
+                                <ComboBoxItem Content="English (Philippines)" Tag="en-PH"/>
+                                <ComboBoxItem Content="English (Malaysia)" Tag="en-MY"/>
+                                <ComboBoxItem Content="English (Pakistan)" Tag="en-PK"/>
                             </ComboBox>
                         </c:SettingRow>
                         <c:SettingRow Icon="hash" Title="Local keywords" Description="Stories mentioning these count as local.">
@@ -156,7 +176,7 @@
                                                         <ColumnDefinition Width="Auto"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="0,0,12,0"/>
+                                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="0,0,12,0" AutomationProperties.Name="{Binding Name, StringFormat=Use {0}}"/>
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Name}" FontSize="13.5"/>
                                                         <TextBlock Style="{StaticResource T.Caption}"><Run Text="{Binding Category, Mode=OneWay}"/><Run Text=" · tier "/><Run Text="{Binding Tier, Mode=OneWay}"/><Run Text="{Binding Query, Mode=OneWay, StringFormat=' · Google News: {0}'}"/></TextBlock>
@@ -177,7 +197,7 @@
                                         </Grid.ColumnDefinitions>
                                         <TextBox x:Name="NewSourceName" ui:UiProps.Placeholder="Name" Margin="0,0,6,0"/>
                                         <TextBox x:Name="NewSourceUrl" Grid.Column="1" ui:UiProps.Placeholder="https://… RSS or Atom feed URL" Margin="0,0,6,0"/>
-                                        <ComboBox x:Name="NewSourceCat" Grid.Column="2" MinWidth="120" Margin="0,0,6,0" SelectedIndex="0">
+                                        <ComboBox x:Name="NewSourceCat" Grid.Column="2" MinWidth="120" Margin="0,0,6,0" SelectedIndex="0" AutomationProperties.Name="Category">
                                             <ComboBoxItem Content="world"/><ComboBoxItem Content="local"/><ComboBoxItem Content="europe"/>
                                             <ComboBoxItem Content="business"/><ComboBoxItem Content="tech"/><ComboBoxItem Content="science"/>
                                         </ComboBox>
@@ -377,10 +397,10 @@
                                                         <ColumnDefinition Width="36"/>
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock VerticalAlignment="Center"><Run Text="{Binding Symbol, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding Name, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/></TextBlock>
-                                                    <TextBox Grid.Column="1" Text="{Binding Shares, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
-                                                    <TextBox Grid.Column="2" Text="{Binding CostBasis, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
-                                                    <TextBox Grid.Column="3" Text="{Binding AlertAbove, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
-                                                    <TextBox Grid.Column="4" Text="{Binding AlertBelow, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4"/>
+                                                    <TextBox Grid.Column="1" Text="{Binding Shares, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Shares"/>
+                                                    <TextBox Grid.Column="2" Text="{Binding CostBasis, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Cost per share"/>
+                                                    <TextBox Grid.Column="3" Text="{Binding AlertAbove, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Alert above"/>
+                                                    <TextBox Grid.Column="4" Text="{Binding AlertBelow, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Alert below"/>
                                                     <Button Grid.Column="5" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveWatch" Tag="{Binding Symbol}" ToolTip="Remove">
                                                         <c:Icon Kind="trash" Width="13" Height="13"/>
                                                     </Button>
@@ -436,12 +456,13 @@
                                                         <ColumnDefinition Width="*"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
-                                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="0,0,12,0"/>
+                                                    <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Enabled}" Margin="0,0,12,0" AutomationProperties.Name="{Binding Name, StringFormat=Show {0}}"/>
                                                     <StackPanel Grid.Column="1">
                                                         <TextBlock Text="{Binding Name}" FontSize="13.5"/>
                                                         <TextBlock Text="{Binding Url}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"/>
                                                     </StackPanel>
-                                                    <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveCalendar" Tag="{Binding Url}"><c:Icon Kind="trash" Width="13" Height="13"/></Button>
+                                                    <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveCalendar" Tag="{Binding Url}" ToolTip="Remove"
+                                                            AutomationProperties.Name="{Binding Name, StringFormat=Remove {0}}"><c:Icon Kind="trash" Width="13" Height="13"/></Button>
                                                 </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
@@ -617,7 +638,7 @@
                         <c:SettingRow Icon="news" Title="Read the articles for “Tell me more”" Description="Asking about a story reads a couple of the outlets' own articles, not just their headlines and summaries.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ReadStoryArticles}" AutomationProperties.Name="Read the articles for Tell me more"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="brain" Title="Start with Think on" Description="Think makes the model reason before answering: slower, better for tricky questions. You can switch it per question.">
+                        <c:SettingRow Icon="brain" Title="Start with Think on" Description="Think makes the model reason before answering: slower, better for tricky questions. You can switch it per question, and Ask remembers Think and Research for each model you pick there.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ThinkByDefault}" AutomationProperties.Name="Start with Think on"/>
                         </c:SettingRow>
                         <c:SettingRow Icon="wand" Title="Plan searches with the model" Description="Before answering, the model works out proper search queries, the words your files are likely named with and which links to open. Adds a second or two; off uses simpler rules.">
@@ -629,7 +650,7 @@
                             <ComboBox x:Name="ChatRetentionCombo" Width="170" SelectedValuePath="Days" DisplayMemberPath="Label" SelectedValue="{Binding Ask.ChatRetentionDays}"
                                       AutomationProperties.Name="Delete chats after"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="layers" Title="Context window" Description="How much the model can take in at once: the chat so far plus what Aqua gathered. Automatic grows it as a chat needs; bigger remembers more but uses more graphics memory and is slower, and changing it reloads the model.">
+                        <c:SettingRow Icon="layers" Title="Context window" Description="How much the model can take in at once: the chat so far plus what Aqua gathered. Automatic grows it as a chat needs, up to 64K (128K on a graphics card with 24 GB or more); bigger remembers more but uses more graphics memory and is slower, and changing it reloads the model.">
                             <ComboBox x:Name="ContextWindowCombo" Width="200" SelectedValuePath="Tokens" DisplayMemberPath="Label" SelectedValue="{Binding Ask.ContextWindow}"
                                       AutomationProperties.Name="Context window"/>
                         </c:SettingRow>
@@ -661,10 +682,10 @@
                             </StackPanel>
                             <c:SettingRow.Below>
                                 <StackPanel>
-                                    <Grid x:Name="WhisperProgressTrack" Height="6" Margin="0,2,0,8" Visibility="Collapsed" AutomationProperties.Name="Whisper download">
+                                    <c:GroupGrid x:Name="WhisperProgressTrack" Height="6" Margin="0,2,0,8" Visibility="Collapsed" AutomationProperties.Name="Whisper download">
                                         <Border CornerRadius="3" Background="{DynamicResource B.Track}"/>
                                         <Border x:Name="WhisperProgressFill" CornerRadius="3" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
-                                    </Grid>
+                                    </c:GroupGrid>
                                     <TextBlock x:Name="WhisperStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap" AutomationProperties.AutomationId="whisper-status"/>
                                     <WrapPanel Margin="0,6,0,0">
                                         <Button x:Name="WhisperCancelButton" Style="{StaticResource Btn.Standard}" Content="Cancel" Click="OnWhisperCancel" Visibility="Collapsed"
@@ -702,10 +723,10 @@
                             <Button x:Name="VoiceTestButton" Style="{StaticResource Btn.Standard}" Content="Start test" Click="OnVoiceTest" AutomationProperties.AutomationId="voice-test"/>
                             <c:SettingRow.Below>
                                 <StackPanel x:Name="VoiceTestPanel" Visibility="Collapsed" Margin="0,2,0,0">
-                                    <Grid x:Name="VoiceLevelTrack" Height="6" Margin="0,0,0,8" AutomationProperties.Name="Microphone level">
+                                    <c:GroupGrid x:Name="VoiceLevelTrack" Height="6" Margin="0,0,0,8" AutomationProperties.Name="Microphone level">
                                         <Border CornerRadius="3" Background="{DynamicResource B.Track}"/>
                                         <Border x:Name="VoiceLevelFill" CornerRadius="3" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
-                                    </Grid>
+                                    </c:GroupGrid>
                                     <TextBlock x:Name="VoiceTestStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
                                     <TextBox x:Name="VoiceTestHeard" Style="{StaticResource ReadOnlyText}" Margin="0,6,0,0" Visibility="Collapsed" AutomationProperties.Name="What Aqua heard"/>
                                     <TextBox x:Name="VoiceTestTidied" Style="{StaticResource ReadOnlyText}" Margin="0,4,0,0" Visibility="Collapsed" Foreground="{DynamicResource B.Accent}"
@@ -816,7 +837,8 @@
                                                 </StackPanel>
                                                 <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding Pinned}" Content="Pinned" Margin="0,0,16,0"/>
                                                 <CheckBox Grid.Column="2" Style="{StaticResource Switch}" IsChecked="{Binding IsMusicPlayer}" Content="Music" Margin="0,0,10,0"/>
-                                                <Button Grid.Column="3" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveApp" Tag="{Binding Id}"><c:Icon Kind="trash" Width="13" Height="13"/></Button>
+                                                <Button Grid.Column="3" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveApp" Tag="{Binding Id}" ToolTip="Remove"
+                                                        AutomationProperties.Name="{Binding Name, StringFormat=Remove {0}}"><c:Icon Kind="trash" Width="13" Height="13"/></Button>
                                             </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
@@ -968,10 +990,10 @@
                             </StackPanel>
                             <c:SettingRow.Below>
                                 <StackPanel>
-                                    <Grid x:Name="UpdateProgressTrack" Height="6" Margin="0,2,0,8" Visibility="Collapsed" AutomationProperties.Name="Update download">
+                                    <c:GroupGrid x:Name="UpdateProgressTrack" Height="6" Margin="0,2,0,8" Visibility="Collapsed" AutomationProperties.Name="Update download">
                                         <Border CornerRadius="3" Background="{DynamicResource B.Track}"/>
                                         <Border x:Name="UpdateProgressFill" CornerRadius="3" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
-                                    </Grid>
+                                    </c:GroupGrid>
                                     <TextBlock x:Name="UpdateStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap" AutomationProperties.AutomationId="update-status"/>
                                     <TextBox x:Name="UpdateNotes" Style="{StaticResource ReadOnlyText}" Margin="0,8,0,0" MaxHeight="200" VerticalScrollBarVisibility="Auto"
                                              Visibility="Collapsed" AutomationProperties.Name="What's new"/>

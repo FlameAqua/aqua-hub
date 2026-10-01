@@ -79,8 +79,8 @@ public sealed class A07_UpcomingSystemTests : E2ETestBase
         });
         Check("This PC", "Doctor's toolkit → journal maintenance-tool (nothing opens in the sandbox)", () =>
             ExpectJournal("maintenance-tool", () => Ui.Invoke(Button(PageRoot("system"), "Reliability Monitor")), d => d.StartsWith("Reliability Monitor", StringComparison.Ordinal)));
-        Check("This PC", "Storage › Open C: → journal open-folder", () =>
-            ExpectJournal("open-folder", () => Ui.Invoke(Button(PageRoot("system"), "Open C:")), d => d.StartsWith("C:", StringComparison.OrdinalIgnoreCase)));
+        Check("This PC", "Storage › Open C: drive → journal open-folder", () =>
+            ExpectJournal("open-folder", () => Ui.Invoke(Button(PageRoot("system"), "Open C: drive")), d => d.StartsWith("C:", StringComparison.OrdinalIgnoreCase)));
         _ = page;
     });
 }
