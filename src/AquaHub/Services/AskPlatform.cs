@@ -199,8 +199,10 @@ internal sealed class ScreenshotTool : AskTool
             : "the screen couldn't be captured");
         run.SawPrivate = true;
         var prepared = Images.Prepare(png);
+        // The answer shows what Aqua saw (kept with the chat when Settings › Privacy › Keep pictures with chats is on).
+        run.Saw(new AskPicture { Name = "Screenshot of " + what, Kind = "screen", Image = prepared });
         var ocr = await OcrService.ReadImageAsync(prepared, ct);
-        // Its own kind: a moment's view of the screen is never kept with the chat.
+        // Its own kind: the text read off the screen is never kept with the chat's sources (the picture is, with the switch above).
         var n = run.Book.Add("Screenshot", "Your screen", null, "screen", ocr);
         var sb = new StringBuilder();
         sb.Append('[').Append(n).Append("] Screenshot of ").Append(what).Append(run.Vision ? ", attached for you to look at." : " (you can't see images; its text is below).");

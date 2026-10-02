@@ -37,8 +37,9 @@ public static partial class AnswerText
     private static partial Regex FencedPath();
 
     /// <summary>
-    /// Small models write LaTeX in plain answers ("$\rightarrow$", "20$^\circ$C"): shown as the symbols. A path they wrap in
-    /// a code fence becomes an inline path (the chat links paths).
+    /// Small models write single LaTeX symbols in plain answers ("$\rightarrow$", "20$^\circ$C", "2 \times warmer"): shown
+    /// as the symbols. Real formulas ("$E = mc^2$") and code are left as written — the chat draws formulas. A path wrapped
+    /// in a code fence becomes an inline path (the chat links paths).
     /// </summary>
     public static string Tidy(string text)
     {
@@ -51,15 +52,18 @@ public static partial class AnswerText
         if (text.Contains("``", StringComparison.Ordinal))
             text = FencedPath().Replace(text, m => "`" + (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value) + "`");
         if (!text.Contains('\\')) return text;
-        var t = InlineMath().Replace(text, m =>
+        var t = MathText.Outside(text, maths: false, s => InlineMath().Replace(s, m =>
         {
             var inner = m.Groups[1].Value.Trim();
-            return Symbols.FirstOrDefault(s => s.Latex == inner).Symbol ?? inner;
-        });
+            return Symbols.FirstOrDefault(x => x.Latex == inner).Symbol ?? m.Value;
+        }));
         // Only where a command starts a word ("a \times b", "20^\circ"), so paths like C:\Users\me\tools are left alone.
-        foreach (var (latex, symbol) in Symbols)
-            t = Regex.Replace(t, @"(?<=^|[\s(\d])" + Regex.Escape(latex) + @"(?![A-Za-z])", symbol.Replace("$", "$$"));
-        return t;
+        return MathText.Outside(t, maths: true, s =>
+        {
+            foreach (var (latex, symbol) in Symbols)
+                s = Regex.Replace(s, @"(?<=^|[\s(\d])" + Regex.Escape(latex) + @"(?![A-Za-z])", symbol.Replace("$", "$$"));
+            return s;
+        });
     }
 
     [GeneratedRegex(@"^[A-Za-z]:\\")]

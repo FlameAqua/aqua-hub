@@ -743,6 +743,11 @@
                         <c:SettingRow Icon="clock" Title="Earlier messages sent with each question" Description="Older messages are left out (the footer says when).">
                             <ComboBox x:Name="HistoryMessagesCombo" Width="120" SelectedValue="{Binding Ask.HistoryMessages}" AutomationProperties.Name="Earlier messages sent"/>
                         </c:SettingRow>
+                        <c:SettingRow x:Name="Row_compress" Icon="compress" Title="Compress long chats on their own"
+                                      Description="When earlier messages would be left out, the model gets a summary of them instead. The messages stay in the chat."
+                                      Keywords="summary summarise summarize context shorten long chat">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.AutoCompress}" AutomationProperties.Name="Compress long chats on their own"/>
+                        </c:SettingRow>
 
                         <TextBlock Text="VOICE" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
                         <c:SettingRow x:Name="Row_voice" Icon="mic" Title="Voice input" Description="Whisper (install it below) is the most accurate. “Windows online speech” sends your voice to Microsoft and needs Online speech recognition on in Windows.">
@@ -983,6 +988,11 @@
                         </c:SettingRow>
                         <c:SettingRow Icon="ask" Title="Keep Ask chats" Description="Kept on this PC. Off deletes them all.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Privacy.KeepAskHistory}"/>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_pictures" Icon="image" Title="Keep pictures with chats"
+                                      Description="Screenshots and pictures Ask looked at stay with the chat and go when it does. Files on your PC are linked, with a thumbnail. Off deletes them."
+                                      Keywords="screenshots images photos thumbnails screen capture media">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.KeepPictures}" AutomationProperties.Name="Keep pictures with chats"/>
                         </c:SettingRow>
                         <c:SettingRow Icon="clock" Title="Keep items for (days)" Description="Saved stories are kept until you unsave them.">
                             <TextBox Text="{Binding Privacy.RetentionDays, UpdateSourceTrigger=PropertyChanged}" Width="80"/>

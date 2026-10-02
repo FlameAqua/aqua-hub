@@ -440,6 +440,8 @@ internal sealed class NullHost : IAskHost
     public readonly StringBuilder Reasoning = new();
     public Func<ToolApproval, bool> Approve { get; set; } = _ => true;
     public readonly List<ToolApproval> Asked = new();
+    public readonly List<AskPicture> Pictures = new();
+    public void Picture(AskPicture picture) { lock (Pictures) Pictures.Add(picture); }
     public void Status(string text) { }
     public int StepStarted(string icon, string text) { lock (Steps) { Steps.Add(text); return Steps.Count; } }
     public void StepFinished(int id, string text, bool ok = true, string? url = null) { lock (Steps) Steps[id - 1] = text; }

@@ -23,6 +23,8 @@ public sealed class ChatSummary
     /// <summary>Tokens the last answer used and the window it had (the context meter).</summary>
     public int ContextUsed { get; set; }
     public int ContextWindow { get; set; }
+    /// <summary>You undid a compression: this chat isn't compressed on its own again (the Compress button still works).</summary>
+    public bool NoAutoCompress { get; set; }
 }
 
 /// <summary>A message as stored (the same shape older versions used for their single conversation).</summary>
@@ -33,27 +35,51 @@ public sealed record SavedChatMessage(bool User, string Text, List<Citation>? Ci
     public DateTimeOffset? At { get; init; }
     /// <summary>What the answer read (excerpts), so a later question in the chat can use it again; kept for recent answers only.</summary>
     public List<ChatSource>? Sources { get; init; }
+    /// <summary>Pictures: the ones you attached to a question, the ones Ask looked at for an answer.</summary>
+    public List<SavedPicture>? Pictures { get; init; }
+}
+
+/// <summary>A picture kept with a message: a screenshot (whole, in the chat's folder) or a picture on the PC (its path and a thumbnail).</summary>
+public sealed record SavedPicture(string Name, string Kind)
+{
+    /// <summary>The picture on the PC (files only).</summary>
+    public string? Path { get; init; }
+    /// <summary>Its file in the chat's picture folder (<see cref="ChatMedia"/>): the whole screenshot, or a file's thumbnail.</summary>
+    public string? File { get; init; }
+    public bool? Match { get; init; }
+    public string Note { get; init; } = "";
 }
 
 /// <summary>
-/// Ask's chat history in the local database: an index of chats plus each chat's messages. Nothing leaves the PC.
-/// Unstarred chats expire after the number of days in settings (0 keeps them); the single conversation older versions
-/// kept is imported as a chat once.
+/// Ask's chat history in the local database: an index of chats plus each chat's messages, notes and compression, and a
+/// folder per chat for the pictures it keeps. Nothing leaves the PC. Unstarred chats expire after the number of days in
+/// settings (0 keeps them), and everything a chat keeps goes with it; the single conversation older versions kept is
+/// imported as a chat once.
 /// </summary>
-public sealed class ChatStore
+public sealed partial class ChatStore
 {
     private const string IndexKey = "ask:chats";
     private const string ChatPrefix = "ask:chat:";
+    private const string NotesPrefix = "ask:chat-notes:";
+    private const string CompressionPrefix = "ask:chat-compressed:";
     private const string LegacyKey = "ask:conversation";
     public const int MaxChats = 500;
     public const int MaxMessagesPerChat = 300;
     private readonly HubDatabase? _db;
+    private readonly string? _mediaRoot;
     private readonly object _gate = new();
     private List<ChatSummary>? _index;
     // Without a database (tests), chats live in memory.
     private readonly Dictionary<string, List<SavedChatMessage>> _memory = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<ChatNote>> _memoryNotes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ChatCompression> _memoryCompression = new(StringComparer.Ordinal);
 
-    public ChatStore(HubDatabase? db) => _db = db;
+    /// <param name="mediaRoot">Where chats keep their pictures (a folder per chat); null keeps none.</param>
+    public ChatStore(HubDatabase? db, string? mediaRoot = null)
+    {
+        _db = db;
+        _mediaRoot = mediaRoot;
+    }
 
     /// <summary>Raised after the list changes (any thread).</summary>
     public event Action? Changed;
@@ -80,7 +106,7 @@ public sealed class ChatStore
     private static ChatSummary Copy(ChatSummary c) => new()
     {
         Id = c.Id, Title = c.Title, Created = c.Created, Updated = c.Updated, Starred = c.Starred, Count = c.Count, Preview = c.Preview,
-        Named = c.Named, ContextUsed = c.ContextUsed, ContextWindow = c.ContextWindow,
+        Named = c.Named, ContextUsed = c.ContextUsed, ContextWindow = c.ContextWindow, NoAutoCompress = c.NoAutoCompress,
     };
 
     public List<SavedChatMessage> Load(string id)
@@ -114,7 +140,7 @@ public sealed class ChatStore
             else
             {
                 existing.Title = summary.Title; existing.Updated = summary.Updated; existing.Starred = summary.Starred; existing.Named = summary.Named;
-                existing.ContextUsed = summary.ContextUsed; existing.ContextWindow = summary.ContextWindow;
+                existing.ContextUsed = summary.ContextUsed; existing.ContextWindow = summary.ContextWindow; existing.NoAutoCompress = summary.NoAutoCompress;
             }
             existing.Count = keep.Count;
             existing.Preview = HtmlText.Truncate(keep.LastOrDefault(m => !m.User)?.Text.ReplaceLineEndings(" ") ?? "", 140);
@@ -157,14 +183,120 @@ public sealed class ChatStore
             Index().Clear();
             SaveIndex();
             _db?.DeleteJson(LegacyKey);
+            DeleteFolder(_mediaRoot);
         }
         Changed?.Invoke();
     }
 
+    /// <summary>Everything a chat keeps: its messages, notes, compression and pictures.</summary>
     private void DeleteMessages(string id)
     {
-        if (_db is null) _memory.Remove(id);
-        else _db.DeleteJson(ChatPrefix + id);
+        if (_db is null)
+        {
+            _memory.Remove(id);
+            _memoryNotes.Remove(id);
+            _memoryCompression.Remove(id);
+        }
+        else
+        {
+            _db.DeleteJson(ChatPrefix + id);
+            _db.DeleteJson(NotesPrefix + id);
+            _db.DeleteJson(CompressionPrefix + id);
+        }
+        DeleteFolder(MediaFolder(id));
+    }
+
+    // ───────────────────────────── Notes and compression ─────────────────────────────
+
+    public List<ChatNote> LoadNotes(string id)
+    {
+        lock (_gate)
+        {
+            if (_db is null) return _memoryNotes.TryGetValue(id, out var n) ? n.ToList() : new();
+            return _db.GetJson<List<ChatNote>>(NotesPrefix + id) ?? new();
+        }
+    }
+
+    /// <summary>Saves a chat's notes (for a chat in the list; none removes them).</summary>
+    public void SaveNotes(string id, IReadOnlyList<ChatNote> notes)
+    {
+        lock (_gate)
+        {
+            if (!Index().Any(c => c.Id == id)) return;
+            if (_db is null)
+            {
+                if (notes.Count == 0) _memoryNotes.Remove(id);
+                else _memoryNotes[id] = notes.ToList();
+            }
+            else if (notes.Count == 0) _db.DeleteJson(NotesPrefix + id);
+            else _db.PutJson(NotesPrefix + id, notes.ToList());
+        }
+    }
+
+    public ChatCompression? LoadCompression(string id)
+    {
+        lock (_gate)
+        {
+            if (_db is null) return _memoryCompression.TryGetValue(id, out var c) ? c : null;
+            return _db.GetJson<ChatCompression>(CompressionPrefix + id);
+        }
+    }
+
+    /// <summary>Saves (or with null, removes — Undo) a chat's compression.</summary>
+    public void SaveCompression(string id, ChatCompression? compression)
+    {
+        lock (_gate)
+        {
+            if (!Index().Any(c => c.Id == id)) return;
+            if (_db is null)
+            {
+                if (compression is null) _memoryCompression.Remove(id);
+                else _memoryCompression[id] = compression;
+            }
+            else if (compression is null) _db.DeleteJson(CompressionPrefix + id);
+            else _db.PutJson(CompressionPrefix + id, compression);
+        }
+    }
+
+    // ───────────────────────────── Pictures ─────────────────────────────
+
+    [GeneratedRegex(@"^[A-Za-z0-9_-]{1,40}\z")]
+    private static partial Regex SafeId();
+
+    /// <summary>The folder a chat keeps its pictures in (it may not exist yet); null without one or for an id that isn't a plain name.</summary>
+    public string? MediaFolder(string id) => _mediaRoot is null || !SafeId().IsMatch(id) ? null : Path.Combine(_mediaRoot, id);
+
+    /// <summary>Deletes every chat's pictures ("Keep pictures with chats" switched off).</summary>
+    public void DeleteAllMedia() => DeleteFolder(_mediaRoot);
+
+    /// <summary>Deletes picture folders whose chat is gone (one deleted while Aqua was closing, say). Returns how many.</summary>
+    public int PruneMedia()
+    {
+        if (_mediaRoot is null || !Directory.Exists(_mediaRoot)) return 0;
+        HashSet<string> ids;
+        lock (_gate) ids = Index().Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        var gone = 0;
+        try
+        {
+            foreach (var folder in Directory.EnumerateDirectories(_mediaRoot))
+            {
+                if (ids.Contains(Path.GetFileName(folder))) continue;
+                DeleteFolder(folder);
+                gone++;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log.Debug("ask", "Couldn't tidy chat pictures: " + ex.Message); }
+        return gone;
+    }
+
+    private static void DeleteFolder(string? folder)
+    {
+        if (folder is null) return;
+        try
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log.Warn("ask", "Couldn't delete a chat's pictures", ex); }
     }
 
     /// <summary>Deletes unstarred chats not used for <paramref name="days"/> days (0 = keep everything). Returns how many.</summary>

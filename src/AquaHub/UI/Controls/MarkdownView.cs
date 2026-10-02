@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Text.RegularExpressions;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -7,18 +7,20 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using AquaHub.Core.Ai;
+using AquaHub.Core.Ai.Assistant;
 using AquaHub.Platform;
 using AquaHub.Services;
-using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Controls;
 
 /// <summary>
-/// A selectable, copyable rendering of an answer: the Markdown subset local models write (paragraphs, bullets, numbered
-/// lists, headings, **bold**, `code`) with [n] citations as links. Read-only rich text, so you can select any part,
-/// copy it, or right-click to ask about it or search the web for it. Re-renders at most every 80 ms while streaming.
+/// A selectable, copyable rendering of an answer: paragraphs, headings, quotes, nested and numbered lists, code, tables
+/// (native WPF tables) and LaTeX formulae (drawn by XAML-Math), with **bold**, *italic*, `code`, links, file paths and
+/// [n] citations as links. Read-only rich text, so you can select any part, copy it — tables, formulae and whole blocks
+/// copy as the Markdown they came from — or right-click to ask about it or search the web for it. Re-renders at most
+/// every 80 ms while streaming.
 /// </summary>
-public sealed partial class MarkdownView : RichTextBox
+public sealed class MarkdownView : RichTextBox
 {
     public static readonly DependencyProperty MarkdownProperty = DependencyProperty.Register(nameof(Markdown), typeof(string), typeof(MarkdownView),
         new PropertyMetadata("", (d, _) => ((MarkdownView)d).Schedule()));
@@ -61,6 +63,8 @@ public sealed partial class MarkdownView : RichTextBox
         Loaded += (_, _) => Render();
         ContextMenu = BuildMenu();
         ContextMenuOpening += (_, _) => UpdateMenu();
+        // Copying keeps the Markdown: tables and formulae come out as written, not as tab-separated text or nothing.
+        CommandManager.AddPreviewExecutedHandler(this, OnPreviewCommand);
         // Let the chat's scroll viewer handle the wheel (this box never scrolls itself).
         PreviewMouseWheel += (_, e) =>
         {
@@ -94,16 +98,7 @@ public sealed partial class MarkdownView : RichTextBox
         Build(doc, text, Citations);
     }
 
-    // ───────────────────────────── Markdown → FlowDocument ─────────────────────────────
-
-    [GeneratedRegex(@"(\*\*[^*]+\*\*|\[[^\]\n]{1,400}\]\((?:https?://[^\s)]+|file:/{2,3}[^)\n]+|[A-Za-z]:\\[^)\n]+)\)|`[^`]+`|\[\d{1,2}\]|<https?://[^\s<>]+>|https?://[^\s<>()\[\]""']+[^\s<>()\[\]""'.,;:!?]|(?<![\w/\\])[A-Za-z]:\\[^\s<>""|?*()\[\]]*[^\s<>""|?*()\[\].,;:!])")]
-    private static partial Regex Tokens();
-
-    [GeneratedRegex(@"^\[(?<text>[^\]\n]{1,400})\]\((?<url>https?://[^\s)]+|file:/{2,3}[^)\n]+|[A-Za-z]:\\[^)\n]+)\)$")]
-    private static partial Regex MarkdownLink();
-
-    [GeneratedRegex(@"^[A-Za-z]:\\")]
-    private static partial Regex DrivePath();
+    // ───────────────────────────── Links ─────────────────────────────
 
     /// <summary>A clickable web link in an answer (opened in the browser; only http(s)).</summary>
     private static Hyperlink WebLink(string text, string url)
@@ -114,7 +109,7 @@ public sealed partial class MarkdownView : RichTextBox
         return link;
     }
 
-    private static string? LocalPath(string target) => Core.Ai.Assistant.AnswerText.LocalPath(target);
+    private static string? LocalPath(string target) => AnswerText.LocalPath(target);
 
     /// <summary>
     /// A file on the PC named in an answer: click opens documents, pictures and media (anything else is shown in its
@@ -163,131 +158,6 @@ public sealed partial class MarkdownView : RichTextBox
         catch (Exception ex) { Core.Util.Log.Warn("ask", "Couldn't open the file", ex); }
     }
 
-    [GeneratedRegex(@"^(\d+)[.)]\s+")]
-    private static partial Regex Numbered();
-
-    internal static void Build(FlowDocument doc, string text, IReadOnlyList<Citation>? citations)
-    {
-        List? list = null;
-        var listNumbered = false;
-        Paragraph? para = null;
-        Paragraph? code = null;
-        foreach (var raw in text.Replace("\r", "").Split('\n'))
-        {
-            var line = raw.TrimEnd();
-            var trimmed = line.TrimStart();
-            // ``` fenced blocks: kept as written, in a monospace box (paths in them can still be opened).
-            if (trimmed.StartsWith("```", StringComparison.Ordinal))
-            {
-                if (code is null)
-                {
-                    code = new Paragraph { Margin = new Thickness(0, 2, 0, 8), Padding = new Thickness(10, 6, 10, 6), FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = doc.FontSize - 1 };
-                    code.SetResourceReference(Block.BackgroundProperty, "B.Subtle");
-                    doc.Blocks.Add(code);
-                }
-                else code = null;
-                para = null;
-                list = null;
-                continue;
-            }
-            if (code is not null)
-            {
-                if (code.Inlines.Count > 0) code.Inlines.Add(new LineBreak());
-                var path = Core.Ai.Assistant.AnswerText.LocalPath(line.Trim());
-                code.Inlines.Add(path is not null && (File.Exists(path) || Directory.Exists(path)) ? FileLink(new Run(line), path) : new Run(line));
-                continue;
-            }
-            if (trimmed.Length == 0) { para = null; list = null; continue; }
-
-            var bullet = trimmed.StartsWith("- ") || trimmed.StartsWith("* ") || trimmed.StartsWith("• ");
-            var number = Numbered().Match(trimmed);
-            if (bullet || number.Success)
-            {
-                var numbered = number.Success;
-                if (list is null || listNumbered != numbered)
-                {
-                    list = new List
-                    {
-                        MarkerStyle = numbered ? TextMarkerStyle.Decimal : TextMarkerStyle.Disc,
-                        Margin = new Thickness(0, 2, 0, 6),
-                        Padding = new Thickness(22, 0, 0, 0),
-                    };
-                    if (numbered && int.TryParse(number.Groups[1].Value, out var start) && start > 1) list.StartIndex = start;
-                    listNumbered = numbered;
-                    doc.Blocks.Add(list);
-                }
-                var content = numbered ? trimmed[number.Length..] : trimmed[2..];
-                var item = new Paragraph { Margin = new Thickness(0, 1, 0, 1) };
-                Inlines(item.Inlines, content, citations);
-                list.ListItems.Add(new ListItem(item));
-                para = null;
-                continue;
-            }
-            list = null;
-            if (trimmed.StartsWith('#'))
-            {
-                var heading = new Paragraph { Margin = new Thickness(0, 10, 0, 4), FontWeight = FontWeights.SemiBold, FontSize = doc.FontSize + 1.5 };
-                Inlines(heading.Inlines, trimmed.TrimStart('#', ' '), citations);
-                doc.Blocks.Add(heading);
-                para = null;
-                continue;
-            }
-            if (para is null)
-            {
-                para = new Paragraph { Margin = new Thickness(0, 0, 0, 8) };
-                doc.Blocks.Add(para);
-            }
-            else para.Inlines.Add(new LineBreak());
-            Inlines(para.Inlines, trimmed, citations);
-        }
-        // No trailing gap under the last block.
-        if (doc.Blocks.LastBlock is Paragraph last) last.Margin = new Thickness(last.Margin.Left, last.Margin.Top, last.Margin.Right, 0);
-    }
-
-    private static void Inlines(InlineCollection target, string line, IReadOnlyList<Citation>? citations)
-    {
-        foreach (var part in Tokens().Split(line))
-        {
-            if (part.Length == 0) continue;
-            if (part.StartsWith("**") && part.EndsWith("**") && part.Length > 4)
-                target.Add(new Bold(new Run(part[2..^2])));
-            else if (part.StartsWith('`') && part.EndsWith('`') && part.Length > 2)
-            {
-                var code = new Run(part[1..^1]) { FontFamily = new FontFamily("Cascadia Mono, Consolas") };
-                code.SetResourceReference(TextElement.BackgroundProperty, "B.Subtle");
-                // A path in backticks is usually a file Aqua found: make it openable.
-                target.Add(LocalPath(part[1..^1]) is { } codePath ? FileLink(code, codePath) : code);
-            }
-            else if (part.StartsWith('[') && part.EndsWith(']') && int.TryParse(part[1..^1], out var n) &&
-                     citations?.FirstOrDefault(c => c.Number == n) is { } cite)
-            {
-                var link = new Hyperlink(new Run($"[{n}]"))
-                {
-                    TextDecorations = null, Cursor = Cursors.Hand, ToolTip = $"{cite.Source}: {cite.Title}", Focusable = false,
-                };
-                link.SetResourceReference(TextElement.ForegroundProperty, "B.AccentText");
-                link.Click += (_, _) => OpenCitation(cite);
-                target.Add(link);
-            }
-            else if (MarkdownLink().Match(part) is { Success: true } md)
-            {
-                var url = md.Groups["url"].Value;
-                var label = md.Groups["text"].Value.Trim('`', ' ');
-                if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) target.Add(WebLink(label, url));
-                else if (LocalPath(url) is { } linked) target.Add(FileLink(new Run(label), linked));
-                else target.Add(new Run(label));
-            }
-            else if (part.Length > 9 && part[0] == '<' && part[^1] == '>' && part[1..].StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                target.Add(WebLink(part[1..^1], part[1..^1])); // <https://…>
-            else if (part.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || part.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                target.Add(WebLink(part, part));
-            // A bare path ends at the first space, so it's a link only when that is a real file or folder.
-            else if (DrivePath().IsMatch(part) && LocalPath(part) is { } bare && (File.Exists(bare) || Directory.Exists(bare)))
-                target.Add(FileLink(new Run(part), bare));
-            else target.Add(new Run(part));
-        }
-    }
-
     /// <summary>Opens a cited source: web links in the browser; files open with their app when they're documents, pictures or media, else they're shown in their folder (never run).</summary>
     public static void OpenCitation(Citation cite)
     {
@@ -298,6 +168,346 @@ public sealed partial class MarkdownView : RichTextBox
             return;
         }
         AppLauncher.OpenUrl(url);
+    }
+
+    // ───────────────────────────── Markdown → FlowDocument ─────────────────────────────
+
+    private static readonly FontFamily Mono = new("Cascadia Mono, Consolas");
+
+    /// <summary>What drawing an answer needs: its text size and its sources.</summary>
+    private sealed record Ctx(double FontSize, IReadOnlyList<Citation>? Citations);
+
+    internal static void Build(FlowDocument doc, string text, IReadOnlyList<Citation>? citations)
+    {
+        var ctx = new Ctx(doc.FontSize, citations);
+        foreach (var block in AnswerMarkdown.Parse(text)) doc.Blocks.Add(BlockOf(block, ctx, 0));
+        // No trailing gap under the last block.
+        if (doc.Blocks.LastBlock is { } last) last.Margin = new Thickness(last.Margin.Left, last.Margin.Top, last.Margin.Right, 0);
+    }
+
+    /// <summary>A block, tagged with the Markdown it came from (what copying a whole block gives back).</summary>
+    private static Block BlockOf(MdBlock md, Ctx ctx, int level)
+    {
+        Block block = md switch
+        {
+            MdHeading h => HeadingOf(h, ctx),
+            MdCode c => CodeOf(c.Lines, ctx),
+            MdMath m => DisplayMath(m, ctx),
+            MdTable t => TableOf(t, ctx),
+            MdList l => ListOf(l, ctx, level),
+            MdQuote q => QuoteOf(q, ctx, level),
+            MdRule => RuleOf(),
+            MdParagraph p => ParagraphOf(p.Lines, ctx),
+            _ => new Paragraph(),
+        };
+        block.Tag = md.Source;
+        return block;
+    }
+
+    private static Paragraph ParagraphOf(IReadOnlyList<string> lines, Ctx ctx)
+    {
+        var para = new Paragraph { Margin = new Thickness(0, 0, 0, 8) };
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (i > 0) para.Inlines.Add(new LineBreak());
+            Inlines(para.Inlines, lines[i], ctx);
+        }
+        return para;
+    }
+
+    private static Paragraph HeadingOf(MdHeading h, Ctx ctx)
+    {
+        var heading = new Paragraph
+        {
+            Margin = new Thickness(0, h.Level <= 2 ? 14 : 10, 0, 4),
+            FontWeight = FontWeights.SemiBold,
+            FontSize = ctx.FontSize + h.Level switch { 1 => 5, 2 => 3, 3 => 1.5, _ => 0.5 },
+        };
+        Inlines(heading.Inlines, h.Text, ctx);
+        return heading;
+    }
+
+    /// <summary>A code block kept as written, in a monospace box; a line that is a file or folder on the PC can be opened.</summary>
+    private static Paragraph CodeOf(IReadOnlyList<string> lines, Ctx ctx)
+    {
+        var code = new Paragraph { Margin = new Thickness(0, 2, 0, 8), Padding = new Thickness(10, 6, 10, 6), FontFamily = Mono, FontSize = ctx.FontSize - 1 };
+        code.SetResourceReference(TextElement.BackgroundProperty, "B.Subtle");
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (i > 0) code.Inlines.Add(new LineBreak());
+            var line = lines[i].TrimEnd();
+            var path = LocalPath(line.Trim());
+            code.Inlines.Add(path is not null && (File.Exists(path) || Directory.Exists(path)) ? FileLink(new Run(line), path) : new Run(line));
+        }
+        return code;
+    }
+
+    /// <summary>A display formula on its own line, centred and shrunk to fit; while it streams in, or if it can't be drawn, its LaTeX.</summary>
+    private static Block DisplayMath(MdMath m, Ctx ctx)
+    {
+        if (m.Closed && MathView.Create(m.Latex, true, ctx.FontSize) is { } view)
+            return new BlockUIContainer(new Viewbox
+            {
+                Child = view, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 2, 0, 0),
+            }) { Margin = new Thickness(0, 4, 0, 10) };
+        var raw = CodeOf(m.Source.Split('\n'), ctx);
+        if (m.Closed) raw.ToolTip = "This formula couldn't be drawn, so here is its LaTeX.";
+        return raw;
+    }
+
+    private static Block RuleOf()
+    {
+        var line = new Border { Height = 1, SnapsToDevicePixels = true };
+        line.SetResourceReference(Border.BackgroundProperty, "B.Divider");
+        return new BlockUIContainer(line) { Margin = new Thickness(0, 6, 0, 12) };
+    }
+
+    private static Section QuoteOf(MdQuote q, Ctx ctx, int level)
+    {
+        var section = new Section { Margin = new Thickness(0, 2, 0, 8), Padding = new Thickness(12, 0, 0, 0), BorderThickness = new Thickness(3, 0, 0, 0) };
+        section.SetResourceReference(Block.BorderBrushProperty, "B.Divider");
+        section.SetResourceReference(TextElement.ForegroundProperty, "B.Text2");
+        foreach (var child in q.Blocks) section.Blocks.Add(BlockOf(child, ctx, level));
+        if (section.Blocks.LastBlock is { } last) last.Margin = new Thickness(last.Margin.Left, last.Margin.Top, last.Margin.Right, 0);
+        return section;
+    }
+
+    private static List ListOf(MdList l, Ctx ctx, int level)
+    {
+        var list = new List
+        {
+            // Nested lists change marker, as printed lists do: • ◦ ▪ and 1. a. i.
+            MarkerStyle = l.Ordered
+                ? (level % 3) switch { 0 => TextMarkerStyle.Decimal, 1 => TextMarkerStyle.LowerLatin, _ => TextMarkerStyle.LowerRoman }
+                : (level % 3) switch { 0 => TextMarkerStyle.Disc, 1 => TextMarkerStyle.Circle, _ => TextMarkerStyle.Square },
+            Margin = level == 0 ? new Thickness(0, 2, 0, 6) : new Thickness(0, 1, 0, 1),
+            Padding = new Thickness(level == 0 ? 22 : 20, 0, 0, 0),
+        };
+        if (l.Ordered && l.Start > 1) list.StartIndex = l.Start;
+        foreach (var item in l.Items)
+        {
+            var li = new ListItem();
+            foreach (var child in item.Blocks)
+            {
+                var block = BlockOf(child, ctx, level + 1);
+                if (block is Paragraph p && child is MdParagraph) p.Margin = new Thickness(0, 1, 0, 1);
+                li.Blocks.Add(block);
+            }
+            if (li.Blocks.FirstBlock is not Paragraph first)
+            {
+                first = new Paragraph { Margin = new Thickness(0, 1, 0, 1) };
+                if (li.Blocks.FirstBlock is { } head) li.Blocks.InsertBefore(head, first);
+                else li.Blocks.Add(first);
+            }
+            if (item.Checked is { } done)
+            {
+                var box = new Run(done ? "☑ " : "☐ ");
+                if (first.Inlines.FirstInline is { } at) first.Inlines.InsertBefore(at, box);
+                else first.Inlines.Add(box);
+            }
+            list.ListItems.Add(li);
+        }
+        return list;
+    }
+
+    /// <summary>A table with a shaded header row; columns share the width by how much they hold (numbers stay narrow).</summary>
+    private static Table TableOf(MdTable t, Ctx ctx)
+    {
+        var columns = t.Header.Count;
+        var table = new Table { CellSpacing = 0, Margin = new Thickness(0, 4, 0, 10), BorderThickness = new Thickness(1) };
+        table.SetResourceReference(Table.BorderBrushProperty, "B.Divider");
+        for (var c = 0; c < columns; c++)
+        {
+            var column = c;
+            var longest = t.Rows.Select(r => r[column]).Prepend(t.Header[column])
+                .Max(cell => cell.Split('\n').Max(line => AnswerMarkdown.Plain(line).Length));
+            table.Columns.Add(new TableColumn { Width = new GridLength(Math.Sqrt(Math.Clamp(longest, 3, 60)), GridUnitType.Star) });
+        }
+        var rows = new TableRowGroup();
+        table.RowGroups.Add(rows);
+        rows.Rows.Add(Row(t.Header, header: true, last: t.Rows.Count == 0));
+        for (var r = 0; r < t.Rows.Count; r++) rows.Rows.Add(Row(t.Rows[r], header: false, last: r == t.Rows.Count - 1));
+        return table;
+
+        TableRow Row(IReadOnlyList<string> cells, bool header, bool last)
+        {
+            var row = new TableRow();
+            if (header)
+            {
+                row.SetResourceReference(TextElement.BackgroundProperty, "B.Subtle");
+                row.FontWeight = FontWeights.SemiBold;
+            }
+            for (var c = 0; c < columns; c++)
+            {
+                var para = new Paragraph
+                {
+                    Margin = new Thickness(0),
+                    LineHeight = ctx.FontSize * 1.4,
+                    TextAlignment = t.Align[c] switch { MdAlign.Center => TextAlignment.Center, MdAlign.Right => TextAlignment.Right, _ => TextAlignment.Left },
+                };
+                var lines = cells[c].Split('\n');
+                for (var i = 0; i < lines.Length; i++)
+                {
+                    if (i > 0) para.Inlines.Add(new LineBreak());
+                    Inlines(para.Inlines, lines[i], ctx);
+                }
+                var cell = new TableCell(para) { Padding = new Thickness(8, 4, 8, 4), BorderThickness = new Thickness(0, 0, c < columns - 1 ? 1 : 0, last ? 0 : 1) };
+                cell.SetResourceReference(TableCell.BorderBrushProperty, "B.Divider");
+                row.Cells.Add(cell);
+            }
+            return row;
+        }
+    }
+
+    private static void Inlines(InlineCollection target, string line, Ctx ctx)
+    {
+        foreach (var piece in AnswerMarkdown.Inlines(line)) target.Add(InlineOf(piece, ctx));
+    }
+
+    private static Span Spans(IReadOnlyList<MdInline> children, Ctx ctx, Span span)
+    {
+        foreach (var child in children) span.Inlines.Add(InlineOf(child, ctx));
+        return span;
+    }
+
+    private static Inline InlineOf(MdInline piece, Ctx ctx)
+    {
+        switch (piece.Kind)
+        {
+            case MdSpan.Bold:
+                return Spans(piece.Children ?? Array.Empty<MdInline>(), ctx, new Bold());
+            case MdSpan.Italic:
+                return Spans(piece.Children ?? Array.Empty<MdInline>(), ctx, new Italic());
+            case MdSpan.BoldItalic:
+                return new Bold(Spans(piece.Children ?? Array.Empty<MdInline>(), ctx, new Italic()));
+            case MdSpan.Strike:
+                return Spans(piece.Children ?? Array.Empty<MdInline>(), ctx, new Span { TextDecorations = TextDecorations.Strikethrough });
+            case MdSpan.Code:
+            {
+                var code = new Run(piece.Text) { FontFamily = Mono };
+                code.SetResourceReference(TextElement.BackgroundProperty, "B.Subtle");
+                // A path in backticks is usually a file Aqua found: make it openable.
+                return LocalPath(piece.Text) is { } codePath ? FileLink(code, codePath) : code;
+            }
+            case MdSpan.Math:
+                return InlineMath(piece, ctx);
+            case MdSpan.Citation when ctx.Citations?.FirstOrDefault(c => c.Number == piece.Number) is { } cite:
+            {
+                var link = new Hyperlink(new Run($"[{piece.Number}]"))
+                {
+                    TextDecorations = null, Cursor = Cursors.Hand, ToolTip = $"{cite.Source}: {cite.Title}", Focusable = false,
+                };
+                link.SetResourceReference(TextElement.ForegroundProperty, "B.AccentText");
+                link.Click += (_, _) => OpenCitation(cite);
+                return link;
+            }
+            case MdSpan.Link when piece.Target is { } target:
+                if (target.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return WebLink(piece.Text, target);
+                return LocalPath(target) is { } linked ? FileLink(new Run(piece.Text), linked) : new Run(piece.Text);
+            case MdSpan.Url when piece.Target is { } url:
+                return WebLink(piece.Text, url);
+            // A bare path ends at the first space, so it's a link only when that is a real file or folder.
+            case MdSpan.Path when LocalPath(piece.Text) is { } bare && (File.Exists(bare) || Directory.Exists(bare)):
+                return FileLink(new Run(piece.Text), bare);
+            default:
+                return new Run(piece.Text);
+        }
+    }
+
+    /// <summary>A formula in the line, sitting on its baseline; one that can't be drawn shows its LaTeX in code type.</summary>
+    private static Inline InlineMath(MdInline piece, Ctx ctx)
+    {
+        var source = piece.Target ?? "$" + piece.Text + "$";
+        if (MathView.Create(piece.Text, false, ctx.FontSize) is not { } view)
+        {
+            var raw = new Run(source) { FontFamily = Mono, ToolTip = "This formula couldn't be drawn, so here is its LaTeX." };
+            raw.SetResourceReference(TextElement.BackgroundProperty, "B.Subtle");
+            return raw;
+        }
+        // The container stands on the baseline: moving the drawing down by its depth puts the formula's own baseline there.
+        view.RenderTransform = new TranslateTransform(0, Math.Round(view.Depth));
+        return new InlineUIContainer(view) { BaselineAlignment = BaselineAlignment.Baseline, Tag = source };
+    }
+
+    // ───────────────────────────── Copying ─────────────────────────────
+
+    private void OnPreviewCommand(object sender, ExecutedRoutedEventArgs e)
+    {
+        if (e.Command != ApplicationCommands.Copy || Selection.IsEmpty) return;
+        e.Handled = true;
+        AskSession.Copy(SelectionMarkdown());
+    }
+
+    /// <summary>
+    /// The selection as Markdown: all of it gives the whole answer as written; a table, a formula or any block selected
+    /// whole gives its Markdown; part of a block gives its text, with formulae as their LaTeX.
+    /// </summary>
+    public string SelectionMarkdown()
+    {
+        var selection = Selection;
+        if (selection.IsEmpty) return "";
+        var doc = Document;
+        if (!HasContent(doc.ContentStart, selection.Start) && !HasContent(selection.End, doc.ContentEnd)) return (Markdown ?? "").Trim();
+        var parts = new List<string>();
+        foreach (var block in doc.Blocks)
+        {
+            if (block.ContentEnd.CompareTo(selection.Start) <= 0 || block.ContentStart.CompareTo(selection.End) >= 0) continue;
+            var from = selection.Start.CompareTo(block.ContentStart) > 0 ? selection.Start : block.ContentStart;
+            var to = selection.End.CompareTo(block.ContentEnd) < 0 ? selection.End : block.ContentEnd;
+            var whole = !HasContent(block.ContentStart, from) && !HasContent(to, block.ContentEnd);
+            if (block.Tag is string source && source.Length > 0 && (whole || block is Table or BlockUIContainer)) parts.Add(source);
+            else if (TextOf(from, to) is { Length: > 0 } text) parts.Add(text);
+        }
+        return string.Join("\n\n", parts).Trim();
+    }
+
+    /// <summary>Whether there is any text or formula between two positions.</summary>
+    private static bool HasContent(TextPointer from, TextPointer to)
+    {
+        for (var p = from; p is not null && p.CompareTo(to) < 0; p = p.GetNextContextPosition(LogicalDirection.Forward))
+        {
+            switch (p.GetPointerContext(LogicalDirection.Forward))
+            {
+                case TextPointerContext.EmbeddedElement:
+                    return true;
+                case TextPointerContext.Text:
+                    var run = p.GetTextInRun(LogicalDirection.Forward);
+                    var max = p.GetOffsetToPosition(to);
+                    if ((max < run.Length ? run[..max] : run).Trim().Length > 0) return true;
+                    break;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>The text between two positions: line breaks between paragraphs, list items and rows; formulae as their LaTeX.</summary>
+    private static string TextOf(TextPointer from, TextPointer to)
+    {
+        var sb = new StringBuilder();
+        void NewLine() { if (sb.Length > 0 && sb[^1] != '\n') sb.Append('\n'); }
+        for (var p = from; p is not null && p.CompareTo(to) < 0; p = p.GetNextContextPosition(LogicalDirection.Forward))
+        {
+            switch (p.GetPointerContext(LogicalDirection.Forward))
+            {
+                case TextPointerContext.Text:
+                    var run = p.GetTextInRun(LogicalDirection.Forward);
+                    var max = p.GetOffsetToPosition(to);
+                    sb.Append(max < run.Length ? run[..max] : run);
+                    break;
+                case TextPointerContext.ElementStart:
+                    switch (p.GetAdjacentElement(LogicalDirection.Forward))
+                    {
+                        case LineBreak: sb.Append('\n'); break;
+                        case InlineUIContainer { Tag: string math }: sb.Append(math); break;
+                        case BlockUIContainer { Tag: string block }: NewLine(); sb.Append(block).Append('\n'); break;
+                        case TableCell when sb.Length > 0 && sb[^1] != '\n': sb.Append(" | "); break;
+                        case System.Windows.Documents.Paragraph or ListItem or TableRow: NewLine(); break;
+                    }
+                    break;
+            }
+        }
+        return sb.ToString().Trim();
     }
 
     // ───────────────────────────── Context menu ─────────────────────────────
@@ -314,7 +524,7 @@ public sealed partial class MarkdownView : RichTextBox
         menu.Items.Add(copyAll);
         menu.Items.Add(new Separator());
         _ask = new MenuItem { Header = "Ask about this" };
-        _ask.Click += (_, _) => { if (SelectedText() is { Length: > 0 } t) AskAboutSelection?.Invoke(t); };
+        _ask.Click += (_, _) => { if (SelectionMarkdown() is { Length: > 0 } t) AskAboutSelection?.Invoke(t); };
         _search = new MenuItem { Header = "Search the web for this" };
         _search.Click += (_, _) => { if (SelectedText() is { Length: > 0 } t) SearchSelection?.Invoke(t); };
         menu.Items.Add(_ask);
@@ -324,9 +534,8 @@ public sealed partial class MarkdownView : RichTextBox
 
     private void UpdateMenu()
     {
-        var has = SelectedText().Length > 0;
-        if (_ask is not null) _ask.IsEnabled = has;
-        if (_search is not null) _search.IsEnabled = has;
+        if (_ask is not null) _ask.IsEnabled = !Selection.IsEmpty;
+        if (_search is not null) _search.IsEnabled = SelectedText().Length > 0;
     }
 
     public string SelectedText() => Selection.IsEmpty ? "" : Selection.Text.Trim();

@@ -15,6 +15,8 @@ public sealed class HubPaths
     public string Database => Path.Combine(Root, "hub.db");
     public string Logs => Path.Combine(Root, "logs");
     public string ImageCache => Path.Combine(Root, "cache", "images");
+    /// <summary>Pictures Ask's chats keep (a folder per chat, deleted with it).</summary>
+    public string ChatMedia => Path.Combine(Root, "chat-media");
 
     /// <summary>%LOCALAPPDATA%\AquaHub, or AQUAHUB_HOME / --data-dir when set.</summary>
     public static HubPaths Resolve(string? overrideDir = null)
@@ -77,7 +79,7 @@ public sealed class HubCore : IDisposable
         WebSearch = new WebSearch(Http, () => Settings.Current, secrets);
         WebReader = new WebReader();
         Workbench = new Ai.Assistant.Workbench(Db);
-        Chats = new Ai.Assistant.ChatStore(Db);
+        Chats = new Ai.Assistant.ChatStore(Db, paths.ChatMedia);
         SkillDrafter = new Ai.Assistant.SkillDrafter(Llm);
         Assistant = new Ai.Assistant.AskAgent(State, Db, Llm, () => Settings.Current, WebSearch, WebReader, Workbench) { RunAgent = Agents.RunAndWaitAsync };
         Commands = new CommandInterpreter(Llm, () => Settings.Current);

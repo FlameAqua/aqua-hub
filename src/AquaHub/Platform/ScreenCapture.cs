@@ -11,8 +11,9 @@ namespace AquaHub.Platform;
 /// <summary>
 /// Screenshots for Ask: a screen (any of them, numbered left to right), all screens at once, one app window (even when
 /// it's behind others), or a region you snip yourself with Windows' Snipping Tool (Win+Shift+S overlay), picked up from
-/// the clipboard. Aqua's own windows are hidden for the moment of a screen capture. Nothing is saved to disk; the image
-/// goes only to the local model or to on-device OCR.
+/// the clipboard. Aqua's own windows are hidden for the moment of a screen capture. The image goes only to the local
+/// model and on-device OCR — and, with Settings › Privacy › Keep pictures with chats on, into the chat's own picture
+/// folder, deleted with the chat.
 /// </summary>
 public static class ScreenCapture
 {

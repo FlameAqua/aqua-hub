@@ -17,7 +17,7 @@ taskbar quick panel, a global command palette and toast alerts. All AI runs on t
 | Storage | **SQLite** (Microsoft.Data.Sqlite, WAL, FTS5) | Zero-admin, crash-safe, full-text search for “Ask Aqua”. |
 | Local AI | **Ollama** (default) or any **OpenAI-compatible** local server (LM Studio, llama.cpp, vLLM) | Swap models freely; loopback-only by default. |
 | Default model | `qwen3.5:9b` (auto-detected) | Strong instruction following + structured output at ~6 GB VRAM; fits a 12 GB GPU with room for context. `qwen3:14b`/`gemma3:12b` optional for long write-ups. Falls back to smaller models (`qwen3.5:4b`, `gemma3:4b`) on smaller GPUs. |
-| Third-party runtime deps | **3** (Microsoft.Data.Sqlite → SQLitePCLRaw; System.Speech for offline dictation; Velopack for Setup and updates, §13) | Everything else is BCL/Windows SDK: HTTP, JSON, XML, WinRT, Win32. Whisper is an optional download, not a package (§11). |
+| Third-party runtime deps | **4** (Microsoft.Data.Sqlite → SQLitePCLRaw; System.Speech for offline dictation; Velopack for Setup and updates, §13; XAML-Math — WpfMath → XamlMath.Shared — for formulae in Ask's answers, §10) | Everything else is BCL/Windows SDK: HTTP, JSON, XML, WinRT, Win32. Whisper is an optional download, not a package (§11). |
 
 ## 2. Solution layout
 
@@ -44,13 +44,14 @@ src/AquaHub          Windows shell (WPF)
                      taskbar integration (jump list, thumbnail media buttons, alerts badge)
   UI/                design system (Theme/*.xaml), controls (charts, gauges, icons, FlowGrid),
                      shell (MainWindow, FlyoutWindow, CommandPalette, Onboarding), pages
-tests/AquaHub.Tests  xUnit (750+): parsers, security cases, clustering, indicators, ICS, commands,
+tests/AquaHub.Tests  xUnit (840+): parsers, security cases, clustering, indicators, ICS, commands,
                      LLM plumbing, DB, settings merge, notification policy, scheduling/back-off,
                      Sentinel de-duplication, fact checks, the update flow (fake updater), your place,
-                     Ask's model picker, a XAML accessibility contract (no name or id on an element
-                     without an automation peer), the collectors and AI agents against a stand-in
-                     network (FakeNetwork) and model server (FakeOllama); plus an opt-in live run
-                     (AQUAHUB_LIVE=1)
+                     Ask's model picker, Ask's Markdown and LaTeX (formulae run through XAML-Math's own
+                     parser), chat notes, compression and pictures, a XAML accessibility contract (no
+                     name or id on an element without an automation peer), the collectors and AI agents
+                     against a stand-in network (FakeNetwork) and model server (FakeOllama); plus an
+                     opt-in live run (AQUAHUB_LIVE=1)
 tests/AquaHub.E2E    UI Automation suite that drives the real app (every page, button, window)
                      in a sandboxed --e2e profile where side effects are journalled, not performed
 ```
@@ -342,12 +343,58 @@ out counts as a citation too. "Remember …" / "Forget …" answers offer *Undo*
 Your questions are selectable as well, with *Copy* and *Edit and ask again* (in place: the question and what
 followed are replaced; ↑ in an empty box edits the last one).
 
+**Tables and maths.** `AnswerMarkdown` parses an answer into blocks — headings, paragraphs, lists nested to any
+depth (bulleted, numbered, task lists), quotes, rules, code, tables and display maths — and their inline spans, and
+`MarkdownView` lays them out in a `FlowDocument`. A Markdown table becomes a native WPF table (a shaded header row,
+each column's alignment, widths shared by how much each column holds). LaTeX — `$…$`, `\(…\)`, `$$…$$`, `\[…\]` or a
+bare `\begin{align}` — is drawn by XAML-Math (`MathView`; inline formulae sit on the text's baseline). XAML-Math
+knows a subset of LaTeX, so `MathText.Normalize` first rewrites what models write into it (`\dfrac`, `\mathbb` and
+the other font commands, `cases`, `bmatrix` and the other matrices, `aligned`, `\tag`, Unicode such as ×, ≤, π, ²,
+½), and `MathText.Drawable` turns away formulae long or nested enough to overflow its recursive parser; whatever it
+still can't draw is shown as its source. Prices stay text: as in Pandoc, `$` opens maths only with no space after it
+and closes it only with no space before it and no digit after, so "$5 and $10" is two prices. A table or formula
+still streaming in shows as text until it's complete. Copying keeps the Markdown: everything selected copies the
+answer as written, a table, formula or block selected whole copies its source, and part of a block its text with
+formulae as their LaTeX.
+
 **Chats** (`ChatStore`, `AskSession`). Every chat is kept in the local database — an index plus each chat's
 messages — with a title from the first question (renamed by the model once it has answered). The history
 panel groups chats (Starred, Today, Yesterday, Previous 7 and 30 days, Older), searches titles and messages,
 and stars, renames and deletes them. Unstarred chats not used for *Delete chats after* days (30 by default,
 or never) are deleted at start-up; *Keep Ask chats* off deletes them all. Each chat is a `ChatThread` with its
-own answer in flight, so an answer keeps streaming in a chat you've left.
+own answer in flight, so an answer keeps streaming in a chat you've left. Everything a chat keeps beside its
+messages — notes, compression, pictures — is deleted with it.
+
+**Notes** (`ChatNotes`, `UpdateNotesTool`). Each chat has notes — facts, decisions and open questions — that go into
+every answer's context ahead of the situation digest (so they're the last thing trimmed), even once the messages
+they came from are no longer sent. The model keeps them with `update_notes` (at most six changes an answer, up to 400
+characters a note, 60 notes; a note repeating one already there — in other words, but with the same numbers — is
+refused). The notes panel beside the chat shows them as plain text under three headings, and you can edit it: an edit
+keeps notes Aqua added while you typed, and lines you wrote are marked as yours. Notes Aqua wrote count as untrusted
+(they came from what the chat read), so an answer that reads them asks before acting as if it had read a page.
+They're separate from Memory: they belong to the chat, and go into its export.
+
+**Compression** (`ChatCompressor`). *Compress* in the context meter's popup — or, with *Compress long chats on
+their own* on, a check after each answer, once there are more messages than a question sends or the last answer
+filled 80 % of the largest window Ask may use — replaces whole exchanges at the start of the chat (all but the last two) with a summary
+the model writes under fixed headings (*What was asked*, *What Aqua found*, *Decisions*, *Open questions*), told to
+keep every name, number, date, price, decision and source; a reply that isn't clearly shorter than what it replaces
+is refused. A long chat is compressed in steps, each on top of the summary so far. The model then gets the summary
+instead of those messages, and the chat says what it saved ("about 9,800 → 1,100 tokens"); the messages stay in the
+chat and its history, dimmed, and *Undo* sends them in full again (and stops that chat compressing on its own). A
+summary carries a fingerprint of the messages it stands in for, so editing or re-asking one of them drops it. After a
+failed automatic attempt it waits two exchanges before trying again.
+
+**Pictures** (`AskRun.Saw`, `ChatMedia`). The screenshots Ask takes and the pictures it reads, or looks at while
+searching for one you described, show as thumbnails in the answer — each once, at most eight, the ones that match
+first; a click opens a screenshot in a window of its own and a picture on the PC with its app. With Settings ›
+Privacy › *Keep pictures with chats* (on by default) they're kept with the chat in
+`%LOCALAPPDATA%\AquaHub\chat-media\<chat>`: screenshots and pasted pictures whole, pictures on the PC as a 320-pixel
+thumbnail beside their path (the file stays where it is, and opens from there; if it has gone, the thumbnail opens).
+Pictures you attach to a question are kept the same way and open from their chip. Files are named from a hash of
+their content, so a picture is kept once and a name read back from the database can only reach that folder. The
+folder goes with its chat (folders whose chat is gone are tidied away when Ask loads its history), and switching the
+setting off deletes every chat's pictures.
 
 **Model.** A picker in the composer chooses the model Ask answers with (Settings › AI's model until you pick
 one). Every call of an answer goes to it (`LlmRequest.Model`): planning, reading a long page in parts, looking
@@ -363,7 +410,7 @@ Past that limit a prompt is trimmed like a fixed window rather than sent whole (
 start, the instructions). A fixed window (8K–128K) leaves out the oldest messages first, then the end of the
 gathered material.
 The meter under the Ask box shows the last answer's prompt + reply tokens against the window; its popup changes
-the window and how many earlier messages each question sends.
+the window and how many earlier messages each question sends, and compresses the chat (above).
 
 **Voice.** The microphone button dictates into the Ask box: with Whisper once installed, offline with Windows'
 desktop speech recognizer (`System.Speech`) — nothing leaves the PC with either — or, if you choose it, Windows
@@ -380,7 +427,8 @@ that…" in Ask, or added in the Workbench) go into every answer's prompt and th
 
 **Tested** with a scripted fake Ollama (planning, tool calls, tool results, thinking, looking at pictures,
 reasoning cut short, narration moved out, memories and skills, images for vision and OCR text for non-vision
-models, declined actions) and live against `qwen3.5:9b` (`LiveAskTests`, `AQUAHUB_LIVE=1`): story questions, a
+models, declined actions, a chat's notes and summary in the context, `update_notes`, compressing a chat, the
+pictures an answer shows), the formulae models write run through XAML-Math's own parser, and live against `qwen3.5:9b` (`LiveAskTests`, `AQUAHUB_LIVE=1`): story questions, a
 web lookup, finding someone's X account and linking it, searching through a site you give it, a research report,
 a question about local files, finding a picture by what it shows (and again from a follow-up), an image, and
 reasoning.

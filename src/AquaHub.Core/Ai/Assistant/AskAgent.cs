@@ -61,7 +61,7 @@ public sealed partial class AskAgent
 
     public async Task<AskResult> RunAsync(string question, IReadOnlyList<LlmMessage> history, IReadOnlyList<AskAttachment> attachments,
         AskOptions options, IAskHost host, IAskPlatform? platform, HashSet<string> allowedForChat, CancellationToken ct,
-        IReadOnlyList<ChatSource>? earlier = null)
+        IReadOnlyList<ChatSource>? earlier = null, AskChatContext? chat = null)
     {
         var sw = Stopwatch.StartNew();
         var s = _settings();
@@ -93,7 +93,7 @@ public sealed partial class AskAgent
             State = _state, Db = _db, Settings = s, Book = new SourceBook(), Options = options, Host = host, Platform = platform,
             Web = options.UsesWeb ? _web : null, Reader = options.UsesWeb || options.StoryId is not null ? _reader : null, Files = files,
             Vision = caps.Vision, Question = question, AllowedForChat = allowedForChat, PrivateTerms = PrivateTermsFor(_state, memories, DateTimeOffset.Now),
-            Skills = skills, Memories = memories, RunAgent = RunAgent,
+            Skills = skills, Memories = memories, RunAgent = RunAgent, Chat = chat,
         };
         foreach (var a in attachments) if (a.Path is { } p) files?.Grant(p);
         if (attachments.Count > 0) run.SawPrivate = run.SawUntrusted = true;
@@ -169,6 +169,19 @@ public sealed partial class AskAgent
     {
         var s = run.Settings;
         var sb = new StringBuilder();
+        // The chat's own memory first (the end of the context is what's cut when it has to fit): the summary standing in
+        // for its compressed messages, and its notes. Both were written from what the chat read, so they count as untrusted.
+        if (run.Chat is { Summary.Length: > 0 } chat)
+        {
+            sb.Append("THIS CHAT SO FAR (Aqua's summary of its first ").Append(chat.SummaryCovers)
+              .Append(" messages, compressed to save room; the newer messages are sent in full):\n").Append(chat.Summary.Trim()).Append("\n\n");
+            run.SawUntrusted = true;
+        }
+        if (run.Notes?.ForPrompt() is { Length: > 0 } notes)
+        {
+            sb.Append("NOTES FOR THIS CHAT (kept with it by Aqua and the user: facts, decisions and open questions):\n").Append(notes).Append('\n');
+            if (run.Notes.Items.Any(n => n.By != "you")) run.SawUntrusted = true;
+        }
         // Aqua's own digest: context, not a source (a model once listed the brief's headline as a site's article).
         sb.Append("THE USER'S SITUATION (Aqua's own summary for context — not a source: never cite it, link it or present it as an article):\n")
           .Append(Digest.Situation(_state, s, brief: AskPlanner.Links(question).Count == 0)).Append('\n');
@@ -350,6 +363,7 @@ public sealed partial class AskAgent
                     Attachments = attachments.Select(a => a.Name + (a.Kind == AttachmentKind.Image ? " (picture)" : "")).ToList(),
                     Research = o.Research,
                     Refreshed = AgentJobs.Ran(run),
+                    ChatSummary = run.Chat?.Summary ?? "",
                 }, run.Now);
                 var (doc, _) = await _llm.CompleteJsonAsync(request with { Model = o.Model }, timeout.Token).ConfigureAwait(false);
                 using (doc) plan = AskPlanner.Merge(doc.RootElement, rules, question, o, run.Skills.Select(k => k.Name).ToList(), history);
@@ -434,6 +448,8 @@ public sealed partial class AskAgent
         else sb.Append("- Use my PC is OFF: you can't see the user's files or screen or open anything. If they ask for that, tell them to switch on Use my PC below the Ask box.\n");
         if (tools && toolNames.Contains("calculate"))
             sb.Append("- calculate, date_math and convert_units do sums, dates and units exactly: use them instead of working anything out in your head.\n");
+        if (tools && toolNames.Contains("update_notes"))
+            sb.Append("- update_notes keeps this chat's notes (they're in the CONTEXT): note a fact, decision or open question worth keeping as the chat goes on, and remove one that's settled — not after every answer.\n");
         sb.Append("- You never run programs, scripts or shell commands, and never read passwords or keys.\n");
 
         // How a careful person works a question out (the same steps Aqua's own reviewers look for).
@@ -464,6 +480,7 @@ public sealed partial class AskAgent
             "report" => "- Format: a two- or three-sentence answer first, then short sections with headings (for a page or chapter: in its order, through to the end).\n",
             _ => "- Format: lead with the answer in one to three sentences — the link or the file first when that's what they asked for — then only the detail that helps.\n",
         });
+        sb.Append("- The chat shows Markdown tables and LaTeX maths ($…$ inline, $$…$$ on its own line): use a table to compare several things on the same points, and LaTeX for real formulas — not for plain numbers, prices or units.\n");
         sb.Append("- For money topics give balanced, educational information, not personal financial advice.\n");
         if (tools && toolNames.Count > 0) sb.Append("Call tools when the CONTEXT doesn't already answer the question; when you have enough, write the final answer with no more tool calls.\n");
         if (vision) sb.Append("Images the user attached or you opened are included; describe what you actually see.\n");
@@ -494,6 +511,7 @@ public sealed partial class AskAgent
         if (run.Options.UsesWeb) tools.AddRange(WebTools());
         if (run.Files is not null) tools.AddRange(FileTools());
         if (run.Options.Computer && run.Platform is not null) tools.AddRange(run.Platform.ComputerTools());
+        if (run.Notes is not null) tools.Add(new UpdateNotesTool());
         var byName = tools.GroupBy(t => t.Name).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
         // Gather what the plan says the question needs (web, links, files, screen, a skill's steps) before the model
@@ -1489,6 +1507,9 @@ public sealed partial class AskAgent
                 catch (Exception e) when (e is FormatException or JsonException or HttpRequestException or InvalidOperationException) { Log.Debug("ask", e.Message); }
             }
         }
+        // The answer shows the pictures it looked at, those that match first.
+        foreach (var (hit, bytes) in prepared.Where(p => result.ContainsKey(p.Hit.Path)).OrderByDescending(p => result[p.Hit.Path].Match))
+            run.Saw(new AskPicture { Name = hit.Name, Path = hit.Path, Image = bytes, Match = result[hit.Path].Match, Note = result[hit.Path].Shows });
         return result;
     }
 
@@ -1546,6 +1567,9 @@ public sealed partial class AskAgent
     internal static int AutomaticLimit(double vramGb) => vramGb >= 24 ? MaxAutomatic : 65536;
 
     private int AutomaticLimitNow => AutomaticLimit(_state.System?.Gpu?.VramTotalGb ?? 0);
+
+    /// <summary>The most context an answer can have on this PC: the fixed window, or as far as Automatic grows.</summary>
+    public static int ContextLimit(HubSettings s, double vramGb) => s.Ask.ContextWindow > 0 ? s.Ask.ContextWindow : AutomaticLimit(vramGb);
 
     private static int Need(int systemChars, IReadOnlyList<LlmMessage> messages, int answerTokens) =>
         (int)((systemChars + messages.Sum(m => m.Content.Length + (m.Images?.Count ?? 0) * 3000)) / 3.2) + answerTokens;

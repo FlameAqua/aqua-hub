@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using AquaHub.Core.Ai;
 using AquaHub.Core.Ai.Assistant;
+using AquaHub.Core.Util;
 using AquaHub.Platform;
 using AquaHub.Services;
 using AquaHub.UI.Controls;
@@ -30,7 +31,15 @@ public partial class AskPage : UserControl, IPage
 
     /// <summary>The history panel's state for this session (null: decide by window width).</summary>
     private static bool? _historyOpen;
+    /// <summary>The notes panel is shown (for this session).</summary>
+    private static bool _notesOpen;
     private readonly UiThrottle _scroll;
+    /// <summary>Saves what you type in the notes a moment after you stop.</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _notesTimer;
+    /// <summary>The chat whose notes are being edited, and when you started (notes Aqua adds meanwhile are kept).</summary>
+    private ChatThread? _notesThread;
+    private DateTimeOffset _notesEditStarted;
+    private bool _notesDirty, _fillingNotes;
     private bool _syncing;
     private bool _follow = true;
     private string _dictationBase = "";
@@ -64,6 +73,8 @@ public partial class AskPage : UserControl, IPage
         Session.Voice.Problem += OnVoiceProblem;
         Session.Voice.Level += OnVoiceLevel;
         Session.Voice.Transcribing += OnVoiceTranscribing;
+        _notesTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
+        _notesTimer.Tick += (_, _) => { _notesTimer.Stop(); CommitNotes(); };
     }
 
     private static AskSession Session => Hub.Ask;
@@ -86,8 +97,14 @@ public partial class AskPage : UserControl, IPage
         Session.Pending.CollectionChanged += OnPendingChanged;
         Session.Chats.CollectionChanged -= OnChatsChanged;
         Session.Chats.CollectionChanged += OnChatsChanged;
+        Session.NotesChanged -= OnNotesChanged;
+        Session.NotesChanged += OnNotesChanged;
+        Session.CompressionChanged -= OnCompressionChanged;
+        Session.CompressionChanged += OnCompressionChanged;
         OnPendingChanged(null, null);
         OnChatsChanged(null, null);
+        ApplyNotesVisibility();
+        FillNotes();
         MarkdownView.AskAboutSelection -= OnAskAboutSelection;
         MarkdownView.AskAboutSelection += OnAskAboutSelection;
         MarkdownView.SearchSelection -= OnSearchSelection;
@@ -120,10 +137,13 @@ public partial class AskPage : UserControl, IPage
         Session.ContextChanged -= UpdateContext;
         Session.Pending.CollectionChanged -= OnPendingChanged;
         Session.Chats.CollectionChanged -= OnChatsChanged;
+        Session.NotesChanged -= OnNotesChanged;
+        Session.CompressionChanged -= OnCompressionChanged;
         Hub.Core.Settings.Changed -= OnSettings;
         MarkdownView.AskAboutSelection -= OnAskAboutSelection;
         MarkdownView.SearchSelection -= OnSearchSelection;
         if (Session.Voice.IsListening) Session.Voice.Stop();
+        CommitNotes();
     }
 
     /// <summary>Shows the current chat (called again when another chat is opened).</summary>
@@ -139,11 +159,93 @@ public partial class AskPage : UserControl, IPage
 
     private void OnChatChanged() => Hub.OnUi(() =>
     {
+        // What you were typing in the notes belongs to the chat you were in.
+        CommitNotes();
+        _compressSaid = null;
         Bind();
         OnBusyChanged();
+        FillNotes(force: true);
         _follow = true;
         Dispatcher.BeginInvoke(() => Scroller.ScrollToEnd(), System.Windows.Threading.DispatcherPriority.Background);
     });
+
+    // ───────────────────────────── Notes ─────────────────────────────
+
+    private void OnToggleNotes(object sender, RoutedEventArgs e)
+    {
+        CommitNotes();
+        _notesOpen = !_notesOpen;
+        ApplyNotesVisibility();
+        FillNotes(force: true);
+        if (_notesOpen) Dispatcher.BeginInvoke(() => NotesBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void ApplyNotesVisibility()
+    {
+        NotesPanel.Visibility = _notesOpen ? Visibility.Visible : Visibility.Collapsed;
+        NotesButton.ToolTip = _notesOpen ? "Hide this chat's notes" : Session.Current.Notes.Count > 0 ? $"Notes for this chat ({Session.Current.Notes.Count})" : "Notes for this chat";
+        NotesDot.Visibility = !_notesOpen && Session.Current.Notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Shows the chat's notes in the box — never over what you're typing (unless <paramref name="force"/>: another chat).</summary>
+    private void FillNotes(bool force = false)
+    {
+        if (!force && (_notesDirty || NotesBox.IsKeyboardFocusWithin)) return;
+        _notesTimer.Stop();
+        _notesDirty = false;
+        _notesThread = Session.Current;
+        var notes = Session.Current.Notes.Items;
+        _fillingNotes = true;
+        NotesBox.Text = ChatNotes.ToText(notes);
+        _fillingNotes = false;
+        var last = notes.Where(n => n.By == "aqua").MaxBy(n => n.At);
+        NotesStatus.Text = notes.Count == 0 ? "No notes yet."
+            : Plural.Of(notes.Count, "note") + (last is null ? "" : " · Aqua last added one " + TimeText.Ago(last.At));
+    }
+
+    private void OnNotesChanged()
+    {
+        ApplyNotesVisibility();
+        if (_notesOpen) FillNotes();
+    }
+
+    private void OnNotesEntered(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (_notesDirty) return;
+        _notesThread = Session.Current;
+        _notesEditStarted = DateTimeOffset.Now;
+    }
+
+    private void OnNotesTyped(object sender, TextChangedEventArgs e)
+    {
+        if (_fillingNotes) return;
+        if (!_notesDirty)
+        {
+            _notesThread ??= Session.Current;
+            if (!NotesBox.IsKeyboardFocusWithin) _notesEditStarted = DateTimeOffset.Now;
+        }
+        _notesDirty = true;
+        _notesTimer.Stop();
+        _notesTimer.Start();
+    }
+
+    private void OnNotesLeft(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        CommitNotes();
+        FillNotes();
+    }
+
+    /// <summary>Saves what you typed to the chat it was typed for, keeping notes Aqua added meanwhile.</summary>
+    private void CommitNotes()
+    {
+        _notesTimer.Stop();
+        if (!_notesDirty) return;
+        _notesDirty = false;
+        var thread = _notesThread ?? Session.Current;
+        thread.Notes.ApplyEdit(NotesBox.Text, _notesEditStarted, DateTimeOffset.Now);
+        _notesEditStarted = DateTimeOffset.Now;
+        NotesStatus.Text = Plural.Of(thread.Notes.Count, "note") + " · saved";
+    }
 
     /// <summary>
     /// Page arguments from other surfaces: "@clipboard", "@story:&lt;id&gt;", "@screen", "@attach", "@new", "@history",
@@ -625,16 +727,77 @@ public partial class AskPage : UserControl, IPage
         ContextDetail.Text = used == 0
             ? $"Nothing used in this chat yet. The window is {mode}."
             : $"The last answer used about {used.ToString("N0", CultureInfo.CurrentCulture)} of {window.ToString("N0", CultureInfo.CurrentCulture)} tokens ({share:P0}). The window is {mode}.";
+        ContextButton.ToolTip = share >= 0.85 ? "Nearly full: compressing the chat keeps its thread (click for more)" : "How much of the context window this chat uses";
         _syncing = true;
         ContextWindowCombo.SelectedItem = ContextWindowCombo.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == Hub.S.Ask.ContextWindow.ToString(CultureInfo.InvariantCulture));
         HistoryCombo.SelectedItem = HistoryCombo.Items.Cast<ComboBoxItem>().OrderBy(i => Math.Abs(int.Parse((string)i.Tag, CultureInfo.InvariantCulture) - Hub.S.Ask.HistoryMessages)).First();
+        AutoCompressBox.IsChecked = Hub.S.Ask.AutoCompress;
         _syncing = false;
+        UpdateCompression();
+    }
+
+    // ───────────────────────────── Compressing ─────────────────────────────
+
+    /// <summary>The popup's Compress section: what's compressed, or what compressing would do.</summary>
+    private void UpdateCompression()
+    {
+        var thread = Session.Current;
+        var compression = Session.CompressionOf(thread);
+        var (messages, tokens) = Session.CompressionPreview(thread);
+        CompressButton.IsEnabled = !thread.Compressing && !thread.IsBusy && messages > 0;
+        UncompressButton.Visibility = compression is not null && !thread.Compressing ? Visibility.Visible : Visibility.Collapsed;
+        if (thread.Compressing) CompressDetail.Text = "Compressing: the model is writing a summary of the earlier messages…";
+        else if (_compressSaid is { } said) CompressDetail.Text = said;
+        else if (compression is not null)
+            CompressDetail.Text = $"{Plural.Of(compression.Covers, "earlier message")} go to the model as a summary (about {AskSession.TokenCount(compression.TokensBefore)} → " +
+                                  $"{AskSession.TokenCount(compression.TokensAfter)} tokens). They stay in the chat." +
+                                  (messages > 0 ? $" Compressing again would add {Plural.Of(messages, "more message")}." : "");
+        else if (messages > 0)
+            CompressDetail.Text = $"The model would get a summary of {Plural.Of(messages, "earlier message")} (about {AskSession.TokenCount(tokens)} tokens) instead; " +
+                                  "they stay in the chat, and the last two exchanges are always sent in full.";
+        else CompressDetail.Text = "Nothing to compress yet: the last two exchanges are always sent in full.";
+    }
+
+    /// <summary>What the last Compress said, shown until the chat or its compression changes.</summary>
+    private string? _compressSaid;
+
+    private async void OnCompress(object sender, RoutedEventArgs e)
+    {
+        var thread = Session.Current;
+        _compressSaid = null;
+        CompressButton.IsEnabled = false;
+        var said = await Session.CompressAsync(thread);
+        if (!ReferenceEquals(thread, Session.Current)) return;
+        UpdateContext();
+        // What happened (or why nothing did) stays in the popup until it's opened again or the chat or its compression changes.
+        _compressSaid = said;
+        UpdateCompression();
+    }
+
+    private void OnCompressionChanged()
+    {
+        _compressSaid = null;
+        UpdateCompression();
+    }
+
+    private void OnUncompress(object sender, RoutedEventArgs e)
+    {
+        _compressSaid = null;
+        Session.UndoCompression(Session.Current);
+    }
+
+    private void OnAutoCompress(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        var on = AutoCompressBox.IsChecked == true;
+        Hub.Core.Settings.Update(s => s.Ask.AutoCompress = on);
     }
 
     private static string Tokens(int n) => n >= 1000 ? (n / 1000.0).ToString(n >= 10000 ? "0" : "0.#", CultureInfo.CurrentCulture) + "K" : n.ToString(CultureInfo.CurrentCulture);
 
     private void OnContext(object sender, RoutedEventArgs e)
     {
+        if (!ContextPopup.IsOpen) _compressSaid = null;
         UpdateContext();
         ContextPopup.IsOpen = !ContextPopup.IsOpen;
     }
@@ -891,5 +1054,6 @@ public partial class AskPage : UserControl, IPage
     {
         StopButton.Visibility = Session.IsBusy ? Visibility.Visible : Visibility.Collapsed;
         SendButton.IsEnabled = !Session.IsBusy;
+        if (ContextPopup.IsOpen) UpdateCompression();
     }
 }

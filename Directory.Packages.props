@@ -4,6 +4,9 @@
       * Microsoft.Data.Sqlite (Microsoft) -> SQLitePCLRaw bundle (native SQLite with FTS5)
       * System.Speech (Microsoft) -> Windows' offline desktop speech recognizer, for dictating into Ask
       * Velopack (MIT, no dependencies of its own on .NET 8+) -> installer and updates from the GitHub releases
+      * WpfMath (XAML-Math, MIT; its fonts Knuth/OFL-1.1) with its UI-neutral core XamlMath.Shared -> LaTeX formulae in
+        Ask's answers, drawn natively in WPF. The unit tests use XamlMath.Shared's parser to check the formulas Aqua
+        rewrites for it.
     Everything else (HTTP, JSON, XML, WinRT, Win32) comes from the .NET BCL / Windows SDK projections.
     Test-only packages are used exclusively by tests/AquaHub.Tests.
   -->
@@ -11,6 +14,8 @@
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageVersion Include="System.Speech" Version="10.0.12" />
     <PackageVersion Include="Velopack" Version="1.2.161" />
+    <PackageVersion Include="WpfMath" Version="2.1.0" />
+    <PackageVersion Include="XamlMath.Shared" Version="2.1.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />

@@ -12,6 +12,12 @@
           "Microsoft.TestPlatform.TestHost": "18.10.1"
         }
       },
+      "XamlMath.Shared": {
+        "type": "Direct",
+        "requested": "[2.1.0, )",
+        "resolved": "2.1.0",
+        "contentHash": "p7W78KZc2EWuVqAd704m4yGWg0HtxahjNYRVxDWhw7npf8oMD8C7EUc1pjkjZIcmk5PxXJ+t5FE2Fs3gBYjv1A=="
+      },
       "xunit": {
         "type": "Direct",
         "requested": "[2.9.3, )",

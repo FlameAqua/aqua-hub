@@ -50,9 +50,28 @@ public sealed record AskAttachment
 /// </summary>
 public sealed record ToolApproval(string Tool, string Title, string Detail, string Icon = "shield", bool AllowForChat = true);
 
+/// <summary>A picture Ask looked at while answering: a screenshot it took, or a picture on the PC (by its path).</summary>
+public sealed record AskPicture
+{
+    public required string Name { get; init; }
+    /// <summary>screen (a capture: kept whole with the chat) or file (on the PC: linked, with only a thumbnail kept).</summary>
+    public string Kind { get; init; } = "file";
+    /// <summary>The file on the PC (files only).</summary>
+    public string? Path { get; init; }
+    /// <summary>The picture as Ask saw it (scaled down).</summary>
+    public byte[]? Image { get; init; }
+    /// <summary>Looking for a picture you described: whether this one shows it (null when it wasn't that kind of look).</summary>
+    public bool? Match { get; init; }
+    /// <summary>What it shows, when Ask said.</summary>
+    public string Note { get; init; } = "";
+}
+
 /// <summary>The chat UI, as Ask sees it while answering.</summary>
 public interface IAskHost
 {
+    /// <summary>Shows a picture Ask looked at in the answer.</summary>
+    void Picture(AskPicture picture) { }
+
     /// <summary>A short status for the footer ("Searching the web…"); empty clears it.</summary>
     void Status(string text);
     /// <summary>Adds a step to the answer's activity list; returns its id.</summary>
@@ -91,6 +110,18 @@ public interface IAskPlatform
 /// question in the same chat can use it again without fetching it again.
 /// </summary>
 public sealed record ChatSource(string Title, string Source, string? Url, string Kind, string Text);
+
+/// <summary>
+/// What a chat keeps beside its messages for the next answer: its notes and, once it has been compressed, the summary
+/// that stands in for its first messages (which then aren't sent with the question).
+/// </summary>
+public sealed record AskChatContext
+{
+    public ChatNotes? Notes { get; init; }
+    public string Summary { get; init; } = "";
+    /// <summary>How many of the chat's first messages <see cref="Summary"/> stands in for.</summary>
+    public int SummaryCovers { get; init; }
+}
 
 /// <summary>What happened while answering, for the footer and the conversation history.</summary>
 public sealed record AskResult

@@ -12,13 +12,19 @@ public static class ChatExport
 {
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public static string ToMarkdown(string title, IReadOnlyList<SavedChatMessage> messages, DateTimeOffset exported)
+    public static string ToMarkdown(string title, IReadOnlyList<SavedChatMessage> messages, DateTimeOffset exported, IReadOnlyList<ChatNote>? notes = null)
     {
         var sb = new StringBuilder();
         sb.Append("# ").Append(title.Trim().Length > 0 ? title.Trim() : "Ask Aqua chat").Append('\n');
         var questions = messages.Count(m => m.User);
         sb.Append("_Aqua Hub · exported ").Append(exported.ToString("d MMM yyyy HH:mm", Inv)).Append(" · ")
           .Append(questions).Append(questions == 1 ? " question" : " questions").Append("_\n");
+        if (notes is { Count: > 0 })
+        {
+            sb.Append("\n## Notes for this chat\n\n");
+            foreach (var line in ChatNotes.ToText(notes).Split('\n'))
+                sb.Append(line.Length == 0 || line.StartsWith("- ", StringComparison.Ordinal) ? line : "**" + line + "**").Append('\n');
+        }
 
         foreach (var m in messages)
         {
@@ -41,6 +47,8 @@ public static class ChatExport
             if (m.Reasoning is { Length: > 0 } reasoning)
                 sb.Append("<details><summary>Reasoning</summary>\n\n").Append(reasoning.Trim()).Append("\n\n</details>\n\n");
             sb.Append(m.Text.Trim().Length > 0 ? m.Text.Trim() : "_(no answer)_").Append('\n');
+            if (m.Pictures is { Count: > 0 } pictures)
+                sb.Append("\n_Pictures Aqua looked at: ").Append(string.Join(", ", pictures.Select(p => p.Path ?? p.Name))).Append("_\n");
             if (m.Citations is { Count: > 0 } cites)
             {
                 sb.Append("\n**Sources**\n");

@@ -60,7 +60,13 @@ All AI runs on your PC.
   **Whisper** on this PC, installed in one click from Settings (whisper.cpp and a 57–547 MB model, each file checked
   against its published SHA-256); Settings has a live test. Answers and your questions are
   selectable; copy or **edit and re-ask** a question, have an answer **read aloud**, and watch the **context
-  meter**. Every chat is kept in a searchable **history** — star the ones to keep; the rest expire after 30 days
+  meter**. Answers lay out **tables** and **maths** (LaTeX drawn as formulae; copying keeps the Markdown) and show
+  the screenshots and pictures Ask looked at as thumbnails that open with a click. Each chat keeps **notes** —
+  facts, decisions and open questions that Ask reads every turn and updates itself, and you can edit beside the
+  chat — and a long chat can be **compressed**: its older messages go to the model as a summary that keeps names,
+  numbers, decisions and sources (with a click, or on its own once older messages would be left out; *Undo* sends
+  them in full again).
+  Every chat is kept in a searchable **history** — star the ones to keep; the rest expire after 30 days
   (your choice). Or press **Ctrl+Alt+Space** anywhere: fuzzy commands, apps, scenes, tickers, earlier chats,
   natural language ("focus mode", "play lofi", "research heat pumps", "what's on my screen", "find my tax
   documents", "remember that…").
@@ -95,8 +101,8 @@ All AI runs on your PC.
 
 ## Why it's light
 
-Native WPF on .NET 10 — no Chromium, no Node, no local web server. Three runtime dependencies: SQLite, Windows'
-offline speech recognizer (for dictation) and Velopack (Setup and updates).
+Native WPF on .NET 10 — no Chromium, no Node, no local web server. Four runtime dependencies: SQLite, Windows'
+offline speech recognizer (for dictation), Velopack (Setup and updates) and XAML-Math (formulae in Ask's answers).
 The dashboard and quick panel are created on first use and hidden (not destroyed) when you close them, so
 reopening is instant and memory can't grow with every open and close; when nothing is on screen the idle
 trim hands the working set back to Windows. Agents batch their requests, use conditional downloads and pause
@@ -211,8 +217,10 @@ summaries and regional news. Settings › Ask Aqua sets what Ask may use: the we
 pages Research reads, the folders it may read (Documents, Desktop, Downloads and Pictures by default), whether
 it may operate app windows and asks before acting or taking screenshots, voice input (Whisper — install or
 remove it there — Windows' offline recognizer or Windows online speech), how long unstarred chats are kept, the
-context window and how many earlier messages each question sends,
-and whether your skills and memories are used.
+context window and how many earlier messages each question sends, whether long chats are compressed on their own,
+and whether your skills and memories are used. Settings › Privacy › *Keep pictures with chats* (on by default) keeps
+the screenshots and pictures Ask looked at with each chat, and deletes them all when you switch it off — see
+[docs/SECURITY.md](docs/SECURITY.md).
 
 Not supported by design: X/Twitter, Facebook, Instagram (no public feeds). Any RSS bridge you run
 (e.g. RSSHub) can be added as an extra feed.
@@ -220,7 +228,7 @@ Not supported by design: X/Twitter, Facebook, Instagram (no public feeds). Any R
 ## Tests
 
 ```powershell
-dotnet test tests/AquaHub.Tests                      # 750+ unit & behaviour tests (parsers, security, analysis, AI plumbing,
+dotnet test tests/AquaHub.Tests                      # 840+ unit & behaviour tests (parsers, security, analysis, AI plumbing,
                                                      # settings merge, notification policy, scheduling, fact checks,
                                                      # clustering and fact-check regressions on real data, locale
                                                      # packs, brief sections, offline answers, Ollama policy, Ask:
@@ -233,7 +241,9 @@ dotnet test tests/AquaHub.Tests                      # 750+ unit & behaviour tes
                                                      # updates (release address, schedule, alerts, notes), alerts
                                                      # read one at a time, Start with Windows hand-over, the update
                                                      # flow against a fake updater, your place (none until chosen,
-                                                     # choosing one, the town lookup), Ask's model picker, a XAML
+                                                     # choosing one, the town lookup), Ask's model picker, Ask's
+                                                     # answers (tables, lists, LaTeX checked against XAML-Math's
+                                                     # own parser), chat notes, compression and pictures, a XAML
                                                      # accessibility contract, the agent against a scripted
                                                      # fake Ollama, the collectors and AI agents against a
                                                      # stand-in network and model server, Ask running the agents,

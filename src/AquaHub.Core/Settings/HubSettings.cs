@@ -348,6 +348,16 @@ public sealed class AskSettings
     /// <summary>Earlier messages of the chat sent with each question (older ones are left out).</summary>
     public int HistoryMessages { get; set; } = 10;
     /// <summary>
+    /// When a chat's earlier messages would be left out (more than <see cref="HistoryMessages"/>, or the context window
+    /// nearly full), Aqua compresses them into a summary after an answer, so the chat keeps its thread.
+    /// </summary>
+    public bool AutoCompress { get; set; } = true;
+    /// <summary>
+    /// Screenshots Ask took or was given, and thumbnails of pictures it looked at, are kept with the chat (in its own
+    /// folder, deleted with it) so they show when you come back to it. Off: they show only while Aqua is open.
+    /// </summary>
+    public bool KeepPictures { get; set; } = true;
+    /// <summary>
     /// Voice input: offline (Windows' on-device recognizer), online (Windows online speech recognition), whisper (Whisper,
     /// installed on request, on this PC) or off.
     /// </summary>

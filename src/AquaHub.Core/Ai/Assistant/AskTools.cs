@@ -124,6 +124,26 @@ public sealed class AskRun
     public AskSkill? Skill { get; set; }
     /// <summary>Things the user asked Aqua to remember.</summary>
     public IReadOnlyList<string> Memories { get; init; } = Array.Empty<string>();
+    /// <summary>The chat's notes and the summary of its compressed messages (null outside a chat).</summary>
+    public AskChatContext? Chat { get; init; }
+    public ChatNotes? Notes => Chat?.Notes;
+
+    /// <summary>Most pictures one answer shows.</summary>
+    public const int MaxPictures = 8;
+    private readonly HashSet<string> _pictures = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Shows a picture Ask looked at in the answer: each one once, at most <see cref="MaxPictures"/> an answer.</summary>
+    public void Saw(AskPicture picture)
+    {
+        var key = picture.Path is { Length: > 0 } path ? "file:" + path
+            : picture.Image is { Length: > 0 } image ? "image:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(image), 0, 8)
+            : "name:" + picture.Name;
+        lock (_pictures)
+        {
+            if (_pictures.Count >= MaxPictures || !_pictures.Add(key)) return;
+        }
+        Host.Picture(picture);
+    }
     /// <summary>Links Aqua saw while answering (on pages it read, in results), address → title: answers may only link these on those sites.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, string> SeenLinks { get; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Scratch space for tools within one answer (e.g. the controls read from a window).</summary>
@@ -369,6 +389,7 @@ public sealed class ReadFileTool : AskTool
         if (!File.Exists(path)) return ToolResult.Fail("that file doesn't exist");
         run.SawPrivate = true;
         var (text, note, image) = await FileText.ReadAsync(path, run, ct).ConfigureAwait(false);
+        if (image is not null) run.Saw(new AskPicture { Name = Path.GetFileName(path), Path = path, Image = image });
         if (image is not null && run.Vision)
         {
             var n0 = run.Book.Add(Path.GetFileName(path), "Your files", path, "file");

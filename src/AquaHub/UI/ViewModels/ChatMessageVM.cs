@@ -54,6 +54,9 @@ public sealed class ChatMessageVM : ObservableObject
     /// <summary>The searches, pages and files Ask used, in order.</summary>
     public ObservableCollection<StepVM> Steps { get; } = new();
 
+    /// <summary>Screenshots and pictures Ask looked at for this answer, as thumbnails that open them.</summary>
+    public ObservableCollection<PictureVM> Pictures { get; } = new();
+
     private bool _stepsOpen = true;
     private string _activity = "Working…";
 
@@ -124,6 +127,29 @@ public sealed class ChatMessageVM : ObservableObject
     public bool HasMemoryActions { get => _memoryActions; set => Set(ref _memoryActions, value); }
     public ICommand? UndoMemoryCommand { get; set; }
     public ICommand? AnswerInsteadCommand { get; set; }
+
+    private bool _compressed;
+    private CompressionVM? _compression;
+
+    /// <summary>Sent to the model as part of the chat's summary rather than in full (shown faded).</summary>
+    public bool IsCompressed { get => _compressed; set => Set(ref _compressed, value); }
+    /// <summary>On the first message after the compressed ones: the line that says so, with the summary and Undo.</summary>
+    public CompressionVM? Compression { get => _compression; set { if (Set(ref _compression, value)) Raise(nameof(HasCompression)); } }
+    public bool HasCompression => _compression is not null;
+}
+
+/// <summary>"12 earlier messages are sent as a summary · saved about 7.9K tokens", with Show summary and Undo.</summary>
+public sealed class CompressionVM : ObservableObject
+{
+    private bool _open;
+
+    public string Label { get; init; } = "";
+    public string Summary { get; init; } = "";
+    public string Tooltip { get; init; } = "";
+    public bool SummaryOpen { get => _open; set { if (Set(ref _open, value)) Raise(nameof(ToggleLabel)); } }
+    public string ToggleLabel => _open ? "Hide summary" : "Show summary";
+    public ICommand? ToggleCommand { get; init; }
+    public ICommand? UndoCommand { get; init; }
 }
 
 /// <summary>A chat in the history list, or a group header ("Today", "Starred").</summary>
@@ -191,14 +217,46 @@ public sealed class AttachmentChipVM : ObservableObject
 {
     private bool _loading;
     private string _note = "";
+    private ImageSource? _thumbnail;
 
     public string Name { get; init; } = "";
     public string Icon { get; init; } = "file";
-    public ImageSource? Thumbnail { get; init; }
-    public bool HasThumbnail => Thumbnail is not null;
+    public ImageSource? Thumbnail { get => _thumbnail; set { if (Set(ref _thumbnail, value)) Raise(nameof(HasThumbnail)); } }
+    public bool HasThumbnail => _thumbnail is not null;
     public string Note { get => _note; set => Set(ref _note, value); }
     public bool IsLoading { get => _loading; set => Set(ref _loading, value); }
     public ICommand? RemoveCommand { get; set; }
     public AskAttachment? Attachment { get; set; }
     public string Tooltip => Note.Length > 0 ? $"{Name} · {Note}" : Name;
+    /// <summary>On a sent question: the attached picture (kept with the chat like the ones Ask looks at), and opening it.</summary>
+    public PictureVM? Picture { get; set; }
+    public bool HasPicture => Picture is not null;
+    public ICommand? OpenCommand => Picture?.OpenCommand;
+}
+
+/// <summary>
+/// A picture in a chat — a screenshot, a pasted picture or one on the PC — shown as a thumbnail that opens it. Until it's
+/// kept with the chat (<see cref="File"/>) the picture is held here.
+/// </summary>
+public sealed class PictureVM : ObservableObject
+{
+    private ImageSource? _thumbnail;
+
+    public string Name { get; init; } = "";
+    /// <summary>screen (Ask took it), file (on the PC) or attachment (you gave it).</summary>
+    public string Kind { get; init; } = "file";
+    /// <summary>The picture on the PC: linked, with only a thumbnail kept.</summary>
+    public string? Path { get; init; }
+    public bool? Match { get; init; }
+    public bool IsMatch => Match == true;
+    public string Note { get; init; } = "";
+    public ImageSource? Thumbnail { get => _thumbnail; set { if (Set(ref _thumbnail, value)) Raise(nameof(HasThumbnail)); } }
+    public bool HasThumbnail => _thumbnail is not null;
+    /// <summary>The picture itself, until it's kept with the chat.</summary>
+    public byte[]? Bytes { get; set; }
+    /// <summary>Its file in the chat's picture folder, once kept (the whole picture, or a thumbnail of one on the PC).</summary>
+    public string? File { get; set; }
+    public ICommand? OpenCommand { get; set; }
+    public string Tooltip =>
+        (IsMatch ? "Shows what you described · " : "") + Name + (Note.Length > 0 ? " — " + Note : "") + (Path is { Length: > 0 } p ? "\n" + p : "");
 }

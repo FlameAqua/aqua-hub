@@ -55,6 +55,8 @@
     <PackageReference Include="System.Speech" />
     <!-- Installer and updates from the project's GitHub releases (Services/UpdateService.cs). -->
     <PackageReference Include="Velopack" />
+    <!-- LaTeX formulae in Ask's answers (UI/Controls/MathView.cs). -->
+    <PackageReference Include="WpfMath" />
   </ItemGroup>
 
   <ItemGroup>

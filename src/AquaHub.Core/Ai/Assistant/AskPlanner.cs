@@ -73,6 +73,8 @@ public sealed record PlanContext
     public bool Research { get; init; }
     /// <summary>What Aqua's agents just refreshed for this message ("the news").</summary>
     public IReadOnlyList<string> Refreshed { get; init; } = Array.Empty<string>();
+    /// <summary>The summary standing in for the chat's compressed messages (they aren't in the history).</summary>
+    public string ChatSummary { get; init; } = "";
 }
 
 public static partial class AskPlanner
@@ -130,6 +132,8 @@ public static partial class AskPlanner
     {
         var sb = new StringBuilder();
         sb.Append("Today is ").Append(now.ToString("dddd d MMMM yyyy", Inv)).Append(".\n");
+        if (ctx.ChatSummary.Length > 0)
+            sb.Append("Before that, in this chat (a summary): ").Append(HtmlText.Truncate(ctx.ChatSummary.ReplaceLineEndings(" "), 700)).Append('\n');
         var turns = history.Where(m => m.Role is "user" or "assistant").TakeLast(6).ToList();
         if (turns.Count > 0)
         {

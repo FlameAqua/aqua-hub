@@ -173,6 +173,9 @@ public static class IconData
         ["bug"] = "M8 9 H16 V15 A4 4 0 0 1 8 15 Z M9.5 9 A2.5 2.5 0 0 1 14.5 9 M8 12 H4.5 M16 12 H19.5 M8.5 15.5 L5.5 18 M15.5 15.5 L18.5 18 M9 7.5 L7 5.5 M15 7.5 L17 5.5 M12 11 V19",
         ["wrench"] = "M14.5 6.5 A4 4 0 0 1 19.5 11.2 L17 10.5 L15.5 12 L16.2 14.5 A4 4 0 0 1 11.2 9.5 L4.5 16.2 A1.8 1.8 0 0 0 7.8 19.5 L14.5 12.8",
         ["pulse"] = "M3 12 H7 L9.5 6 L13.5 18 L16 12 H21",
+        // A note with its corner folded (a chat's notes), and lines pressed together (compressing a chat).
+        ["note"] = "M5 4.5 H19 V14.5 L14 19.5 H5 Z M14 19.5 V14.5 H19 M8.5 8.5 H15.5 M8.5 11.5 H13",
+        ["compress"] = "M12 3 V9 M8.5 5.5 L12 9 L15.5 5.5 M12 21 V15 M8.5 18.5 L12 15 L15.5 18.5 M4.5 12 H19.5",
     };
 
     public static (Geometry Geometry, bool Filled)? Get(string? name)
