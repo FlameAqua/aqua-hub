@@ -42,6 +42,7 @@ public sealed class A02_TitleBarTests : E2ETestBase
     private static string DndName(bool on) => on ? "Do not disturb: on" : "Do not disturb: off";
 
     [Fact]
+    [Trait("Category", "Smoke")]
     public void T01_CommandBoxAndCtrlKOpenThePalette() => Run(() =>
     {
         GoTo("today");

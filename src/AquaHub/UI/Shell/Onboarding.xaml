@@ -18,7 +18,7 @@
                 <StackPanel x:Name="Step1">
                     <Image Source="/Assets/AquaHub.png" Width="72" Height="72" HorizontalAlignment="Left"/>
                     <TextBlock Text="Welcome to Aqua Hub" Style="{StaticResource T.Display}" Margin="0,18,0,8"/>
-                    <TextBlock Text="Your agents read the news, your local feeds, the markets and your calendar — then tell you what matters. You never have to doom-scroll again."
+                    <TextBlock Text="Agents read the news, your feeds, the markets and your calendar, and tell you what matters."
                                Style="{StaticResource T.Body}" Foreground="{DynamicResource B.Text2}" FontSize="15" LineHeight="23"/>
                     <StackPanel Margin="0,26,0,0">
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
@@ -39,7 +39,7 @@
                 <!-- Step 2: location -->
                 <StackPanel x:Name="Step2" Visibility="Collapsed">
                     <TextBlock Text="Where are you?" Style="{StaticResource T.Title}"/>
-                    <TextBlock Text="For weather, local news and what people nearby are talking about. Search for your town, or let Windows tell Aqua roughly where this PC is. You can skip this and choose later in Settings."
+                    <TextBlock Text="For weather and local news. You can skip this and choose later in Settings."
                                Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,6,0,18"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -87,7 +87,7 @@
                 <!-- Step 4: AI -->
                 <StackPanel x:Name="Step4" Visibility="Collapsed">
                     <TextBlock Text="Your private AI" Style="{StaticResource T.Title}"/>
-                    <TextBlock Text="Aqua Hub uses a language model running on this PC to write summaries and answer questions. Nothing is sent to the cloud."
+                    <TextBlock Text="A language model on this PC writes summaries and answers questions."
                                Style="{StaticResource T.Body2}" Margin="0,6,0,18"/>
                     <Border Style="{StaticResource Card}" Padding="18">
                         <Grid>
@@ -111,7 +111,7 @@
                 <!-- Step 5: finish -->
                 <StackPanel x:Name="Step5" Visibility="Collapsed">
                     <TextBlock Text="You're all set" Style="{StaticResource T.Title}"/>
-                    <TextBlock Text="Your agents are already gathering today's news. Your first brief will be ready in a minute or two." Style="{StaticResource T.Body2}" Margin="0,6,0,18"/>
+                    <TextBlock Text="Your first brief is ready in a minute or two." Style="{StaticResource T.Body2}" Margin="0,6,0,18"/>
                     <CheckBox x:Name="StartWithWindows" Style="{StaticResource Switch}" IsChecked="True" Content="Start Aqua Hub with Windows (runs quietly in the tray)" HorizontalAlignment="Left"/>
                     <Border Style="{StaticResource CardInner}" Margin="0,20,0,0">
                         <StackPanel>
@@ -128,7 +128,7 @@
                             <StackPanel>
                                 <TextBlock Text="Keep the Aqua icon on your taskbar" FontWeight="SemiBold"/>
                                 <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,4,12,0"
-                                           Text="Windows 11 tucks new tray icons behind the ^ arrow. Turn Aqua Hub on under Taskbar → Other system tray icons for one-click access — then click it for the quick panel, double-click for this window, middle-click to play or pause."/>
+                                           Text="Windows 11 hides new tray icons behind the ^ arrow. Turn Aqua Hub on under Taskbar › Other system tray icons. Click it for the quick panel, double-click for this window."/>
                             </StackPanel>
                             <Button Grid.Column="1" Style="{StaticResource Btn.Standard}" Content="Open taskbar settings" VerticalAlignment="Center" Click="OnTaskbarSettings"/>
                         </Grid>

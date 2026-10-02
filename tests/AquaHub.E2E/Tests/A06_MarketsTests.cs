@@ -33,7 +33,8 @@ public sealed class A06_MarketsTests : E2ETestBase
         var flat = TreeSnapshot.Capture(Markets()).Descendants().ToList();
         var range = flat.FindIndex(n => n.Type == ControlType.RadioButton && n.Name == "1D");
         return flat.Take(range < 0 ? flat.Count : range)
-            .Where(n => n.Type == ControlType.Button && n.Name.Length > 0 && n.Parent?.Type == ControlType.DataItem && !n.AutomationId.StartsWith("watch-", StringComparison.Ordinal))
+            .Where(n => n.Type == ControlType.Button && n.Name.Length > 0 && n.Parent?.Type == ControlType.DataItem
+                        && !n.AutomationId.StartsWith("watch-", StringComparison.Ordinal) && !n.AutomationId.StartsWith("link-", StringComparison.Ordinal))
             .Select(n => n.Name).ToList();
     }
 
@@ -132,6 +133,70 @@ public sealed class A06_MarketsTests : E2ETestBase
         {
             Ui.WaitFind(Main, Ui.Id("watch-TSLA"), "watch-TSLA row", TimeSpan.FromSeconds(40));
             Wait.For(() => HeaderSymbol() == "TSLA", $"header shows TSLA (now {HeaderSymbol()})", TimeSpan.FromSeconds(20));
+        });
+    });
+
+    private List<string> BarOrder() => App.Settings.Symbols("markets.indices").Concat(App.Settings.Symbols("markets.macro")).ToList();
+
+    [Fact]
+    public void T06_TheChartRowCanBeRearranged() => Run(() =>
+    {
+        Markets();
+        var charts = new[] { "markets.indices", "markets.macro" }
+            .SelectMany(list => (App.Settings.Get(list) as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+            .Select(w => (Symbol: (string?)w["symbol"] ?? "", Name: (string?)w["name"] is { Length: > 0 } n ? n : (string?)w["symbol"] ?? ""))
+            .ToList();
+        Check("Markets chart row", "Edit charts shows the editor", () =>
+        {
+            Expect(charts.Count >= 3, $"only {charts.Count} charts configured");
+            Ui.Invoke(Ui.WaitFind(PageRoot("markets"), Ui.Id("markets-edit-bar"), "Edit charts"));
+            Ui.WaitFind(PageRoot("markets"), Ui.Id("markets-bar-editor"), "chart row editor");
+        });
+        Check("Markets chart row", "moving the second chart left and back", () =>
+        {
+            var (symbol, name) = charts[1];
+            Ui.Invoke(Ui.WaitFind(PageRoot("markets"), Ui.Button($"Move {name} left"), "move left"));
+            Wait.For(() => BarOrder().FirstOrDefault() == symbol, $"{symbol} first (now {string.Join(" ", BarOrder())})", E2EConfig.PersistTimeout);
+            Ui.Invoke(Ui.WaitFind(PageRoot("markets"), Ui.Button($"Move {name} right"), "move right"));
+            Wait.For(() => BarOrder().FirstOrDefault() == charts[0].Symbol, "the first two back in order", E2EConfig.PersistTimeout);
+        });
+        Check("Markets chart row", "removing the last chart", () =>
+        {
+            var (symbol, name) = charts[^1];
+            Ui.Invoke(Ui.WaitFind(PageRoot("markets"), Ui.Button($"Remove {name}"), "remove"));
+            Wait.For(() => !BarOrder().Contains(symbol), $"{symbol} removed", E2EConfig.PersistTimeout);
+        });
+        Check("Markets chart row", "while editing, search adds to the row, not the watchlist", () =>
+        {
+            var box = Ui.WaitFind(PageRoot("markets"), Ui.Id("AddBox"), "search box");
+            Ui.SetValue(box, "nikkei 225");
+            var item = Wait.For(() => ResultWith("^N225"), "^N225 result", TimeSpan.FromSeconds(20));
+            Ui.Select(item);
+            FocusAndPress(Main, item, VK.Enter);
+            Wait.For(() => BarOrder().LastOrDefault() == "^N225", "^N225 at the end of the row", E2EConfig.PersistTimeout);
+            Expect(!App.Settings.Symbols("markets.watchlist").Contains("^N225"), "^N225 was added to the watchlist as well");
+        });
+        Check("Markets chart row", "Done closes the editor", () =>
+        {
+            Ui.Invoke(Ui.WaitFind(PageRoot("markets"), Ui.Id("markets-edit-bar"), "Done"));
+            Wait.For(() => Ui.Find(PageRoot("markets"), Ui.Id("markets-bar-editor")) is null, "editor hidden");
+        });
+    });
+
+    [Fact]
+    public void T07_LinksAndEdit() => Run(() =>
+    {
+        Check("Markets detail", "the Yahoo Finance link opens the symbol's page (dry run)", () =>
+        {
+            Markets();
+            var link = Ui.WaitFind(PageRoot("markets"), Ui.Id("link-Yahoo Finance"), "Yahoo Finance link", TimeSpan.FromSeconds(30));
+            ExpectJournal("open-url", () => Ui.Invoke(link), d => d.StartsWith("https://finance.yahoo.com/quote/", StringComparison.Ordinal));
+        });
+        Check("Markets watchlist", "Edit opens Settings at the holdings editor", () =>
+        {
+            Ui.Invoke(Ui.WaitFind(PageRoot("markets"), Ui.Id("markets-edit-watchlist"), "Edit watchlist"));
+            ExpectPage("settings");
+            Ui.WaitFind(PageRoot("settings"), Ui.Id("WatchList"), "holdings editor");
         });
     });
 

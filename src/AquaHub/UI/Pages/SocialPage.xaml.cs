@@ -141,7 +141,7 @@ public partial class SocialPage : UserControl, IPage
                 _ => new("social", "Nothing here yet", "Add communities, hashtags, accounts or channels to follow.", "Choose sources", "social"),
             };
         var minutes = s.RefreshMinutes;
-        return new("clock", "No posts yet", $"Your Social Scout checks every {minutes} minutes — new posts appear here as they arrive.", "Check now", "@refresh");
+        return new("clock", "No posts yet", $"New posts appear here as they arrive (checked every {minutes} minutes).", "Check now", "@refresh");
     }
 
     private void ShowEmpty(EmptyState? state)

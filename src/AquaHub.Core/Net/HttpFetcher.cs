@@ -70,21 +70,25 @@ public sealed class HttpFetcher : IDisposable
         if (Interlocked.Increment(ref _networkFailures) == 3) ConnectivityChanged?.Invoke(false);
     }
 
-    public HttpFetcher(HubDatabase? db)
+    public HttpFetcher(HubDatabase? db) : this(db, new SocketsHttpHandler
+    {
+        AutomaticDecompression = DecompressionMethods.All,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        MaxConnectionsPerServer = 6,
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 5,
+        UseCookies = false,
+        UseProxy = true,
+    })
+    {
+    }
+
+    /// <summary>Over another handler: the tests' stand-in network, which answers the real addresses without leaving the PC.</summary>
+    internal HttpFetcher(HubDatabase? db, HttpMessageHandler handler)
     {
         _db = db;
-        var handler = new SocketsHttpHandler
-        {
-            AutomaticDecompression = DecompressionMethods.All,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-            ConnectTimeout = TimeSpan.FromSeconds(10),
-            MaxConnectionsPerServer = 6,
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 5,
-            UseCookies = false,
-            UseProxy = true,
-        };
         _client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
         _client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
         _client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en;q=0.9");

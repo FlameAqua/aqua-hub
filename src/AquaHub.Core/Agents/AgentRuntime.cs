@@ -67,6 +67,12 @@ public sealed record AgentResult(bool Ok, string Message, bool Changed = true, T
     public static AgentResult Wait(string message, TimeSpan retry) => new(true, message, false, retry, Waiting: true);
 }
 
+/// <summary>How a run that was asked for and waited on ended.</summary>
+public enum AgentRunEnd { Finished, Disabled, Paused, StillRunning }
+
+/// <summary>The outcome of <see cref="AgentRuntime.RunAndWaitAsync"/>: how it ended and the agent's status by then.</summary>
+public sealed record AgentRunReport(AgentRunEnd End, AgentStatus Status);
+
 public abstract class Agent
 {
     public abstract string Id { get; }
@@ -111,6 +117,12 @@ public sealed class AgentRuntime : IDisposable
     private Task? _loop;
 
     public AgentRuntime(HubContext ctx) => _ctx = ctx;
+
+    /// <summary>How often the scheduler looks for agents that are due (tests make it quicker).</summary>
+    internal TimeSpan Tick { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>How soon an agent runs after one it follows brought in something new (tests make it quicker).</summary>
+    internal TimeSpan FollowUpDelay { get; init; } = TimeSpan.FromSeconds(2);
 
     public event Action<AgentStatus>? StatusChanged;
     public bool Paused { get; set; }
@@ -159,6 +171,35 @@ public sealed class AgentRuntime : IDisposable
         lock (_slots) return _slots.Any(s => s.Agent.Id == id && s.Forced);
     }
 
+    /// <summary>
+    /// Runs an agent now and waits for the run to finish, up to <paramref name="timeout"/> (Ask's "refresh the news").
+    /// A run already under way is fetching fresh data too, so that one is waited on instead of queuing another. Null
+    /// when there's no such agent; one that's switched off, or all agents paused, comes back at once.
+    /// </summary>
+    public async Task<AgentRunReport?> RunAndWaitAsync(string id, TimeSpan timeout, CancellationToken ct)
+    {
+        Slot? slot;
+        int runs;
+        lock (_slots)
+        {
+            slot = _slots.FirstOrDefault(s => s.Agent.Id == id);
+            if (slot is null) return null;
+            runs = slot.Status.Runs;
+        }
+        if (!slot.Agent.IsEnabled(_ctx)) return new(AgentRunEnd.Disabled, slot.Status);
+        if (Paused && !slot.Running) return new(AgentRunEnd.Paused, slot.Status);
+        if (!slot.Running) RunNow(id);
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(Math.Min(250, Tick.TotalMilliseconds), Math.Max(1, (timeout - sw.Elapsed).TotalMilliseconds))), ct).ConfigureAwait(false);
+            // The run counts once its status is recorded (the slot lets go of it a moment later).
+            if (slot.Status.Runs > runs) return new(AgentRunEnd.Finished, slot.Status);
+            if (Paused && !slot.Running) return new(AgentRunEnd.Paused, slot.Status);
+        }
+        return new(AgentRunEnd.StillRunning, slot.Status);
+    }
+
     /// <summary>Waits until all agents have completed at least one run (used by snapshot mode).</summary>
     public async Task WaitForFirstPassAsync(TimeSpan timeout, Func<Agent, bool>? filter = null)
     {
@@ -196,7 +237,7 @@ public sealed class AgentRuntime : IDisposable
                         _inflight[slot.Agent.Id] = Task.Run(() => RunSlotAsync(slot, ct), ct);
                     }
                 }
-                await Task.Delay(1000, ct).ConfigureAwait(false);
+                await Task.Delay(Tick, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { Log.Error("agents", "Scheduler loop error", ex); }
@@ -289,7 +330,7 @@ public sealed class AgentRuntime : IDisposable
                 {
                     foreach (var dependent in _slots.Where(s => s.Agent.After.Contains(agent.Id)))
                     {
-                        var soon = now + TimeSpan.FromSeconds(2);
+                        var soon = now + FollowUpDelay;
                         if (dependent.NextRun > soon) dependent.NextRun = soon;
                     }
                 }

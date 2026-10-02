@@ -25,16 +25,23 @@ public sealed class UpdateService
 
     /// <param name="simulated">E2E dry run: Check now is journalled instead of performed.</param>
     /// <param name="restartArgs">Arguments for the copy started after installing (the profile, if not the default).</param>
-    public UpdateService(bool simulated, string[] restartArgs)
+    /// <param name="demo">"available" or "ready": a pretend release instead of GitHub's (<see cref="DemoAllowed"/> only).</param>
+    public UpdateService(bool simulated, string[] restartArgs, string? demo = null)
     {
-        Simulated = simulated;
         _restartArgs = restartArgs;
         var assembly = typeof(UpdateService).Assembly;
         CurrentVersion = assembly.GetName().Version?.ToString(3) ?? "";
         Repository = UpdatePolicy.Repository(assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(a => a.Key == "UpdateRepository")?.Value);
         IUpdater? source = null;
-        if (!simulated && Repository is not null)
+        if (demo is not null && DemoAllowed)
+        {
+            Demo = true;
+            source = new DemoUpdater(ready: demo == "ready");
+            Log.Info("update", $"Pretend update ({demo}): nothing is downloaded or installed");
+        }
+        else Simulated = simulated;
+        if (!Demo && !simulated && Repository is not null)
         {
             try
             {
@@ -66,9 +73,30 @@ public sealed class UpdateService
     public bool IsInstalled { get; }
 
     public bool Simulated { get; }
+    /// <summary>The pretend release (--demo-update) stands in for GitHub's.</summary>
+    public bool Demo { get; }
+
+    /// <summary>
+    /// The pretend release is for trying the banner and the card: in Debug builds, and in E2E dry runs (which never
+    /// install anything anyway), never in a copy people use.
+    /// </summary>
+#if DEBUG
+    public static bool DemoAllowed => true;
+#else
+    public static bool DemoAllowed => Sandbox.Enabled;
+#endif
+
     public string CurrentVersion { get; }
     /// <summary>Set when an installed copy's updater couldn't start (rather than this copy not being installed).</summary>
     public string? StartError { get; }
+
+    /// <summary>How this copy came to be on the PC, as the diagnostics summary reports it.</summary>
+    public string InstallKind =>
+        Demo ? "pretend release (--demo-update)"
+        : Simulated ? "test session (updates simulated)"
+        : StartError is not null ? "installed, but its updater couldn't start"
+        : _machine.Stage == UpdateStage.Unavailable ? (Repository is null ? "built from source" : "a folder copy (not installed)")
+        : IsInstalled ? "installed with Setup" : "portable (updates itself)";
     public UpdateStage Stage => Simulated ? UpdateStage.Idle : _machine.Stage;
     public string? NewVersion => _machine.NewVersion;
     public long DownloadSize => _machine.DownloadSize;
@@ -84,7 +112,16 @@ public sealed class UpdateService
     /// <summary>Automatic checks: the first a few minutes after start-up, then about once a day while Aqua runs.</summary>
     public void Start()
     {
+        // After an update the "available" and "ready" alerts for this version would still be in the bell, unread.
+        try { Hub.State.RemoveAlerts(a => UpdatePolicy.IsSettled(a, CurrentVersion)); }
+        catch (Exception ex) { Log.Warn("update", "Couldn't tidy the update alerts", ex); }
         if (Simulated || _machine.Stage == UpdateStage.Unavailable) return;
+        if (Demo)
+        {
+            // The pretend release turns up straight away, as an automatic check would find it (with its alert).
+            if (_machine.Stage == UpdateStage.Idle) _ = _machine.CheckAsync(userAsked: false);
+            return;
+        }
         _timer = new DispatcherTimer { Interval = UpdatePolicy.FirstCheckDelay };
         _timer.Tick += (_, _) =>
         {
@@ -97,7 +134,7 @@ public sealed class UpdateService
 
     /// <summary>Asks GitHub whether there's a newer version (the automatic check also raises an alert for it).</summary>
     public Task CheckAsync(bool userAsked) =>
-        Sandbox.Intercept("update-check", userAsked ? "user" : "automatic") ? Task.CompletedTask : _machine.CheckAsync(userAsked);
+        !Demo && Sandbox.Intercept("update-check", userAsked ? "user" : "automatic") ? Task.CompletedTask : _machine.CheckAsync(userAsked);
 
     /// <summary>Downloads the version the check found (the user asked). Cancellable; a failed download can be retried.</summary>
     public Task DownloadAsync() => _machine.DownloadAsync();
@@ -110,7 +147,7 @@ public sealed class UpdateService
     /// </summary>
     /// <param name="background">Started by Start with Windows: the updater stays quiet and restarts us in the tray.</param>
     public bool ApplyPendingAtStartup(bool background) =>
-        !Simulated && _machine.ApplyAndRestart(silent: background, background ? _restartArgs.Append("--background").ToArray() : _restartArgs);
+        !Simulated && !Demo && _machine.ApplyAndRestart(silent: background, background ? _restartArgs.Append("--background").ToArray() : _restartArgs);
 
     /// <summary>Quits Aqua Hub; Velopack's updater waits for it to close, installs the update and starts it again.</summary>
     public void RestartToInstall()
@@ -126,23 +163,52 @@ public sealed class UpdateService
             UpdateStage.Unavailable => StartError is not null
                 ? $"This copy is installed, but its updater couldn't start ({StartError}). Reinstalling it with Setup fixes that."
                 : Repository is null
-                    ? "This copy was built from source, so it doesn't update itself. Copies installed with Setup, from the project's GitHub releases, check for new versions."
-                    : "This copy isn't installed (it runs from a folder), so it can't update itself. Install it with Setup from the GitHub releases to get updates.",
+                    ? "This copy was built from source, so it doesn't update itself. Copies installed with Setup do."
+                    : "This copy runs from a folder, so it can't update itself. Install it with Setup for updates.",
             UpdateStage.Idle => automatic
-                ? "Aqua looks for a new version about once a day, and asks before downloading anything."
+                ? "Aqua checks for a new version about once a day."
                 : "Automatic checks are off. Check now looks for a new version.",
             UpdateStage.Checking => "Asking GitHub for the latest version…",
             UpdateStage.UpToDate => $"You have the latest version (checked at {Fmt.Clock(LastChecked ?? DateTimeOffset.Now, Hub.S.General.Use24Hour)}).",
-            UpdateStage.Available => $"Aqua Hub {NewVersion} is available ({UpdatePolicy.Megabytes(DownloadSize)}). Download it now; it installs when you restart Aqua Hub."
+            UpdateStage.Available => $"Aqua Hub {NewVersion} is available ({UpdatePolicy.Megabytes(DownloadSize)})."
                                      + (Error is null ? "" : $" The download didn't finish: {Error}."),
             UpdateStage.Downloading => $"Downloading Aqua Hub {NewVersion}… {Percent}%",
-            UpdateStage.Ready => $"Aqua Hub {NewVersion} is downloaded. Restart now to install it, or it installs itself the next time Aqua Hub starts."
+            UpdateStage.Ready => $"Aqua Hub {NewVersion} is ready. Restart now to install it, or it installs at the next start."
                                  + (Error is null ? "" : $" The updater didn't start: {Error}."),
             UpdateStage.Failed => $"Couldn't check for updates: {Error}." + (automatic ? " Aqua tries again later." : ""),
             _ => "",
         };
 
     private static void Announce(Core.Models.HubAlert alert) => Hub.Core.Context.RaiseAlert(alert, alert.Id);
+
+    /// <summary>
+    /// A pretend release (--demo-update) for trying the banner, the progress and Restart now: it "downloads" in a few
+    /// seconds and never installs anything (Restart now says so; in an E2E dry run the click goes to the journal).
+    /// </summary>
+    private sealed class DemoUpdater(bool ready) : IUpdater
+    {
+        private static readonly UpdateOffer Offer = new("9.9.9", 96L * 1024 * 1024,
+            "- A pretend release, for trying out how updates look.\n- Nothing is downloaded or installed.");
+
+        public UpdateOffer? Pending { get; } = ready ? Offer : null;
+
+        public Task<UpdateOffer?> CheckAsync() => Task.FromResult<UpdateOffer?>(Offer);
+
+        public async Task DownloadAsync(UpdateOffer offer, Action<int> progress, CancellationToken ct)
+        {
+            for (var p = 0; p <= 100; p += 4)
+            {
+                progress(p);
+                await Task.Delay(120, ct);
+            }
+        }
+
+        public void ApplyAndRestart(UpdateOffer offer, bool silent, string[] restartArgs)
+        {
+            Sandbox.Record("update-restart", offer.Version);
+            throw new InvalidOperationException("this is a pretend update, so there's nothing to install");
+        }
+    }
 
     /// <summary>Velopack behind <see cref="IUpdater"/>; it keeps Velopack's own objects for what it last reported.</summary>
     private sealed class VelopackSource(UpdateManager manager) : IUpdater

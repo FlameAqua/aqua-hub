@@ -26,6 +26,9 @@ public sealed class SessionOptions
     /// <summary>Tweaks applied to the copied settings.json before launch.</summary>
     public Action<JsonObject>? EditSettings { get; init; }
 
+    /// <summary>More command-line arguments for the app (e.g. <c>--demo-update</c>, a pretend release).</summary>
+    public IReadOnlyList<string> ExtraArgs { get; init; } = Array.Empty<string>();
+
     public static SessionOptions Warm => new();
 }
 
@@ -97,6 +100,7 @@ public sealed class AppSession : IDisposable
 
         var args = new List<string> { "--e2e", "--data-dir", profile };
         if (options.Background) args.Add("--background");
+        args.AddRange(options.ExtraArgs);
         var process = Launch(exe, args);
         var session = new AppSession(name, profile, options, process);
         Results.Log($"[session] started {name} pid={process.Id} profile={profile}");

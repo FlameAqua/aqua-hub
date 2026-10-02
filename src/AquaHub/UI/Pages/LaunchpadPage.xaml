@@ -33,7 +33,7 @@
                         <TextBlock Text="{Binding MediaArtist}" Style="{StaticResource T.Body2}" Margin="0,2,0,0" Visibility="{Binding HasMedia, Converter={StaticResource Vis}}"/>
                         <StackPanel Visibility="{Binding HasMedia, Converter={StaticResource VisNot}}" Margin="0,16,0,0">
                             <TextBlock Text="Nothing is playing" FontSize="18" FontWeight="SemiBold"/>
-                            <TextBlock Text="Aqua controls any app that shows in Windows' media controls — Spotify, browsers, Media Player and more." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
+                            <TextBlock Text="Works with any app in Windows' media controls, such as Spotify, browsers and Media Player." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,8">
                             <Button Style="{StaticResource Btn.Media}" Width="48" Height="48" ui:UiProps.CornerRadius="24" Command="{Binding PrevCommand}" ToolTip="Previous"><c:Icon Kind="previous" Width="20" Height="20"/></Button>

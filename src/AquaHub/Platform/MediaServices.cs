@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AquaHub.Core.Media;
 using AquaHub.Core.Util;
 using AquaHub.Services;
 using Windows.Media.Control;
@@ -19,8 +20,16 @@ public sealed class MediaController
 {
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
-    private string? _thumbKey;
+    private string? _key;
+    private string? _album;
     private byte[]? _thumb;
+    /// <summary>The previous title's artwork, which a browser keeps reporting for a moment with a new title.</summary>
+    private byte[]? _previousArt;
+    private string? _previousAlbum;
+    private int _generation;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly object _hookGate = new();
+    private System.Threading.Timer? _watch;
 
     public MediaInfo? Current { get; private set; }
     public event Action? Changed;
@@ -30,10 +39,13 @@ public sealed class MediaController
         try
         {
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            _manager.CurrentSessionChanged += (_, _) => { Hook(); _ = RefreshAsync(); };
-            _manager.SessionsChanged += (_, _) => { Hook(); _ = RefreshAsync(); };
+            _manager.CurrentSessionChanged += (_, _) => { Hook(); _ = RefreshAsync(artwork: true); };
+            _manager.SessionsChanged += (_, _) => { Hook(); _ = RefreshAsync(artwork: true); };
             Hook();
-            await RefreshAsync();
+            await RefreshAsync(artwork: true);
+            // Windows doesn't always say when a player closes; a quiet look every few seconds catches it.
+            _watch = new System.Threading.Timer(_ => { if (_session is not null || Current is not null) { Hook(); _ = RefreshAsync(artwork: false); } },
+                null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
         }
         catch (Exception ex)
         {
@@ -43,87 +55,153 @@ public sealed class MediaController
 
     private void Hook()
     {
-        var session = _manager?.GetCurrentSession();
-        if (ReferenceEquals(session, _session)) return;
-        if (_session is not null)
-        {
-            _session.MediaPropertiesChanged -= OnMediaChanged;
-            _session.PlaybackInfoChanged -= OnPlaybackChanged;
-        }
-        _session = session;
-        if (_session is not null)
-        {
-            _session.MediaPropertiesChanged += OnMediaChanged;
-            _session.PlaybackInfoChanged += OnPlaybackChanged;
-        }
+        lock (_hookGate) HookLocked();
     }
 
-    private void OnMediaChanged(GlobalSystemMediaTransportControlsSession s, MediaPropertiesChangedEventArgs e) => _ = RefreshAsync();
-    private void OnPlaybackChanged(GlobalSystemMediaTransportControlsSession s, PlaybackInfoChangedEventArgs e) => _ = RefreshAsync();
-
-    public async Task RefreshAsync()
+    private void HookLocked()
     {
+        GlobalSystemMediaTransportControlsSession? session;
+        try { session = _manager?.GetCurrentSession(); }
+        catch (COMException) { session = null; }
+        if (ReferenceEquals(session, _session)) return;
+        if (_session is { } old)
+        {
+            // A player that has closed can't be unsubscribed from; it's dropped either way.
+            try
+            {
+                old.MediaPropertiesChanged -= OnMediaChanged;
+                old.PlaybackInfoChanged -= OnPlaybackChanged;
+            }
+            catch (COMException) { }
+        }
+        _session = session;
+        if (session is null) return;
         try
         {
+            session.MediaPropertiesChanged += OnMediaChanged;
+            session.PlaybackInfoChanged += OnPlaybackChanged;
+        }
+        catch (COMException) { _session = null; }
+    }
+
+    private void OnMediaChanged(GlobalSystemMediaTransportControlsSession s, MediaPropertiesChangedEventArgs e) => _ = RefreshAsync(artwork: true);
+    private void OnPlaybackChanged(GlobalSystemMediaTransportControlsSession s, PlaybackInfoChangedEventArgs e) => _ = RefreshAsync(artwork: false);
+
+    public Task RefreshAsync() => RefreshAsync(artwork: true);
+
+    /// <param name="artwork">Read the artwork again (the media changed), not just the playback state.</param>
+    private async Task RefreshAsync(bool artwork)
+    {
+        var generation = Interlocked.Increment(ref _generation);
+        // Only the latest refresh may change what's shown: an older one finishing late would bring back the previous
+        // title or picture. They also take turns, as events arrive on several threads at once.
+        bool Stale() => generation != Volatile.Read(ref _generation);
+        await _refreshGate.WaitAsync();
+        try
+        {
+            if (Stale()) return;
             var session = _session;
             if (session is null)
             {
-                Current = null;
-                Changed?.Invoke();
+                Set(null);
                 return;
             }
-            var props = await session.TryGetMediaPropertiesAsync();
-            var playback = session.GetPlaybackInfo();
-            var timeline = session.GetTimelineProperties();
-            var key = props.Title + "|" + props.Artist + "|" + props.AlbumTitle;
-            if (key != _thumbKey)
+            GlobalSystemMediaTransportControlsSessionMediaProperties props;
+            GlobalSystemMediaTransportControlsSessionPlaybackInfo? playback;
+            GlobalSystemMediaTransportControlsSessionTimelineProperties timeline;
+            try
             {
-                _thumbKey = key;
+                props = await session.TryGetMediaPropertiesAsync();
+                playback = session.GetPlaybackInfo();
+                timeline = session.GetTimelineProperties();
+            }
+            catch (COMException)
+            {
+                // The player has gone (its process ended): look again at what Windows has now.
+                if (Stale()) return;
+                if (ReferenceEquals(_session, session)) _session = null;
+                Hook();
+                if (_session is null) Set(null);
+                else _ = RefreshAsync(artwork: true);
+                return;
+            }
+            if (Stale()) return;
+
+            var title = props.Title ?? "";
+            var key = title + "|" + props.Artist + "|" + props.AlbumTitle;
+            var titleChanged = key != _key;
+            if (titleChanged)
+            {
+                _previousArt = _thumb;
+                _previousAlbum = _album;
+                _key = key;
+                _album = props.AlbumTitle;
                 _thumb = null;
-                if (props.Thumbnail is not null)
-                {
-                    try
-                    {
-                        using var stream = await props.Thumbnail.OpenReadAsync();
-                        if (stream.Size is > 0 and < 4_000_000)
-                        {
-                            await using var net = stream.AsStreamForRead();
-                            using var ms = new MemoryStream();
-                            await net.CopyToAsync(ms);
-                            _thumb = ms.ToArray();
-                        }
-                    }
-                    catch { _thumb = null; }
-                }
+            }
+            if (titleChanged || artwork)
+            {
+                var art = await ReadArtworkAsync(props);
+                if (Stale()) return;
+                _thumb = art is not null && NowPlayingRules.IsStaleArtwork(art, _previousArt, props.AlbumTitle, _previousAlbum) ? null : art;
+                // The new picture often follows a moment later; look once more in case no event says so.
+                if (titleChanged) _ = Task.Delay(1500).ContinueWith(_ => RefreshAsync(artwork: true), TaskScheduler.Default);
+            }
+
+            var controls = playback?.Controls;
+            var state = (PlaybackState)(int)(playback?.PlaybackStatus ?? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed);
+            switch (NowPlayingRules.Decide(title, state, controls?.IsPlayEnabled ?? false, controls?.IsPlayPauseToggleEnabled ?? false))
+            {
+                case NowPlayingDecision.Hide:
+                    Set(null);
+                    return;
+                case NowPlayingDecision.Keep when Current is not null:
+                    return;
             }
             var app = FriendlyApp(session.SourceAppUserModelId);
-            var status = playback?.PlaybackStatus;
-            var playing = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-            // A session with no title that isn't playing (an idle browser tab, a closed track) is "nothing playing",
-            // not "Unknown title". Play still resumes it, because the session is kept.
-            if (string.IsNullOrWhiteSpace(props.Title) && !playing)
-            {
-                Current = null;
-                Changed?.Invoke();
-                return;
-            }
-            Current = new MediaInfo(
-                string.IsNullOrWhiteSpace(props.Title) ? (string.IsNullOrEmpty(app) ? "Playing" : $"Playing in {app}") : props.Title,
+            Set(new MediaInfo(
+                string.IsNullOrWhiteSpace(title) ? (string.IsNullOrEmpty(app) ? "Playing" : $"Playing in {app}") : title,
                 props.Artist ?? "",
                 props.AlbumTitle ?? "",
                 app,
-                status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
+                state == PlaybackState.Playing,
                 timeline.Position,
                 timeline.EndTime - timeline.StartTime,
                 _thumb,
-                playback?.Controls.IsNextEnabled ?? false,
-                playback?.Controls.IsPreviousEnabled ?? false);
-            Changed?.Invoke();
+                controls?.IsNextEnabled ?? false,
+                controls?.IsPreviousEnabled ?? false));
         }
         catch (Exception ex)
         {
             Log.Debug("media", "Refresh failed: " + ex.Message);
         }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
+    private static async Task<byte[]?> ReadArtworkAsync(GlobalSystemMediaTransportControlsSessionMediaProperties props)
+    {
+        if (props.Thumbnail is null) return null;
+        try
+        {
+            using var stream = await props.Thumbnail.OpenReadAsync();
+            if (stream.Size is not (> 0 and < 4_000_000)) return null;
+            await using var net = stream.AsStreamForRead();
+            using var ms = new MemoryStream();
+            await net.CopyToAsync(ms);
+            return ms.ToArray();
+        }
+        catch { return null; }
+    }
+
+    private void Set(MediaInfo? info)
+    {
+        var current = Current;
+        Current = info;
+        // Only the position moved (or nothing at all): no need to redraw anything.
+        if (info is null ? current is null : current is not null && info with { Position = current.Position, Duration = current.Duration } == current) return;
+        Changed?.Invoke();
     }
 
     /// <summary>Resolves an AppUserModelID to a display name via the Start-menu catalog (e.g. Firefox's hash-like id).</summary>
@@ -147,11 +225,23 @@ public sealed class MediaController
 
     public bool HasSession => _session is not null;
 
-    public async Task<bool> PlayPauseAsync() => Sandbox.Intercept("media", "toggle") || (_session is not null && await _session.TryTogglePlayPauseAsync());
-    public async Task<bool> PlayAsync() => Sandbox.Intercept("media", "play") || (_session is not null && await _session.TryPlayAsync());
-    public async Task<bool> PauseAsync() => Sandbox.Intercept("media", "pause") || (_session is not null && await _session.TryPauseAsync());
-    public async Task<bool> NextAsync() => Sandbox.Intercept("media", "next") || (_session is not null && await _session.TrySkipNextAsync());
-    public async Task<bool> PreviousAsync() => Sandbox.Intercept("media", "previous") || (_session is not null && await _session.TrySkipPreviousAsync());
+    public Task<bool> PlayPauseAsync() => SendAsync("toggle", s => s.TryTogglePlayPauseAsync().AsTask());
+    public Task<bool> PlayAsync() => SendAsync("play", s => s.TryPlayAsync().AsTask());
+    public Task<bool> PauseAsync() => SendAsync("pause", s => s.TryPauseAsync().AsTask());
+    public Task<bool> NextAsync() => SendAsync("next", s => s.TrySkipNextAsync().AsTask());
+    public Task<bool> PreviousAsync() => SendAsync("previous", s => s.TrySkipPreviousAsync().AsTask());
+
+    /// <summary>A control for the current player; Now Playing then shows what it really did (a refused one may mean it's gone).</summary>
+    private async Task<bool> SendAsync(string action, Func<GlobalSystemMediaTransportControlsSession, Task<bool>> send)
+    {
+        if (Sandbox.Intercept("media", action)) return true;
+        if (_session is not { } session) return false;
+        bool ok;
+        try { ok = await send(session); }
+        catch (COMException) { ok = false; }
+        _ = Task.Delay(ok ? 700 : 0).ContinueWith(_ => { Hook(); return RefreshAsync(artwork: false); }, TaskScheduler.Default);
+        return ok;
+    }
 
     /// <summary>Sends the hardware play/pause media key (wakes a player without an active session).</summary>
     public static void SendMediaKey(byte vk = 0xB3)

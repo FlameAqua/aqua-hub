@@ -10,8 +10,9 @@ using AquaHub.Services;
 
 namespace AquaHub;
 
+/// <param name="DemoUpdate">--demo-update [ready]: a pretend release for trying the update banner (Debug builds and E2E dry runs).</param>
 public sealed record AppArgs(bool Background, string? Snapshot, int SnapshotWait, string? SnapshotPages, string? DataDir, string? Page,
-    bool E2e, string? Command, bool Measure = false)
+    bool E2e, string? Command, bool Measure = false, string? DemoUpdate = null)
 {
     public static AppArgs Parse(string[] args)
     {
@@ -29,7 +30,10 @@ public sealed record AppArgs(bool Background, string? Snapshot, int SnapshotWait
             Value("--page"),
             args.Any(a => a.Equals("--e2e", StringComparison.OrdinalIgnoreCase)) || Environment.GetEnvironmentVariable("AQUAHUB_E2E") == "1",
             SingleInstance.Commands.FirstOrDefault(c => args.Any(a => a.Equals("--" + c, StringComparison.OrdinalIgnoreCase))),
-            args.Any(a => a.Equals("--measure", StringComparison.OrdinalIgnoreCase)));
+            args.Any(a => a.Equals("--measure", StringComparison.OrdinalIgnoreCase)),
+            args.Any(a => a.Equals("--demo-update", StringComparison.OrdinalIgnoreCase))
+                ? Value("--demo-update") is { } stage && stage.Equals("ready", StringComparison.OrdinalIgnoreCase) ? "ready" : "available"
+                : null);
     }
 }
 
@@ -97,7 +101,8 @@ public partial class App : Application
         Hub.Windows = new WindowManager();
         Hub.Ask = new AskSession();
         Hub.Ollama = new OllamaManager();
-        Hub.Updates = new UpdateService(Sandbox.Enabled, args.DataDir is null ? Array.Empty<string>() : new[] { "--data-dir", paths.Root });
+        Hub.Updates = new UpdateService(Sandbox.Enabled, args.DataDir is null ? Array.Empty<string>() : new[] { "--data-dir", paths.Root },
+            args.DemoUpdate);
         // A version downloaded earlier ("Later") installs now, before anything opens: Velopack's updater waits for this
         // process to end, swaps versions and starts the new one (in the background again if that's how we started).
         if (!Hub.SnapshotMode && Hub.Updates.ApplyPendingAtStartup(args.Background))
@@ -126,6 +131,7 @@ public partial class App : Application
         Hub.Tray = new TrayIcon();
         Hub.Platform.AttachTray(Hub.Tray);
         Hub.Hotkeys = new HotkeyManager(Hub.Tray);
+        UI.Controls.HotkeyBox.Listening += PauseHotkeys;
         var firstIcon = IconFactory.CreateTrayIcon();
         Hub.Tray.Show(firstIcon, IconFactory.CreateLargeIcon(), "Aqua Hub");
         Hub.Tray.LeftClick += (_, _) => Hub.OnUi(() => Hub.Windows.ToggleFlyout(fromTrayClick: true));
@@ -209,8 +215,20 @@ public partial class App : Application
         ["Ctrl+Alt+Space"] = new[] { "Ctrl+Alt+Space", "Ctrl+Alt+K", "Ctrl+Alt+J", "Win+Alt+K" },
     };
 
+    private static bool _hotkeysPaused;
+
+    /// <summary>While a shortcut box is listening, Aqua lets go of its own shortcuts so pressing them records them.</summary>
+    private static void PauseHotkeys(bool pause)
+    {
+        if (_hotkeysPaused == pause) return;
+        _hotkeysPaused = pause;
+        if (pause) Hub.Hotkeys.Clear();
+        else RegisterHotkeys();
+    }
+
     private static void RegisterHotkeys()
     {
+        if (_hotkeysPaused) return;
         HotkeyErrors.Clear();
         Hub.Hotkeys.Clear();
         var g = Hub.S.General;

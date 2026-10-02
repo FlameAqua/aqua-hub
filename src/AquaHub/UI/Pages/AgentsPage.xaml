@@ -108,8 +108,8 @@
                 </c:Card>
                 <c:Card Grid.Column="2" Title="Model output inspector" Icon="eye" Subtitle="what the local model actually said">
                     <StackPanel>
-                        <TextBlock Text="Every AI result is produced on this PC. Expand an entry to see the raw structured output behind it." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                        <TextBlock x:Name="NoOutputs" Text="Nothing yet — model output appears here once the local model has written summaries, the pulse or the brief." Style="{StaticResource T.Body2}" TextWrapping="Wrap" Visibility="Collapsed"/>
+                        <TextBlock Text="What the local model wrote. Expand an entry to see its raw output." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <TextBlock x:Name="NoOutputs" Text="Nothing yet. Summaries, the pulse and the brief appear here once the local model writes them." Style="{StaticResource T.Body2}" TextWrapping="Wrap" Visibility="Collapsed"/>
                         <ItemsControl x:Name="Outputs">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>

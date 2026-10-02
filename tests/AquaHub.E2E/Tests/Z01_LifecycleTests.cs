@@ -75,6 +75,7 @@ public sealed class Z01_LifecycleTests : E2ETestBase
     });
 
     [Fact]
+    [Trait("Category", "Smoke")]
     public void T03_QuitCommandExitsCleanly()
     {
         // Fresh instance: the "still running" hint is shown at most once per profile, so start from a clean copy.

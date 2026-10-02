@@ -775,6 +775,24 @@ public class NewSourceAndSettingsTests
     }
 
     [Fact]
+    public void OlderSettingsGainGamingAndInternetNewsOnce()
+    {
+        var s = new HubSettings { Version = 3 };
+        s.News.Sources.RemoveAll(x => x.Category == "gaming");
+        // Someone who already follows Kotaku under their own name keeps just that one.
+        s.News.Sources.Add(new NewsSource { Id = "my-kotaku", Name = "Kotaku (mine)", Url = "https://www.kotaku.com/rss", Category = "tech" });
+        Assert.True(SettingsStore.Migrate(s));
+        var added = s.News.Sources.Where(x => x.Category == "gaming").Select(x => x.Id).ToList();
+        Assert.Equal(new[] { "eurogamer", "vgc", "dexerto", "insider-gaming", "dailydot" }, added);
+        Assert.Single(s.News.Sources, x => x.Url.Contains("kotaku.com", StringComparison.OrdinalIgnoreCase));
+        Assert.All(s.News.Sources.Where(x => x.Category == "gaming"), x => Assert.True(SettingsStore.IsSafeHttpUrl(x.Url)));
+        // Removed later: stays removed.
+        s.News.Sources.RemoveAll(x => x.Id == "dexerto");
+        Assert.False(SettingsStore.Migrate(s));
+        Assert.DoesNotContain(s.News.Sources, x => x.Id == "dexerto");
+    }
+
+    [Fact]
     public void ArsTechnicaAndGamersNexusAreDefaultSources()
     {
         var sources = NewsSettings.DefaultSources();

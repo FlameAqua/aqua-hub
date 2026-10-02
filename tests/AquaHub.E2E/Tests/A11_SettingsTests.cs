@@ -32,7 +32,7 @@ public sealed class A11_SettingsTests : E2ETestBase
 
     private static readonly string[] SectionNames =
     {
-        "General", "Location & weather", "News", "Social", "Markets", "Agenda", "Predictions", "AI & models", "Ask Aqua", "Apps & scenes", "Notifications", "Privacy & data",
+        "General", "Shortcuts", "Location & weather", "News", "Social", "Markets", "Agenda", "Predictions", "AI & models", "Ask Aqua", "Apps & scenes", "Notifications", "Privacy & data",
         "Debug", "About",
     };
 
@@ -159,6 +159,7 @@ public sealed class A11_SettingsTests : E2ETestBase
 
     // ───────────── tests ─────────────
     [Fact]
+    [Trait("Category", "Smoke")]
     public void T01_EverySectionOpens() => Run(() =>
     {
         foreach (var name in SectionNames)
@@ -237,18 +238,38 @@ public sealed class A11_SettingsTests : E2ETestBase
 
         RecordHotkey("Quick panel hotkey", VK.F9, "general.hotkeyFlyout");
         RecordHotkey("Command palette hotkey", VK.F10, "general.hotkeyPalette");
+        Check("Settings shortcuts", "the command palette's keys are refused for the quick panel, with the reason shown", () =>
+        {
+            Section("Shortcuts");
+            App.EnsureForeground(Main);
+            Wait.Retry(Field("Quick panel hotkey", ControlType.Edit).SetFocus, "focus the hotkey box");
+            Thread.Sleep(120);
+            Input.Chord(Pid, VK.Control, VK.Alt, VK.Shift, VK.F10);
+            Wait.For(() => Ui.Find(Page, Ui.Id("hotkey-problem")) is { } problem && Ui.NameOf(problem).Contains("command palette", StringComparison.Ordinal) ? problem : null,
+                "a message that those keys open the command palette");
+            Thread.Sleep(900);
+            Expect(App.Settings.GetString("general.hotkeyFlyout") == "Ctrl+Alt+Shift+F9", $"the clashing keys were saved: {App.Settings.GetString("general.hotkeyFlyout")}");
+        });
+        Check("Settings shortcuts", "Backspace clears a hotkey and Esc puts it back", () =>
+        {
+            Section("Shortcuts");
+            FocusAndPress(Main, Field("Quick panel hotkey", ControlType.Edit), VK.Back);
+            App.Settings.WaitForString("general.hotkeyFlyout", "");
+            PressInMain(VK.Escape);
+            App.Settings.WaitForString("general.hotkeyFlyout", "Ctrl+Alt+Shift+F9");
+        });
     });
 
     /// <summary>
-    /// A hotkey box records the keys pressed while it has focus (it can't be typed into). Backspace (restore the
-    /// default) isn't exercised: the default is a real system-wide shortcut, which test sessions never register.
+    /// A hotkey box records the keys pressed while it has focus (it can't be typed into). Reset (back to the default)
+    /// isn't exercised: the default is a real system-wide shortcut, which test sessions never register.
     /// </summary>
     private void RecordHotkey(string fieldName, VK key, string path)
     {
         var gesture = "Ctrl+Alt+Shift+" + key;
-        Check("Settings general", $"'{fieldName}': pressing {gesture} records it → {path}", () =>
+        Check("Settings shortcuts", $"'{fieldName}': pressing {gesture} records it → {path}", () =>
         {
-            Section("General");
+            Section("Shortcuts");
             App.EnsureForeground(Main);
             Wait.Retry(Field(fieldName, ControlType.Edit).SetFocus, "focus the hotkey box");
             Thread.Sleep(120);
@@ -257,6 +278,33 @@ public sealed class A11_SettingsTests : E2ETestBase
             Expect(Ui.ValueOf(Field(fieldName, ControlType.Edit)) == gesture, "the box doesn't show the recorded shortcut");
         });
     }
+
+    [Fact]
+    [Trait("Category", "Smoke")]
+    public void T02b_SearchTakesYouToASetting() => Run(() =>
+    {
+        Check("Settings search", "'dark mode' finds Theme, and Enter opens General with Theme focused", () =>
+        {
+            Section("Privacy & data");
+            var box = Ui.WaitFind(Page, Ui.Id("settings-search"), "settings search box");
+            Ui.SetValue(box, "dark mode");
+            var results = Wait.For(() => Ui.Find(Main, Ui.Id("settings-search-results")), "search results");
+            var first = Wait.For(() => Ui.FindAll(results, Ui.Type(ControlType.ListItem)).FirstOrDefault(), "a result");
+            Expect(Ui.NameOf(first).StartsWith("Theme", StringComparison.Ordinal), $"the first result is '{Ui.NameOf(first)}'");
+            Ui.Select(first);
+            FocusAndPress(Main, first, VK.Enter);
+            Wait.For(() => Ui.FindAll(Ui.WaitFind(Page, Ui.Id("Sections"), "sections"), Ui.Type(ControlType.ListItem)).FirstOrDefault(Ui.IsSelected) is { } s && Ui.Texts(s).Contains("General") ? s : null,
+                "General selected");
+            Wait.For(() => Ui.Find(Page, Ui.And(Ui.Type(ControlType.ComboBox), Ui.Name("Theme"))) is { Current.HasKeyboardFocus: true } theme ? theme : null, "the Theme setting focused");
+        });
+        Check("Settings search", "a search with no match says so", () =>
+        {
+            var box = Ui.WaitFind(Page, Ui.Id("settings-search"), "settings search box");
+            Ui.SetValue(box, "zzqx");
+            Wait.For(() => Ui.HasText(Main, "No setting matches “zzqx”."), "the no-match line");
+            Ui.SetValue(box, "");
+        });
+    });
 
     [Fact]
     public void T03_LocationAndWeather() => Run(() =>
@@ -398,6 +446,14 @@ public sealed class A11_SettingsTests : E2ETestBase
                 Ui.SetValue(Ui.WaitFind(row, Ui.And(Ui.Type(ControlType.Edit), Ui.Name(field)), field), value);
             Wait.For(() => WatchRow("NVDA") is { } w && (double?)w["shares"] == 10 && (double?)w["costBasis"] == 150.5 && (double?)w["alertAbove"] == 300 && (double?)w["alertBelow"] == 100,
                 "holdings saved", E2EConfig.PersistTimeout);
+        });
+        Check("Settings markets", "fractional shares and the currency a holding was paid in", () =>
+        {
+            var row = Row("NVDA");
+            Ui.SetValue(Ui.WaitFind(row, Ui.And(Ui.Type(ControlType.Edit), Ui.Name("Shares")), "Shares"), "2.75");
+            Wait.For(() => WatchRow("NVDA") is { } w && (double?)w["shares"] == 2.75, "2.75 shares saved", E2EConfig.PersistTimeout);
+            Ui.SelectComboItem(Ui.WaitFind(row, Ui.And(Ui.Type(ControlType.ComboBox), Ui.Name("Cost currency")), "cost currency"), "EUR", Pid);
+            Wait.For(() => WatchRow("NVDA") is { } w && (string?)w["costCurrency"] == "EUR", "cost currency saved", E2EConfig.PersistTimeout);
         });
         Check("Settings markets", "remove IWDA.AS from the watchlist", () =>
         {

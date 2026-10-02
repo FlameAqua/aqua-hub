@@ -202,6 +202,15 @@ public sealed class HotkeyManager : IDisposable
         return null;
     }
 
+    /// <summary>Whether Windows would give these keys to Aqua now: they're held for a moment and let go.</summary>
+    public bool IsFree(string gesture)
+    {
+        const int probe = 0x5BFF;
+        if (!TryParse(gesture, out var mods, out var vk) || !Native.RegisterHotKey(_tray.Handle, probe, mods | Native.MOD_NOREPEAT, vk)) return false;
+        Native.UnregisterHotKey(_tray.Handle, probe);
+        return true;
+    }
+
     public static bool TryParse(string gesture, out int modifiers, out int vk)
     {
         modifiers = 0;

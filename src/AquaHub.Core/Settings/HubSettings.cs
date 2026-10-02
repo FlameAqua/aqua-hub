@@ -135,6 +135,13 @@ public sealed class NewsSettings
         new() { Id = "ars", Name = "Ars Technica", Url = "https://feeds.arstechnica.com/arstechnica/index", Category = "tech", Tier = 2 },
         new() { Id = "verge", Name = "The Verge", Url = "https://www.theverge.com/rss/index.xml", Category = "tech", Tier = 2 },
         new() { Id = "gamersnexus", Name = "Gamers Nexus", Url = "https://gamersnexus.net/rss.xml", Category = "tech", Tier = 2 },
+        // Gaming & internet culture
+        new() { Id = "kotaku", Name = "Kotaku", Url = "https://kotaku.com/feed", Category = "gaming", Tier = 2 },
+        new() { Id = "eurogamer", Name = "Eurogamer", Url = "https://www.eurogamer.net/feed", Category = "gaming", Tier = 2 },
+        new() { Id = "vgc", Name = "Video Games Chronicle", Url = "https://www.videogameschronicle.com/feed/", Category = "gaming", Tier = 2 },
+        new() { Id = "dexerto", Name = "Dexerto", Url = "https://www.dexerto.com/feed/", Category = "gaming", Tier = 3 },
+        new() { Id = "insider-gaming", Name = "Insider Gaming", Url = "https://insider-gaming.com/feed/", Category = "gaming", Tier = 3 },
+        new() { Id = "dailydot", Name = "The Daily Dot", Url = "https://dailydot.com/feed", Category = "gaming", Tier = 3 },
         new() { Id = "gnews-top", Name = "Top Stories (Google News)", Kind = "google", Query = "", Category = "world", Tier = 3, Enabled = false },
     };
 }
@@ -189,8 +196,12 @@ public sealed class WatchSymbol
     public string Name { get; set; } = "";
     /// <summary>index | equity | etf | fx | crypto | commodity</summary>
     public string Kind { get; set; } = "equity";
+    /// <summary>How many you own (fractions allowed). Set, it makes this a holding.</summary>
     public double? Shares { get; set; }
+    /// <summary>Average cost of one, in <see cref="CostCurrency"/>.</summary>
     public double? CostBasis { get; set; }
+    /// <summary>The currency the cost was paid in (e.g. "EUR"); empty when it's the one the price is in.</summary>
+    public string CostCurrency { get; set; } = "";
     public double? AlertAbove { get; set; }
     public double? AlertBelow { get; set; }
 }

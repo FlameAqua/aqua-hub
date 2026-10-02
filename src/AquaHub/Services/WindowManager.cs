@@ -193,6 +193,8 @@ public static class TrayHint
     public static void ShowOnce()
     {
         if (Hub.Core.Db.TryMarkSeen("hint:tray"))
-            Hub.Tray?.Notify("Aqua Hub is still running", "Your agents keep working in the background. Click the tray icon or press " + Hub.S.General.HotkeyFlyout + " for the quick panel.", quiet: true);
+            Hub.Tray?.Notify("Aqua Hub is still running", Hub.S.General.HotkeyFlyout is { Length: > 0 } hotkey
+                ? $"Your agents keep working in the background. Click the tray icon or press {hotkey} for the quick panel."
+                : "Your agents keep working in the background. Click the tray icon for the quick panel.", quiet: true);
     }
 }

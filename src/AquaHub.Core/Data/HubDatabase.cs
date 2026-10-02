@@ -411,6 +411,24 @@ public sealed class HubDatabase
         Exec(c, "DELETE FROM alerts;");
     }
 
+    /// <summary>Deletes these alerts; returns how many there were.</summary>
+    public int DeleteAlerts(IEnumerable<string> ids)
+    {
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        var n = 0;
+        foreach (var id in ids)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM alerts WHERE id=$id;";
+            cmd.Parameters.AddWithValue("$id", id);
+            n += cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+        return n;
+    }
+
     /// <summary>Whether a de-duplication key is recorded (see <see cref="TryMarkSeen"/>); keys expire after 10 days.</summary>
     public bool HasSeen(string key)
     {

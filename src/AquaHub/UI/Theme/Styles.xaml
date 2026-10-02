@@ -283,6 +283,11 @@
                         <DataTrigger Binding="{Binding (ui:UiProps.Badge), RelativeSource={RelativeSource Self}}" Value="dot">
                             <Setter TargetName="BadgeDot" Property="Visibility" Value="Visible"/>
                         </DataTrigger>
+                        <!-- Something new to look at (an update), rather than something wrong -->
+                        <DataTrigger Binding="{Binding (ui:UiProps.Badge), RelativeSource={RelativeSource Self}}" Value="new">
+                            <Setter TargetName="BadgeDot" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="BadgeDot" Property="Background" Value="{DynamicResource B.Accent}"/>
+                        </DataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

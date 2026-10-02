@@ -228,3 +228,76 @@ From the roadmap's first phase (no review round, as agreed):
 | Start with Windows | An installed copy takes over the entry from a build run from source; a source build never takes it back; uninstalling removes it. |
 | Privacy and security sweep | No names, e-mail addresses, keys, tokens or personal paths in the committed files (the review found the commit's author e-mail is a personal address: see the Phase 1 review below); the E2E suite no longer points at a developer's temp folder or types a real name; screenshots with a name, what was playing or press photos moved to a git-ignored folder, and the README's Today screenshot has the greeting's name painted out. Code scan: no certificate bypasses, unsafe serializers or string-built SQL; files from answers open only as documents and media. CI pins the target framework (a newer SDK on the runner would break the locked restore) and runs the E2E job on demand. |
 | Verified | 29 new unit tests (538 pass): the release address, the check schedule, update alerts and notes, one alert read at a time, alerts raised once per key, the Start with Windows hand-over, 128K growth and validation. The app starts through the new entry point (a settings snapshot run), and the E2E project compiles with new checks for *Check now* and for opening an alert lowering the unread count. Not run here: the E2E suite (the owner's; run on 1 Oct, see below). The first real release (v1.0.0) then ran green on GitHub; an installed copy updating itself hasn't been exercised yet. |
+
+## Phase 1 review (7.1) and test-pipeline audit (5.2), 1–2 Oct: what changed
+
+After the owner's first full E2E run (98 tests: 50 passed, 48 failed, 33 minutes), two independent agents worked
+read-only on a frozen snapshot of v1.0.0 and the run's artifacts. The **reviewer**: functionality 7.4,
+implementation 7.6, security & privacy 6.4, usability 7.0, docs 6.5 — overall **7.1**. The **testing-pipeline
+auditor**: unit tests 7.5, E2E suite 3.0, CI/release 4.5, scripts 4.0 — overall **5.2**. Both were under the 8 bar.
+Everything below was acted on and shipped in 1.1.0 (CI and the release workflow green on GitHub); as the owner
+directed on 2 Oct, no further review round followed, so there are no re-scores.
+
+**The E2E run.** The auditor classified the 77 failed checks: 21 stale tests (names, ids and controls that had
+changed on purpose), 22 harness or test-design flaws (6 of them cascades from one failure), 16 timing or focus races
+(9 in the tray menu), 7 unexplained lookups, 5 accessibility gaps, 3 host-dependent, 2 product bugs (plus 4 tests
+that failed only through the palette crash) and 1 data gap. All were addressed:
+
+| Kind | Change |
+|---|---|
+| Product bugs | The command palette closed twice on Esc/Enter (a logged crash); the scene editor collapsed when a step was added or removed; the connection test's detailed result was overwritten; Esc didn't close the alerts or Local AI popups; stopping read-aloud didn't reset in dry runs; *Pause media* with nothing playing wasn't journalled. |
+| Accessibility | Panels with a name or id but no automation peer (Local AI popup, Ask's chat history, approval card, dictation bar, download progress…) are `GroupBorder`/`GroupGrid`s that screen readers and UI Automation see; buttons with an icon and text are named from their text; list items announce what they show instead of a record dump; the hotkey boxes, holdings, sources, calendars, volume sliders and drives have proper names; Ask's answers are readable through UI Automation (the rich text keeps one document). |
+| Races | `--tray-menu` brings Aqua to the front first (4 of 4 opened in a probe); the quick panel's re-open guard applies only to tray clicks; the System page no longer rebuilds its drive and process lists every 1.5 s (rows stay put, and the process list holds still while it has keyboard focus). |
+| Stale tests | 14 tests updated (A01–A17, Z01) to the current ids, names, controls and keyboard model. |
+| Harness | The fixture no longer restarts a dead app behind a test's back (an exit is always reported; a test that ended the app hands the next one a fresh copy); owned dialogs (file pickers, message boxes) are found under their owner and closed after a failure; a failed check returns to the page it started on, and a test stops after three timeouts in a row; only UI Automation hiccups count as transient (a nested wait's timeout or a test bug surfaces at once, and a timeout names the last error it tolerated); Ask's tests read the answer itself, not the longest caption near it; the crawler presses one of each kind of *Remove* per page and flips every switch back; each profile copy without a place gets Dublin. |
+
+**The reviewer's findings:**
+
+| # | Finding | Change |
+|---|---|---|
+| H1 | The public commit's author e-mail is a personal address (name and birth year) | Not a code fix: the owner decides (steps given; it's on the 1.1.0 commit too). The sweep's claim was corrected to "in the files". |
+| M1 | A second launch with a downloaded update force-killed the running copy (Velopack applied it before the single-instance check) | Velopack no longer applies at start by itself; the first instance applies a ready update before any window opens, and second launches only pass their command on. |
+| M2 | The update flow had never run and had no tests | The flow is `UpdateMachine` in Core behind an `IUpdater` seam, with 12 tests against a fake (check, failure wording, alert once, download with progress, cancel, retry, ready at start, apply failing, an alert failing). The installed-copy rehearsal is the owner's (steps given; updating an installed 1.0.0 to 1.1.0 is the first real one). |
+| M3 | A notification click could only open the latest alert | After several notifications, a click opens the bell's list; the docs say how it works. |
+| M4 | The target framework flipped with the installed SDK; the scripts ignored failures | An explicit `AquaNet` (now **.NET 10**, the owner's request) and `global.json`; lock files regenerated; `build.ps1` and `e2e.ps1` stop at a failed step. |
+| M5 | `e2e.ps1` sent `quit` (the app knows `--quit`), so the warm profile was killed | Fixed; the suite also compiles before the interactive setup step. |
+| M7 | A failing alert could relabel a good check or download as failed; a once-key was used up before its alert was stored | Alerts are raised outside the state changes and guarded; the key is marked only after the alert is stored. Tests. |
+| M8 | Release and CI hygiene | Actions pinned to commit SHAs (checked against their tags) with Dependabot; no stored checkout token; tag name and token through the environment; releases only from tags on `main`; the delta download only when there's a previous release, without `continue-on-error`; the vulnerability audit fails the build; timeouts and a concurrency group; CI no longer runs on tags. |
+| M9 | The on-demand E2E job in CI could only fail | Removed; CI compiles the suite instead. |
+| M10 | Doc claims that didn't match the code | Corrected (dependencies, .NET version, test counts, notification clicks, update-check requests, the runtime's UAC prompt, update wording). |
+| L1, L2, L4, L5, L8, L9, L13 | Velopack's "not installed" warning in Problems; an unguarded start-up call; raw error text; double *Restart now*; banners that vanished under the pointer or outlived *Clear*; the A02 bell test matching a banner; portable copies counted as installed | Fixed (plain failure wording, a re-entrancy guard, banners that pause while in use and close with *Clear* / *Mark all read*, a portable copy never takes over Start with Windows). |
+| L19 | Automatic context could grow to 128K on any GPU | Automatic stops at 64K unless the card has 24 GB or more; past the limit a prompt is trimmed rather than overflowing (the auditor's M9). Tests. |
+
+**The auditor's pipeline findings:** the E2E project builds with the .NET 10 SDK and in CI (C1); the harness
+fixes above (C2, H1–H3, H8, H9); the 12 peerless names and ids fixed, with a XAML contract test in the unit suite
+that caught the one first missed, the Social page's empty state (H4); the vulnerability audit gates (H12); the release's publish restores in locked
+mode — the app's lock file now includes win-x64 and one locked restore covers the ReadyToRun publish, checked
+with a local publish and by the 1.1.0 release (H13); `--quit`, compile-first and the scripts' exit codes (H7, M1,
+M2); the log tests no longer run alongside others (M7); the alert's Settings target has a contract test (M10);
+quiet hours' fallback has a unit test instead of a stale E2E test.
+
+**The owner's requests from the same review:**
+
+| Request | Change |
+|---|---|
+| No default location | A new profile has no place: onboarding asks (search, or *Use my location* through Windows' location with permission, town-level and rounded to about a kilometre, looked up with OpenStreetMap), and it can be skipped. Until a place is chosen there's no weather or local news search, Today's weather card offers *Choose a place*, prompts leave the place out instead of inventing one, and Ask uses Windows' time zone. Choosing a place sets up its country (outlets, subreddits, holidays, index, units, currency); a move swaps them and keeps what you added. Profiles from before keep Dublin. A map picker would need an embedded browser (WebView2) and map tiles: left as the upgrade path, as search plus location covers it. |
+| .NET 10 | Done (1.1.0 runs on .NET 10; Setup, or the first update from 1.0.0, installs the runtime if it's missing). |
+| A model selector in Ask | A picker in the composer; Think and Research are remembered for each model; Think is greyed out for a model without a thinking mode (Gemma 3); every call of an answer stays on the picked model, so Ollama doesn't swap models mid-answer. |
+| GitHub hardening | The workflow side is done (above); the repository settings to change are the owner's (listed in the hand-over). |
+
+**Verified:** 594 unit tests pass (23 live ones skipped), 56 more than at the review; the app builds with no
+warnings; the E2E suite compiles (running it is the owner's); UI Automation probes of a scratch build in the
+sandbox: onboarding with no place, *Use my location* (simulated), Today's *Choose a place*, Settings setting up
+Cork with the Irish pack, the title bar's names, Ask's answer text, the tray menu. CI on `main` and the v1.1.0
+release passed on GitHub. Dependabot's first pull request failed CI because the UI-test project's lock file wasn't
+updated with the unit tests' (it isn't in the solution); `dependabot.yml` now covers both folders in one pull
+request.
+
+**Carried to the next phase:** the update rehearsal on an installed copy (M2) and the e-mail decision (H1) — the
+owner's; update discoverability (M6: a banner and a badge when a version is ready); the Updates card's progress
+as a real progress bar (L10); release notes from a changelog (L11); install kind in the diagnostics (L12); tests
+for the Start with Windows registry plan (L14); a LICENSE and `.gitattributes` (L16, L17); from the audit, shared
+UI ids for app and tests (H5), a hermetic E2E run with a fake model server and network and a generated warm
+profile (H6), tests for the collectors and AI agents (H14), the slow timing-based unit tests (M6), the XXE test's
+weak assertion (M8), a single-pass crawler and a smoke subset, a coverage ratchet, and a release smoke test with a
+draft release.

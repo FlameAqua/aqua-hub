@@ -68,8 +68,62 @@ public static partial class UpdatePolicy
         Created = now,
     };
 
+    /// <summary>
+    /// An update alert ("available", "ready") for a version this copy already runs, or an older one: true once the
+    /// update has been installed, so the bell doesn't offer it again after the restart.
+    /// </summary>
+    public static bool IsSettled(HubAlert alert, string currentVersion)
+    {
+        if (alert.Kind != "update" || !Version.TryParse(currentVersion, out var current)) return false;
+        var colon = alert.Id.IndexOf(':');
+        return colon > 0 && Version.TryParse(alert.Id[(colon + 1)..], out var offered) && offered <= current;
+    }
+
     public static string Megabytes(long bytes) =>
         bytes <= 0 ? "size unknown" : string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:0.#} MB");
+
+    /// <summary>Where the updater stands, in a few words for the diagnostics summary.</summary>
+    public static string Describe(UpdateStage stage, string? version, string? error, DateTimeOffset? lastChecked) => stage switch
+    {
+        UpdateStage.Unavailable => "can't update itself",
+        UpdateStage.Idle => "not checked yet",
+        UpdateStage.Checking => "checking",
+        UpdateStage.UpToDate => "up to date" + (lastChecked is { } t ? string.Create(CultureInfo.InvariantCulture, $" (checked {t:yyyy-MM-dd HH:mm})") : ""),
+        UpdateStage.Available => $"{version} available" + (error is null ? "" : $", the download failed ({error})"),
+        UpdateStage.Downloading => $"downloading {version}",
+        UpdateStage.Ready => $"{version} ready to install" + (error is null ? "" : $", the updater didn't start ({error})"),
+        UpdateStage.Failed => $"the last check failed ({error})",
+        _ => stage.ToString(),
+    };
+
+    /// <summary>What the banner across the top of the window says, its button, and whether it shows progress or a notes link.</summary>
+    public sealed record Banner(string Text, string Action, bool Progress, bool Notes);
+
+    /// <summary>The banner for a stage: a new version, its download and "Restart now" (null: nothing to say).</summary>
+    public static Banner? BannerFor(UpdateStage stage, string? version, long size, int percent, string? error) => stage switch
+    {
+        UpdateStage.Available => new(
+            $"Aqua Hub {version} is available ({Megabytes(size)})." + (error is null ? " Nothing downloads until you choose to." : $" The download didn't finish: {error}."),
+            error is null ? "Download" : "Try again", Progress: false, Notes: true),
+        UpdateStage.Downloading => new($"Downloading Aqua Hub {version}… {percent}%", "Cancel", Progress: true, Notes: false),
+        UpdateStage.Ready => new(
+            error is null
+                ? $"Aqua Hub {version} is ready. Restart now to install it (Aqua opens again by itself), or it installs the next time Aqua starts."
+                : $"Aqua Hub {version} is ready, but the updater didn't start: {error}. It installs the next time Aqua starts.",
+            "Restart now", Progress: false, Notes: true),
+        _ => null,
+    };
+
+    /// <summary>
+    /// Which banner "Not now" put away: a new version, or the same one moving on (from on offer to ready to install),
+    /// brings it back.
+    /// </summary>
+    public static string? BannerKey(UpdateStage stage, string? version) => stage switch
+    {
+        UpdateStage.Available or UpdateStage.Downloading => "offer:" + version,
+        UpdateStage.Ready => "ready:" + version,
+        _ => null,
+    };
 
     [GeneratedRegex(@"!?\[([^\]]*)\]\([^)]*\)")]
     private static partial Regex Link();

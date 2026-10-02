@@ -34,6 +34,7 @@ public sealed class A14_PaletteTests : E2ETestBase
     }
 
     [Fact]
+    [Trait("Category", "Smoke")]
     public void T01_OpenAndClose() => Run(() =>
     {
         Check("Palette", "--palette opens it; Esc closes", () =>

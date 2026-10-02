@@ -479,6 +479,39 @@ public sealed partial class LocalFiles
         return list.OrderByDescending(h => h.Modified).Take(max).ToList();
     }
 
+    /// <summary>
+    /// A folder attached in Ask: how many files it holds (counting stops at <paramref name="cap"/>, or after two seconds)
+    /// and its newest entries, skipping what a search skips (system, app data, build output, keys).
+    /// </summary>
+    public static (int Files, bool More, List<FileHit> Newest) Survey(string folder, int cap = 5000, int newest = 40)
+    {
+        var top = new LocalFiles(() => new[] { folder }).List(folder, newest);
+        var count = 0;
+        var sw = Stopwatch.StartNew();
+        var queue = new Queue<string>();
+        queue.Enqueue(folder);
+        while (queue.Count > 0 && count < cap && sw.Elapsed < TimeSpan.FromSeconds(2))
+        {
+            var dir = queue.Dequeue();
+            try
+            {
+                foreach (var f in Directory.EnumerateFiles(dir))
+                {
+                    if (IsSensitive(f, folder)) continue;
+                    if (++count >= cap) break;
+                }
+                foreach (var d in Directory.EnumerateDirectories(dir))
+                {
+                    var name = Path.GetFileName(d);
+                    if (SkipDirs.Contains(name) || name.StartsWith('.') || IsSensitive(d + Path.DirectorySeparatorChar + "x", folder)) continue;
+                    queue.Enqueue(d);
+                }
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException) { }
+        }
+        return (count, count >= cap || queue.Count > 0, top);
+    }
+
     public static string Size(long bytes) => bytes switch
     {
         < 0 => "folder",

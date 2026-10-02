@@ -15,7 +15,7 @@ public static class MaintenanceTools
     public static readonly Tool[] All =
     {
         new("taskmgr", "Performance", "Task Manager", "bolt", "What's running and what it uses; end a stuck app.", "taskmgr.exe"),
-        new("resmon", "Performance", "Resource Monitor", "pulse", "Live detail on CPU, memory, disk and network per process — which app is hammering the disk.", "resmon.exe"),
+        new("resmon", "Performance", "Resource Monitor", "pulse", "CPU, memory, disk and network use per process.", "resmon.exe"),
         new("startup", "Performance", "Startup apps", "power", "Turn off apps that start with Windows, for a quicker startup.", "ms-settings:startupapps"),
         new("services", "Performance", "Services", "settings", "Windows' background services and whether they run.", "services.msc"),
         new("storage", "Storage", "Storage settings", "disk", "What fills your drives, Storage Sense and cleanup recommendations.", "ms-settings:storagesense"),
@@ -23,7 +23,7 @@ public static class MaintenanceTools
         new("defrag", "Storage", "Optimise drives", "layers", "Trim SSDs and defragment hard drives (Windows does this weekly).", "dfrgui.exe"),
         new("update", "Health & security", "Windows Update", "download", "Check for and install updates; see the update history.", "ms-settings:windowsupdate"),
         new("security", "Health & security", "Windows Security", "shield", "Antivirus, firewall and device security; run a scan.", "windowsdefender:"),
-        new("reliability", "Health & security", "Reliability Monitor", "warning", "A timeline of crashes, failed updates and installs — the quickest way to see what went wrong and when.", "perfmon.exe", "/rel"),
+        new("reliability", "Health & security", "Reliability Monitor", "warning", "A timeline of crashes, failed updates and installs.", "perfmon.exe", "/rel"),
         new("events", "Health & security", "Event Viewer", "book", "Windows' detailed logs, for chasing an error message.", "eventvwr.msc"),
         new("devices", "Hardware & system", "Device Manager", "cube", "Devices, their drivers, and any with a problem.", "devmgmt.msc"),
         new("sysinfo", "Hardware & system", "System Information", "info", "Everything about the hardware and Windows version.", "msinfo32.exe"),

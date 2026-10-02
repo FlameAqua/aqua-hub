@@ -10,7 +10,12 @@
                     <TextBlock Text="Markets" Style="{StaticResource T.Title}"/>
                     <TextBlock Text="{Binding Subtitle}" Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
                 </StackPanel>
-                <Grid HorizontalAlignment="Right" VerticalAlignment="Center" Width="300">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button x:Name="EditBarButton" Style="{StaticResource Btn.Standard}" Margin="0,0,10,0" Click="OnEditBar" AutomationProperties.AutomationId="markets-edit-bar"
+                        AutomationProperties.Name="Edit charts">
+                    <StackPanel Orientation="Horizontal"><c:Icon x:Name="EditBarIcon" Kind="edit" Width="14" Height="14"/><TextBlock x:Name="EditBarText" Text="Edit charts" Margin="8,0,0,0"/></StackPanel>
+                </Button>
+                <Grid Width="300">
                     <TextBox x:Name="AddBox" ui:UiProps.Placeholder="Add a company or ticker…" ToolTip="Search for a company or ticker to add it to your watchlist" TextChanged="OnSearchChanged"/>
                     <Popup x:Name="SearchPopup" PlacementTarget="{Binding ElementName=AddBox}" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" VerticalOffset="4">
                         <Border Width="300" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="8" Padding="4" Margin="0,0,8,12">
@@ -30,10 +35,11 @@
                         </Border>
                     </Popup>
                 </Grid>
+                </StackPanel>
             </Grid>
 
             <!-- Index & macro tiles -->
-            <ItemsControl ItemsSource="{Binding Tiles}" Margin="-6,0,-6,10">
+            <ItemsControl ItemsSource="{Binding Tiles}" Margin="-6,0,-6,10" Visibility="{Binding Editing, Converter={StaticResource VisNot}}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
@@ -54,6 +60,39 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <StackPanel Visibility="{Binding Editing, Converter={StaticResource Vis}}" Margin="0,0,0,10">
+                <ItemsControl ItemsSource="{Binding BarItems}" Margin="-6,0,-6,0" AutomationProperties.AutomationId="markets-bar-editor">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><c:FlowGrid MaxColumns="8" MinColumnWidth="150" Gap="12"/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <c:GroupBorder Background="{DynamicResource B.Card}" BorderBrush="{DynamicResource B.AccentSoft}" BorderThickness="1" CornerRadius="12" Padding="14,10,8,8"
+                                           AutomationProperties.Name="{Binding Name}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{DynamicResource B.Text2}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding PriceText}" Style="{StaticResource T.Number}" FontSize="15" FontWeight="SemiBold" Margin="0,2,0,6"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnMoveChartLeft" Tag="{Binding Symbol}"
+                                                IsEnabled="{Binding CanMoveLeft}" ToolTip="Move left" AutomationProperties.Name="{Binding MoveLeftName}">
+                                            <c:Icon Kind="chevron-left" Width="13" Height="13"/>
+                                        </Button>
+                                        <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnMoveChartRight" Tag="{Binding Symbol}"
+                                                IsEnabled="{Binding CanMoveRight}" ToolTip="Move right" AutomationProperties.Name="{Binding MoveRightName}">
+                                            <c:Icon Kind="chevron-right" Width="13" Height="13"/>
+                                        </Button>
+                                        <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveChart" Tag="{Binding Symbol}"
+                                                ToolTip="Remove" AutomationProperties.Name="{Binding RemoveName}">
+                                            <c:Icon Kind="trash" Width="13" Height="13"/>
+                                        </Button>
+                                    </StackPanel>
+                                </StackPanel>
+                            </c:GroupBorder>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="Search above to add a chart." Style="{StaticResource T.Caption}" Margin="2,8,0,0"/>
+            </StackPanel>
 
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -84,6 +123,22 @@
                                     <TextBlock Text="{Binding Detail.StateText}" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="12,6,0,0"/>
                                 </StackPanel>
                                 <TextBlock Text="{Binding HoldingText}" Style="{StaticResource T.Caption}" Margin="0,4,0,0" Visibility="{Binding HoldingText, Converter={StaticResource Vis}}"/>
+                                <ItemsControl ItemsSource="{Binding Links}" Margin="-6,6,0,0" Focusable="False">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource Btn.Link}" Click="OnOpenLink" Tag="{Binding Url}" ToolTip="{Binding Url}" AutomationProperties.Name="{Binding Label}"
+                                                    AutomationProperties.AutomationId="{Binding Label, StringFormat=link-{0}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Label}"/>
+                                                    <c:Icon Kind="external" Width="11" Height="11" Margin="5,0,0,0"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                             <WrapPanel x:Name="Ranges" HorizontalAlignment="Right" VerticalAlignment="Top"/>
                         </Grid>
@@ -123,7 +178,7 @@
                                         <TextBlock Text="{Binding Detail.SignalText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Detail.SignalBrush}"/>
                                     </Border>
                                 </StackPanel>
-                                <TextBlock Text="Transparent rule-based composite of trend, momentum, RSI, MACD and 52-week position." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,4,0,8"/>
+                                <TextBlock Text="Combines trend, momentum, RSI, MACD and the 52-week range." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,4,0,8"/>
                                 <ItemsControl ItemsSource="{Binding Factors}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
@@ -190,11 +245,63 @@
 
                 <!-- Watchlist + market brief -->
                 <StackPanel Grid.Column="2" VerticalAlignment="Top">
+                <c:GroupBorder Style="{StaticResource Card}" Margin="0,0,0,16" Visibility="{Binding HasPortfolio, Converter={StaticResource Vis}}"
+                               AutomationProperties.AutomationId="portfolio-card" AutomationProperties.Name="Portfolio">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="Portfolio" Style="{StaticResource T.CardTitle}" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource Btn.Link}" HorizontalAlignment="Right" Click="OnEditHoldings" AutomationProperties.Name="Edit holdings">
+                                <StackPanel Orientation="Horizontal"><c:Icon Kind="edit" Width="12" Height="12"/><TextBlock Text="Edit" Margin="6,0,0,0"/></StackPanel>
+                            </Button>
+                        </Grid>
+                        <TextBlock x:Name="PortfolioValue" Text="{Binding PortfolioValue}" Style="{StaticResource T.Number}" FontSize="28" FontWeight="SemiBold" Margin="0,4,0,0"
+                                   AutomationProperties.AutomationId="portfolio-value"/>
+                        <TextBlock FontSize="13" Margin="0,2,0,0" TextWrapping="Wrap">
+                            <Run Text="{Binding PortfolioDay, Mode=OneWay}" Foreground="{Binding PortfolioDayBrush, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=" today" Foreground="{DynamicResource B.Text2}"/><Run Text="{Binding PortfolioGainSeparator, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/><Run Text="{Binding PortfolioGain, Mode=OneWay}" Foreground="{Binding PortfolioGainBrush, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="{Binding PortfolioGainLabel, Mode=OneWay}" Foreground="{DynamicResource B.Text2}"/>
+                        </TextBlock>
+                        <Grid Margin="0,12,0,0">
+                            <TextBlock Text="Today's holdings at past prices" Style="{StaticResource T.Caption}" VerticalAlignment="Center"/>
+                            <WrapPanel x:Name="PortfolioRanges" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <Grid Height="130" Margin="0,6,0,6">
+                            <c:LineChart x:Name="PortfolioChart" LabelBrush="{DynamicResource B.Text3}" GridBrush="{DynamicResource B.Divider}"/>
+                            <TextBlock x:Name="PortfolioChartStatus" Style="{StaticResource T.Caption}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding PortfolioLines}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="72"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="70"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Symbol}" FontSize="13" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0">
+                                            <c:Bar Value="{Binding Weight}" Height="4" Fill="{DynamicResource B.Accent}" Track="{DynamicResource B.Track}"/>
+                                            <TextBlock Text="{Binding WeightText}" Style="{StaticResource T.Caption}" HorizontalAlignment="Right" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="2" Text="{Binding ValueText}" Style="{StaticResource T.Number}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="6,0"/>
+                                        <TextBlock Grid.Column="3" Text="{Binding GainText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding GainBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding PortfolioNote}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding PortfolioNote, Converter={StaticResource Vis}}"/>
+                    </StackPanel>
+                </c:GroupBorder>
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <Grid Margin="0,0,0,8">
-                            <TextBlock Text="Watchlist" Style="{StaticResource T.CardTitle}"/>
-                            <TextBlock Text="{Binding PortfolioText}" Style="{StaticResource T.Caption}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            <TextBlock Text="Watchlist" Style="{StaticResource T.CardTitle}" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource Btn.Link}" HorizontalAlignment="Right" Click="OnEditHoldings" AutomationProperties.Name="Edit watchlist and holdings"
+                                    AutomationProperties.AutomationId="markets-edit-watchlist">
+                                <StackPanel Orientation="Horizontal"><c:Icon Kind="edit" Width="12" Height="12"/><TextBlock Text="Edit" Margin="6,0,0,0"/></StackPanel>
+                            </Button>
                         </Grid>
                         <ItemsControl ItemsSource="{Binding Watchlist}">
                             <ItemsControl.ItemTemplate>
@@ -230,8 +337,6 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <TextBlock Text="Right-click a symbol (or press the context-menu key) to remove it. Add holdings in Settings → Markets to track position value."
-                                   Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,10,0,0"/>
                     </StackPanel>
                 </Border>
 
@@ -261,7 +366,7 @@
             <!-- Ideas (educational) -->
             <c:Card Title="Ideas to consider" Icon="target" Subtitle="balanced, risk-labelled — educational only" Margin="0,16,0,0">
                 <StackPanel>
-                    <TextBlock Text="Your Market Analyst hasn't suggested any ideas yet — they appear after it reviews your watchlist." Style="{StaticResource T.Body2}"
+                    <TextBlock Text="No ideas yet. They appear after the Market Analyst reviews your watchlist." Style="{StaticResource T.Body2}"
                                Visibility="{Binding Ideas, Converter={StaticResource VisNot}}"/>
                     <ItemsControl ItemsSource="{Binding Ideas}">
                         <ItemsControl.ItemsPanel>
@@ -296,7 +401,7 @@
                             </Grid.ColumnDefinitions>
                             <c:Icon Kind="shield" Width="15" Height="15" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Grid.Column="1" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Foreground="{DynamicResource B.Text2}"
-                                       Text="Educational analysis generated on this PC from delayed prices, technical indicators and headlines. It is not personal financial advice and may be wrong. Consider your own situation, diversify, and consult a licensed adviser before investing. Aqua Hub never places trades."/>
+                                       Text="For information only, from delayed prices, indicators and headlines. Not financial advice, and it can be wrong. Aqua Hub never trades."/>
                         </Grid>
                     </Border>
                 </StackPanel>

@@ -52,7 +52,7 @@ public sealed partial class SettingsStore
         if (isNew || migrated) Persist(_current);
     }
 
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     /// <summary>
     /// One-time additions for settings saved by older versions. Each step runs once (the version is saved), so anything
@@ -75,6 +75,16 @@ public sealed partial class SettingsStore
             var old = new[] { "%DOCUMENTS%", "%DESKTOP%", "%DOWNLOADS%" };
             if (s.Ask.Folders.Count == old.Length && old.All(f => s.Ask.Folders.Contains(f, StringComparer.OrdinalIgnoreCase)))
                 s.Ask.Folders.Add("%PICTURES%");
+        }
+        if (s.Version < 4)
+        {
+            // v4: gaming and internet news (Kotaku, Eurogamer, VGC, Dexerto, Insider Gaming, the Daily Dot).
+            foreach (var source in NewsSettings.DefaultSources().Where(x => x.Category == "gaming"))
+            {
+                var host = Uri.TryCreate(source.Url, UriKind.Absolute, out var u) ? u.Host.Replace("www.", "") : "";
+                if (!s.News.Sources.Any(x => x.Id == source.Id || (host.Length > 0 && x.Url.Contains(host, StringComparison.OrdinalIgnoreCase))))
+                    s.News.Sources.Add(source);
+            }
         }
         s.Version = CurrentVersion;
         Log.Info("settings", $"Settings updated to version {CurrentVersion}");
@@ -239,6 +249,9 @@ public sealed partial class SettingsStore
     [GeneratedRegex(@"^(?:[01]?\d|2[0-3]):[0-5]\d$")]
     private static partial Regex TimePattern();
 
+    [GeneratedRegex(@"^[A-Za-z]{3}$")]
+    private static partial Regex CurrencyCode();
+
     /// <summary>Clamp numbers, drop invalid entries, and enforce URL safety rules.</summary>
     public static void Validate(HubSettings s)
     {
@@ -271,6 +284,13 @@ public sealed partial class SettingsStore
         s.Markets.Indices = CleanSymbols(s.Markets.Indices);
         s.Markets.Macro = CleanSymbols(s.Markets.Macro);
         s.Markets.Watchlist = CleanSymbols(s.Markets.Watchlist);
+        foreach (var w in s.Markets.Watchlist)
+        {
+            if (w.Shares is not (> 0 and < 1e12)) w.Shares = null;
+            if (w.CostBasis is not (> 0 and < 1e12)) w.CostBasis = null;
+            w.CostCurrency = CurrencyCode().IsMatch(w.CostCurrency ?? "") ? w.CostCurrency!.ToUpperInvariant() : "";
+        }
+        s.Markets.BaseCurrency = CurrencyCode().IsMatch(s.Markets.BaseCurrency ?? "") ? s.Markets.BaseCurrency!.ToUpperInvariant() : "USD";
 
         s.Events.LookaheadDays = Math.Clamp(s.Events.LookaheadDays, 1, 60);
         s.Events.ReminderMinutes = Math.Clamp(s.Events.ReminderMinutes, 0, 240);

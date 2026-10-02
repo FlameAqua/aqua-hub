@@ -69,6 +69,39 @@ public class UpdatePolicyTests
     }
 
     [Fact]
+    public void AnInstalledVersionsAlertsAreSettled()
+    {
+        var now = DateTimeOffset.Now;
+        Assert.True(UpdatePolicy.IsSettled(UpdatePolicy.Available("1.1.0", 1, now), "1.1.0"));
+        Assert.True(UpdatePolicy.IsSettled(UpdatePolicy.Ready("1.1.0", now), "1.1.0"));
+        Assert.True(UpdatePolicy.IsSettled(UpdatePolicy.Available("1.0.9", 1, now), "1.1.0"));
+        Assert.False(UpdatePolicy.IsSettled(UpdatePolicy.Available("1.2.0", 1, now), "1.1.0"));
+        Assert.False(UpdatePolicy.IsSettled(UpdatePolicy.Ready("1.1.10", now), "1.1.9"));
+        Assert.False(UpdatePolicy.IsSettled(new HubAlert { Id = "price:1.1", Kind = "price", Title = "x" }, "9.9.9"));
+        Assert.False(UpdatePolicy.IsSettled(UpdatePolicy.Available("1.1.0", 1, now), ""));   // a copy without a version keeps them
+    }
+
+    [Fact]
+    public void AfterAnUpdateTheBellNoLongerOffersIt()
+    {
+        using var t = new TestContext();
+        var now = DateTimeOffset.Now;
+        t.Ctx.RaiseAlert(UpdatePolicy.Available("1.1.0", 1, now), "update:1.1.0");
+        t.Ctx.RaiseAlert(UpdatePolicy.Ready("1.1.0", now));
+        t.Ctx.RaiseAlert(new HubAlert { Id = "price:NVDA", Kind = "price", Title = "NVDA crossed 200", Created = now });
+        Assert.Equal(3, t.Ctx.State.UnreadAlerts);
+        var topics = new List<string>();
+        t.Ctx.State.Changed += topics.Add;
+
+        t.Ctx.State.RemoveAlerts(a => UpdatePolicy.IsSettled(a, "1.1.0"));
+        Assert.Equal("price:NVDA", Assert.Single(t.Ctx.State.Alerts).Id);
+        Assert.Equal(new[] { Topics.Alerts }, topics);
+        t.Ctx.State.RemoveAlerts(a => UpdatePolicy.IsSettled(a, "1.1.0"));   // nothing left to remove: nobody is told
+        Assert.Single(topics);
+        Assert.False(t.Ctx.RaiseAlert(UpdatePolicy.Available("1.1.0", 1, now), "update:1.1.0"));   // and it isn't raised again
+    }
+
+    [Fact]
     public void SizesReadAsMegabytes()
     {
         Assert.Equal("size unknown", UpdatePolicy.Megabytes(0));
@@ -87,6 +120,53 @@ public class UpdatePolicyTests
         var cut = UpdatePolicy.Notes(long_, 100);
         Assert.True(cut.Length <= 102);
         Assert.EndsWith(" …", cut);
+    }
+
+    [Fact]
+    public void TheBannerFollowsAnUpdateFromOfferToRestart()
+    {
+        Assert.Null(UpdatePolicy.BannerFor(UpdateStage.Idle, null, 0, 0, null));
+        Assert.Null(UpdatePolicy.BannerFor(UpdateStage.UpToDate, null, 0, 0, null));
+        Assert.Null(UpdatePolicy.BannerFor(UpdateStage.Failed, null, 0, 0, "GitHub didn't answer in time"));
+
+        var offer = UpdatePolicy.BannerFor(UpdateStage.Available, "1.2.0", 12_345_678, 0, null)!;
+        Assert.Equal("Aqua Hub 1.2.0 is available (11.8 MB). Nothing downloads until you choose to.", offer.Text);
+        Assert.Equal("Download", offer.Action);
+        Assert.True(offer.Notes);
+        Assert.False(offer.Progress);
+        var retry = UpdatePolicy.BannerFor(UpdateStage.Available, "1.2.0", 12_345_678, 40, "couldn't reach GitHub (are you offline?)")!;
+        Assert.Equal("Try again", retry.Action);
+        Assert.Contains("The download didn't finish: couldn't reach GitHub", retry.Text);
+
+        var downloading = UpdatePolicy.BannerFor(UpdateStage.Downloading, "1.2.0", 12_345_678, 42, null)!;
+        Assert.Equal("Downloading Aqua Hub 1.2.0… 42%", downloading.Text);
+        Assert.Equal("Cancel", downloading.Action);
+        Assert.True(downloading.Progress);
+
+        var ready = UpdatePolicy.BannerFor(UpdateStage.Ready, "1.2.0", 12_345_678, 100, null)!;
+        Assert.Equal("Restart now", ready.Action);
+        Assert.StartsWith("Aqua Hub 1.2.0 is ready. Restart now to install it", ready.Text);
+        Assert.Contains("the updater didn't start", UpdatePolicy.BannerFor(UpdateStage.Ready, "1.2.0", 0, 100, "access denied")!.Text);
+    }
+
+    [Fact]
+    public void TheDiagnosticsSayWhereTheUpdaterStands()
+    {
+        Assert.Equal("can't update itself", UpdatePolicy.Describe(UpdateStage.Unavailable, null, null, null));
+        Assert.Equal("up to date (checked 2026-10-02 09:30)",
+            UpdatePolicy.Describe(UpdateStage.UpToDate, null, null, new DateTimeOffset(2026, 10, 2, 9, 30, 0, TimeSpan.FromHours(1))));
+        Assert.Equal("1.2.0 ready to install, the updater didn't start (access denied)", UpdatePolicy.Describe(UpdateStage.Ready, "1.2.0", "access denied", null));
+        Assert.Equal("the last check failed (GitHub didn't answer in time)", UpdatePolicy.Describe(UpdateStage.Failed, null, "GitHub didn't answer in time", null));
+    }
+
+    [Fact]
+    public void NotNowLastsUntilTheNextVersionOrStep()
+    {
+        // Putting away the offer keeps it away while it downloads; ready to install, or a newer version, shows again.
+        Assert.Equal(UpdatePolicy.BannerKey(UpdateStage.Available, "1.2.0"), UpdatePolicy.BannerKey(UpdateStage.Downloading, "1.2.0"));
+        Assert.NotEqual(UpdatePolicy.BannerKey(UpdateStage.Available, "1.2.0"), UpdatePolicy.BannerKey(UpdateStage.Ready, "1.2.0"));
+        Assert.NotEqual(UpdatePolicy.BannerKey(UpdateStage.Available, "1.2.0"), UpdatePolicy.BannerKey(UpdateStage.Available, "1.3.0"));
+        Assert.Null(UpdatePolicy.BannerKey(UpdateStage.UpToDate, "1.2.0"));
     }
 }
 

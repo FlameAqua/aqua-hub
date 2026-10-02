@@ -1,0 +1,15 @@
+# The repository is LF everywhere, whatever core.autocrlf says on the PC that checks it out.
+* text=auto eol=lf
+
+# cmd.exe needs CRLF in batch files.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Never touched as text.
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.zip binary
+*.nupkg binary

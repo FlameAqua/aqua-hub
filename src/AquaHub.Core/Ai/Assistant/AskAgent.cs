@@ -44,9 +44,12 @@ public sealed partial class AskAgent
     public const int MaxSteps = 6;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
+    /// <summary>Runs one of Aqua's agents and waits for it ("refresh the news"); null leaves them alone.</summary>
+    public AgentRunner? RunAgent { get; set; }
+
     public static IEnumerable<AskTool> HubTools() => new AskTool[]
     {
-        new SearchHubTool(), new GetStoryTool(), new CalculateTool(), new DateMathTool(), new ConvertUnitsTool(),
+        new SearchHubTool(), new GetStoryTool(), new RunAgentTool(), new CalculateTool(), new DateMathTool(), new ConvertUnitsTool(),
     };
     public static IEnumerable<AskTool> WebTools() => new AskTool[] { new WebSearchTool(), new ReadWebpageTool() };
     public static IEnumerable<AskTool> FileTools() => new AskTool[] { new SearchFilesTool(), new ReadFileTool(), new ListFolderTool() };
@@ -74,8 +77,13 @@ public sealed partial class AskAgent
         // From here on the model is the one actually answering (the picked one may have been uninstalled since).
         options = options with { Model = caps.Model };
         Func<string, string?>? known = platform is null ? null : platform.KnownFolder;
-        var files = options.Computer
-            ? new LocalFiles(() => LocalFiles.ExpandFolders(_settings().Ask.Folders, known), () => LocalFiles.ExpandFolders(LocalFiles.UserFolderTokens, known))
+        // Folders attached to the chat are searched first; app data, system and key folders are never taken.
+        var attached = options.Folders.Where(f => Directory.Exists(f) && !LocalFiles.IsSensitiveFolder(f)).ToList();
+        options = options with { Folders = attached };
+        var files = options.Computer || attached.Count > 0
+            ? new LocalFiles(
+                () => attached.Concat(options.Computer ? LocalFiles.ExpandFolders(_settings().Ask.Folders, known) : new List<string>()).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                () => attached.Concat(options.Computer ? LocalFiles.ExpandFolders(LocalFiles.UserFolderTokens, known) : new List<string>()).ToList())
             : null;
         var skills = _workbench is null ? new List<AskSkill>()
             : _workbench.Skills().Where(k => k.Id == options.SkillId || s.Ask.UseSkills && k.Enabled).ToList();
@@ -85,12 +93,14 @@ public sealed partial class AskAgent
             State = _state, Db = _db, Settings = s, Book = new SourceBook(), Options = options, Host = host, Platform = platform,
             Web = options.UsesWeb ? _web : null, Reader = options.UsesWeb || options.StoryId is not null ? _reader : null, Files = files,
             Vision = caps.Vision, Question = question, AllowedForChat = allowedForChat, PrivateTerms = PrivateTermsFor(_state, memories, DateTimeOffset.Now),
-            Skills = skills, Memories = memories,
+            Skills = skills, Memories = memories, RunAgent = RunAgent,
         };
         foreach (var a in attachments) if (a.Path is { } p) files?.Grant(p);
         if (attachments.Count > 0) run.SawPrivate = run.SawUntrusted = true;
 
-        var context = await BuildContextAsync(question, attachments, run, ct, earlier).ConfigureAwait(false);
+        // "Refresh the news and…": those agents run first, so the answer starts from what they bring in.
+        var refreshed = await RefreshFirstAsync(question, history, run, ct).ConfigureAwait(false);
+        var context = refreshed + await BuildContextAsync(question, attachments, run, ct, earlier).ConfigureAwait(false);
         run.Plan = await PlanAsync(question, history, attachments, run, ct).ConfigureAwait(false);
         if (run.Plan.Skill.Length > 0) run.Skill = skills.FirstOrDefault(k => k.Name.Equals(run.Plan.Skill, StringComparison.OrdinalIgnoreCase));
         if (run.Skill is not null) _workbench?.RecordUse(run.Skill.Id, run.Now);
@@ -119,13 +129,39 @@ public sealed partial class AskAgent
             Citations = run.Book.CitedIn(text),
             Sources = run.Book.Keep(text),
             UsedWeb = run.PagesRead > 0 || run.SawWeb || result.UsedWeb,
-            UsedPc = run.SawPrivate && options.Computer,
+            UsedPc = run.SawPrivate && (options.Computer || options.Folders.Count > 0),
             Mode = options.Research ? "research" : options.Think ? "think" : "",
             Skill = run.Skill?.Name ?? "",
         };
     }
 
     // ───────────────────────────── Context ─────────────────────────────
+
+    /// <summary>
+    /// Runs the agents a message asks for in so many words ("refresh the news", "a fresh brief") before anything else —
+    /// collectors side by side, then the AI ones — and says how it went at the top of the context.
+    /// </summary>
+    internal static async Task<string> RefreshFirstAsync(string question, IReadOnlyList<LlmMessage> history, AskRun run, CancellationToken ct)
+    {
+        if (run.RunAgent is null) return "";
+        // "Refresh it" after a question about the markets: the earlier question says what "it" is.
+        var jobs = AgentJobs.Requested(question, history.LastOrDefault(m => m.Role == "user")?.Content);
+        if (jobs.Count == 0) return "";
+        async Task<AgentJobs.Outcome> One(AgentJobs.Job job)
+        {
+            var id = run.Host.StepStarted("agents", $"Refreshing {job.What}…");
+            var outcome = await AgentJobs.RunAsync(job, run, ct).ConfigureAwait(false);
+            run.Host.StepFinished(id, outcome.Ok ? $"Refreshed {job.What} · {outcome.Summary}" : $"Couldn't refresh {job.What} — {outcome.Summary}", outcome.Ok);
+            return outcome;
+        }
+        run.Host.Status(jobs.Count == 1 ? $"Refreshing {jobs[0].What}…" : "Refreshing what you asked for…");
+        var outcomes = (await Task.WhenAll(jobs.Where(j => !j.UsesAi).Select(One)).ConfigureAwait(false)).ToList();
+        foreach (var job in jobs.Where(j => j.UsesAi)) outcomes.Add(await One(job).ConfigureAwait(false));
+        run.Host.Status("");
+        var sb = new StringBuilder("WHAT AQUA'S AGENTS DID FOR THIS MESSAGE (already done, as the user asked — don't run them again; tell the user how it went):\n");
+        foreach (var o in outcomes) sb.Append(o.Text);
+        return sb.Append('\n').ToString();
+    }
 
     /// <summary>What the model sees before it calls anything: today, the situation, the subject story, matching items, attachments.</summary>
     internal async Task<string> BuildContextAsync(string question, IReadOnlyList<AskAttachment> attachments, AskRun run, CancellationToken ct,
@@ -196,6 +232,9 @@ public sealed partial class AskAgent
             sb.Append("MARKET BRIEF (Aqua's Market Analyst): ").Append(mb.Overview).Append('\n');
             foreach (var i in mb.Insights.Take(8)) sb.Append("- ").Append(i.Symbol).Append(": ").Append(i.Stance).Append(" — ").Append(i.Summary).Append('\n');
         }
+        // The user's own holdings, valued as the Markets page's portfolio card values them.
+        if (PortfolioRx().IsMatch(question) && Markets.Portfolio.Holdings(s.Markets).Any())
+            sb.Append(PortfolioText(Markets.Portfolio.Value(s.Markets, _state.Quotes, _state.Fx)));
         if ((q.Contains("predict") || q.Contains("odds") || q.Contains("chance") || q.Contains("likely") || q.Contains("expect")) && _state.Predictions.Count > 0)
         {
             sb.Append("PREDICTION MARKETS (crowd odds):\n");
@@ -214,8 +253,14 @@ public sealed partial class AskAgent
             var budget = Math.Max(4000, 14000 / attachments.Count);
             foreach (var a in attachments)
             {
-                var n = run.Book.Add(a.Name, "Attachment", a.Path, "file", a.Text);
+                var n = run.Book.Add(a.Name, "Attachment", a.Path, a.Kind == AttachmentKind.Folder ? "folder" : "file", a.Text);
                 sb.Append('[').Append(n).Append("] ").Append(a.Name).Append(a.Note.Length > 0 ? " (" + a.Note + ")" : "");
+                if (a.Kind == AttachmentKind.Folder)
+                {
+                    // A folder is too big to include: its newest entries, and the tools search the rest.
+                    sb.Append(" — a folder, `").Append(a.Path).Append("`; its newest entries:\n").Append(HtmlText.Truncate(a.Text, budget)).Append('\n');
+                    continue;
+                }
                 if (a.Kind == AttachmentKind.Image)
                     sb.Append(run.Vision ? " — image attached to the user's message" : " — image; the model can't see images, so here is its text (OCR)").Append('\n');
                 else sb.Append('\n');
@@ -284,10 +329,10 @@ public sealed partial class AskAgent
     internal async Task<AskPlan> PlanAsync(string question, IReadOnlyList<LlmMessage> history, IReadOnlyList<AskAttachment> attachments, AskRun run, CancellationToken ct)
     {
         var o = run.Options;
-        var rules = AskPlanner.Heuristic(question, history, o, attachments.Count);
+        var rules = AskPlanner.Heuristic(question, history, o, attachments.Count(a => a.Kind != AttachmentKind.Folder));
         var plan = rules;
         var worth = o.StoryId is null && run.Settings.Ask.PlanWithModel && question.Trim().Length > 3 &&
-                    (o.UsesWeb || o.Computer || rules.Urls.Count > 0 || run.Skills.Count > 0);
+                    (o.UsesWeb || o.Computer || o.Folders.Count > 0 || rules.Urls.Count > 0 || run.Skills.Count > 0);
         if (worth)
         {
             var step = run.Host.StepStarted("wand", "Working out what to look for…");
@@ -297,12 +342,14 @@ public sealed partial class AskAgent
                 timeout.CancelAfter(TimeSpan.FromSeconds(60)); // the first call may have to load the model
                 var request = AskPlanner.Request(question, history, o, new PlanContext
                 {
-                    Folders = o.Computer ? run.Settings.Ask.Folders.Select(FolderLabel).ToList() : Array.Empty<string>(),
+                    Folders = o.Folders.Select(Path.GetFileName).OfType<string>()
+                        .Concat(o.Computer ? run.Settings.Ask.Folders.Select(FolderLabel) : Array.Empty<string>()).ToList(),
                     Memories = run.Memories,
                     Skills = run.Skills.Select(k => (k.Name, k.Description)).ToList(),
                     FeedMatches = run.FeedMatches,
                     Attachments = attachments.Select(a => a.Name + (a.Kind == AttachmentKind.Image ? " (picture)" : "")).ToList(),
                     Research = o.Research,
+                    Refreshed = AgentJobs.Ran(run),
                 }, run.Now);
                 var (doc, _) = await _llm.CompleteJsonAsync(request with { Model = o.Model }, timeout.Token).ConfigureAwait(false);
                 using (doc) plan = AskPlanner.Merge(doc.RootElement, rules, question, o, run.Skills.Select(k => k.Name).ToList(), history);
@@ -352,7 +399,8 @@ public sealed partial class AskAgent
 
         sb.Append("WHAT YOU CAN DO RIGHT NOW:\n");
         sb.Append("- The user's feeds (news stories with every outlet, social posts, markets, predictions, their agenda): the matches are in the CONTEXT")
-          .Append(tools ? "; search_hub and get_story find more" : "").Append(".\n");
+          .Append(tools ? "; search_hub and get_story find more" : "")
+          .Append(tools && toolNames.Contains("run_agent") ? "; run_agent has Aqua's agents refresh them (or write a fresh brief or analysis) when the user asks" : "").Append(".\n");
         if (o.UsesWeb)
             sb.Append("- Web is ON. ").Append(tools
                 ? "web_search finds pages (use short keyword queries, not the user's sentence); read_webpage opens any public page or link — including links the user gives you — and lists its links so you can follow them through a site. "
@@ -375,6 +423,14 @@ public sealed partial class AskAgent
             }
             else sb.Append("The files and screen found for this question are in the CONTEXT.\n");
         }
+        else if (o.Folders.Count > 0)
+        {
+            var it = o.Folders.Count == 1 ? "it" : "them";
+            sb.Append("- The user attached ").Append(o.Folders.Count == 1 ? "a folder" : "folders").Append(" to this chat: ")
+              .Append(string.Join(", ", o.Folders.Select(f => "`" + f + "`"))).Append(". ")
+              .Append(tools ? $"search_files, list_folder and read_file work inside {it}" : $"What was found in {it} is in the CONTEXT")
+              .Append(". Use my PC is OFF otherwise: you can't see other files or the screen, or open anything.\n");
+        }
         else sb.Append("- Use my PC is OFF: you can't see the user's files or screen or open anything. If they ask for that, tell them to switch on Use my PC below the Ask box.\n");
         if (tools && toolNames.Contains("calculate"))
             sb.Append("- calculate, date_math and convert_units do sums, dates and units exactly: use them instead of working anything out in your head.\n");
@@ -392,10 +448,10 @@ public sealed partial class AskAgent
         sb.Append("- Answer from the CONTEXT and tool results, citing sources inline as [n] with the numbers given there. Cite a source only for what it says; never invent a number or a link.\n");
         sb.Append("- Newer reports beat older ones: an article published before an event may only be a preview.\n");
         sb.Append("- Date events by their sources' dates (\"on Monday 28 September\"); say \"today\" only for what a source published today reports.\n");
-        if (o.Computer) sb.Append("- When you point to a file on the PC, give its name and its full path in backticks, so the user can open it from the answer.\n");
+        if (o.Computer || o.Folders.Count > 0) sb.Append("- When you point to a file on the PC, give its name and its full path in backticks, so the user can open it from the answer.\n");
         sb.Append("- If the sources don't cover something, say so briefly, then answer from general knowledge, marked as such and without citations.\n");
         sb.Append("- If something wasn't found, say what was tried and suggest the next step — don't ask the user to do what you can do yourself.\n");
-        sb.Append("- Never say you searched, read, opened or checked something unless the CONTEXT or a tool result shows it happened; if you haven't looked yet and can, look first.\n");
+        sb.Append("- Never say you searched, read, opened, checked or refreshed something unless the CONTEXT or a tool result shows it happened (in this message, not an earlier one); if you haven't looked yet and can, look first.\n");
         sb.Append("- When the CONTEXT already has FILES FOUND, WEB RESULTS or PAGES for the question, answer from them rather than searching again.\n");
         sb.Append("- Earlier answers in this chat may be wrong: when the CONTEXT or tool results disagree with them, trust the sources and correct yourself in one sentence.\n");
         sb.Append("- Never narrate your reasoning or the tools you use in the answer (no \"The user is asking…\", \"Let me…\").\n");
@@ -434,13 +490,10 @@ public sealed partial class AskAgent
         string context, AskRun run, LlmCapabilities caps, CancellationToken ct)
     {
         var s = run.Settings;
-        var tools = new List<AskTool>(HubTools());
+        var tools = new List<AskTool>(HubTools().Where(t => t is not RunAgentTool || run.RunAgent is not null));
         if (run.Options.UsesWeb) tools.AddRange(WebTools());
-        if (run.Options.Computer)
-        {
-            tools.AddRange(FileTools());
-            if (run.Platform is not null) tools.AddRange(run.Platform.ComputerTools());
-        }
+        if (run.Files is not null) tools.AddRange(FileTools());
+        if (run.Options.Computer && run.Platform is not null) tools.AddRange(run.Platform.ComputerTools());
         var byName = tools.GroupBy(t => t.Name).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
         // Gather what the plan says the question needs (web, links, files, screen, a skill's steps) before the model
@@ -506,11 +559,12 @@ public sealed partial class AskAgent
             foreach (var call in output.Calls.Take(4))
             {
                 toolCalls++;
-                var asks = WillAsk(call, byName, run);
-                if (asks) hold.Release();
+                // Let go of the model while the user is asked, or while an AI agent works with it.
+                var letGo = WillAsk(call, byName, run) || WaitsForModel(call, byName);
+                if (letGo) hold.Release();
                 ToolResult result;
                 try { result = await RunToolAsync(call, byName, run, ct).ConfigureAwait(false); }
-                finally { if (asks) await hold.RetakeAsync(_llm.ReserveAsync, ct).ConfigureAwait(false); }
+                finally { if (letGo) await hold.RetakeAsync(_llm.ReserveAsync, ct).ConfigureAwait(false); }
                 messages.Add(new LlmMessage("tool", "<<<DATA\n" + result.Text + "\nDATA>>>")
                 {
                     ToolName = call.Name, ToolCallId = call.Id,
@@ -537,6 +591,18 @@ public sealed partial class AskAgent
         {
             using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
             return ApprovalFor(tool, doc.RootElement, tool.Describe(doc.RootElement), run) is not null;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    /// <summary>Whether this call waits on work that needs the model (an AI agent writing).</summary>
+    private static bool WaitsForModel(LlmToolCall call, IReadOnlyDictionary<string, AskTool> tools)
+    {
+        if (!tools.TryGetValue(call.Name, out var tool)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
+            return tool.WaitsForModel(doc.RootElement);
         }
         catch (JsonException) { return false; }
     }
@@ -657,6 +723,7 @@ public sealed partial class AskAgent
             }
         }
 
+        if (tool.AlreadyDone(args, run)) return await tool.RunAsync(args, run, ct).ConfigureAwait(false);
         var id = run.Host.StepStarted(tool.Icon, description + "…");
         try
         {
@@ -729,6 +796,36 @@ public sealed partial class AskAgent
 
     [GeneratedRegex(@"\b(near me|nearby|near here|around here|around me|in my area|my area|local|locally|in town|my city|my town|my county|where i live)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NearMeRx();
+
+    [GeneratedRegex(@"\b(?:portfolio|holdings?|my\s+(?:shares|stocks|investments?|positions?|etfs?))\b", RegexOptions.IgnoreCase)]
+    private static partial Regex PortfolioRx();
+
+    /// <summary>The portfolio card in words: its value in the portfolio's currency, today's move and the gain since bought, holding by holding.</summary>
+    internal static string PortfolioText(Markets.PortfolioSummary p)
+    {
+        string Money(double v) => v.ToString("N2", Inv) + " " + p.Currency;
+        string Signed(double v) => (v >= 0 ? "+" : "−") + Money(Math.Abs(v));
+        string Pct(double v) => (v >= 0 ? "+" : "−") + Math.Abs(v).ToString("0.0", Inv) + "%";
+        var sb = new StringBuilder("THE USER'S PORTFOLIO (their own holdings from Settings › Markets, valued in ").Append(p.Currency)
+            .Append(" at the latest prices; their data, not a source):\n");
+        if (p.Lines.Count == 0) sb.Append("No holding has a price yet.\n");
+        else
+        {
+            sb.Append("Worth ").Append(Money(p.Value)).Append(", today ").Append(Signed(p.DayChange)).Append(" (").Append(Pct(p.DayChangePercent)).Append(')');
+            if (p.Gain is { } g && p.GainPercent is { } gp) sb.Append(", ").Append(Signed(g)).Append(" (").Append(Pct(gp)).Append(") since bought");
+            sb.Append(".\n");
+            foreach (var l in p.Lines)
+            {
+                sb.Append("- ").Append(l.Symbol).Append(l.Name.Length > 0 && l.Name != l.Symbol ? " (" + l.Name + ")" : "").Append(": ")
+                  .Append(l.Shares.ToString("0.####", Inv)).Append(l.Shares == 1 ? " share, " : " shares, ").Append(Money(l.Value))
+                  .Append(", today ").Append(Signed(l.DayChange));
+                if (l.Gain is { } lg && l.GainPercent is { } lgp) sb.Append(", ").Append(Signed(lg)).Append(" (").Append(Pct(lgp)).Append(") since bought");
+                sb.Append(", ").Append((l.Weight * 100).ToString("0", Inv)).Append("% of the portfolio\n");
+            }
+        }
+        if (p.Unpriced.Count > 0) sb.Append("Not valued yet (no price or exchange rate): ").Append(string.Join(", ", p.Unpriced)).Append('\n');
+        return sb.ToString();
+    }
 
     // Plainly going back to what was read — not just any "it" ("will it rain tomorrow?" isn't about the last page).
     [GeneratedRegex(@"\b(?:tell me more|more (?:about|on) (?:it|that|this|them|those)|what else|anything else|go on|keep going|elaborate|expand on|" +
@@ -916,7 +1013,7 @@ public sealed partial class AskAgent
         var wantFiles = plan.Intent == "files" || plan.FileTerms.Count > 0 && plan.Intent is not ("web" or "page" or "site" or "screen" or "act");
         if (wantFiles)
         {
-            if (o.Computer && run.Files is not null) sb.Append(await FindFilesAsync(plan, question, run, ct).ConfigureAwait(false));
+            if (run.Files is not null) sb.Append(await FindFilesAsync(plan, question, run, ct).ConfigureAwait(false));
             else if (plan.Intent == "files") sb.Append("NOTE: Use my PC is off, so the user's files can't be searched. Tell them to switch on “Use my PC” below the Ask box.\n");
         }
 
@@ -1182,7 +1279,8 @@ public sealed partial class AskAgent
         var files = run.Files!;
         var sb = new StringBuilder();
         Func<string, string?>? known = run.Platform is null ? null : run.Platform.KnownFolder;
-        var prefer = PreferredFolders(plan.FileFolders, files.Roots, known);
+        // Folders attached to the chat come first.
+        var prefer = run.Options.Folders.Concat(PreferredFolders(plan.FileFolders, files.Roots, known)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var terms = plan.FileTerms;
         var kind = plan.FileKind;
         var label = string.Join(", ", terms.Select(t => "“" + t + "”"));

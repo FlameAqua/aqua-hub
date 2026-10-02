@@ -1,4 +1,5 @@
 using AquaHub.Core.Analysis;
+using AquaHub.Core.Markets;
 using AquaHub.Core.Models;
 using AquaHub.Core.Settings;
 using AquaHub.Core.Sources;
@@ -164,19 +165,20 @@ public sealed class MarketWatchAgent : Agent
 
         // 1) Daily history + metadata (refreshed at most once every ~20h per symbol, a few per run).
         var refreshed = 0;
-        foreach (var w in all.Where(w => w.Kind is not "fx"))
+        async Task RefreshHistoryAsync(string symbol)
         {
-            if (refreshed >= 16) break;
-            var metaKey = "meta:" + w.Symbol;
+            if (refreshed >= 16) return;
+            var metaKey = "meta:" + symbol;
             var meta = ctx.Db.GetJson<MetaCache>(metaKey);
-            if (meta is not null && DateTimeOffset.UtcNow - meta.Fetched < TimeSpan.FromHours(20)) continue;
-            var chart = await YahooFinance.GetChartAsync(ctx.Http, w.Symbol, "1y", "1d", ct).ConfigureAwait(false);
-            if (chart is null) continue;
+            if (meta is not null && DateTimeOffset.UtcNow - meta.Fetched < TimeSpan.FromHours(20)) return;
+            var chart = await YahooFinance.GetChartAsync(ctx.Http, symbol, "1y", "1d", ct).ConfigureAwait(false);
+            if (chart is null) return;
             refreshed++;
             ctx.Db.PutJson(metaKey, new MetaCache { Fetched = DateTimeOffset.UtcNow, Meta = chart.Meta });
             var bars = chart.Times.Zip(chart.Closes, (t, c) => (t, c)).Where(x => !double.IsNaN(x.c)).ToList();
-            ctx.Db.UpsertCloses(w.Symbol, bars);
+            ctx.Db.UpsertCloses(symbol, bars);
         }
+        foreach (var w in all.Where(w => w.Kind is not "fx")) await RefreshHistoryAsync(w.Symbol).ConfigureAwait(false);
 
         // 2) Live quotes via one batched spark request.
         var spark = await YahooFinance.GetSparkAsync(ctx.Http, all.Select(w => w.Symbol).ToList(), ct: ct).ConfigureAwait(false);
@@ -191,7 +193,24 @@ public sealed class MarketWatchAgent : Agent
         }
         ctx.State.SetQuotes(quotes);
 
-        // 3) Indicators for everything except FX.
+        // 3) Exchange rates to value holdings in your currency, with their history for the portfolio chart.
+        var pairs = FxPairs(m, quotes);
+        if (pairs.Count > 0)
+        {
+            var rates = ctx.State.Fx.Rates.ToDictionary(r => r.Key, r => r.Value, StringComparer.OrdinalIgnoreCase);
+            var missing = pairs.Where(p => !quotes.ContainsKey(p)).ToList();
+            var fx = missing.Count > 0 ? await YahooFinance.GetSparkAsync(ctx.Http, missing, ct: ct).ConfigureAwait(false) : new();
+            foreach (var pair in pairs)
+            {
+                var rate = quotes.TryGetValue(pair, out var q) ? q.Price
+                    : fx.TryGetValue(pair, out var data) ? data.Closes.LastOrDefault(c => !double.IsNaN(c)) : 0;
+                if (rate > 0 && FxRates.PairKey(pair) is { } key) rates[key] = rate;
+            }
+            ctx.State.SetFx(rates);
+            foreach (var pair in pairs) await RefreshHistoryAsync(pair).ConfigureAwait(false);
+        }
+
+        // 4) Indicators for everything except FX.
         var indicators = new Dictionary<string, Indicators>(StringComparer.OrdinalIgnoreCase);
         foreach (var w in all.Where(w => w.Kind is not "fx"))
         {
@@ -205,6 +224,19 @@ public sealed class MarketWatchAgent : Agent
 
         var open = quotes.Values.Count(q => q.MarketState == "open");
         return AgentResult.Success($"{quotes.Count} quotes ({open} live), {indicators.Count} with indicators" + (refreshed > 0 ? $", refreshed history for {refreshed}" : ""));
+    }
+
+    /// <summary>Yahoo symbols of the rates needed to value holdings (and their costs) in the base currency.</summary>
+    public static List<string> FxPairs(MarketSettings m, IReadOnlyDictionary<string, Quote> quotes)
+    {
+        var pairs = new List<string>();
+        foreach (var w in Portfolio.Holdings(m))
+        {
+            if (!quotes.TryGetValue(w.Symbol, out var q)) continue;
+            if (FxRates.PairSymbol(q.Currency, m.BaseCurrency) is { } price) pairs.Add(price);
+            if (FxRates.PairSymbol(Portfolio.CostCurrency(w, q), m.BaseCurrency) is { } cost) pairs.Add(cost);
+        }
+        return pairs.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     public sealed class MetaCache

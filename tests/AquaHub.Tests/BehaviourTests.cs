@@ -17,14 +17,16 @@ internal sealed class TestContext : IDisposable
     public NullPlatform Platform { get; } = new();
     public HubContext Ctx { get; }
 
-    public TestContext()
+    /// <param name="network">A stand-in network (<see cref="FakeNetwork"/>) instead of the real one.</param>
+    public TestContext(HttpMessageHandler? network = null)
     {
         var settings = new SettingsStore(Path.Combine(_dir.Path, "settings.json"));
         var db = new HubDatabase(Path.Combine(_dir.Path, "hub.db"));
         var secrets = new InMemorySecretStore();
         Ctx = new HubContext
         {
-            Settings = settings, Db = db, Http = new HttpFetcher(db), Llm = new LlmClient(() => settings.Current.Ai, secrets),
+            Settings = settings, Db = db, Http = network is null ? new HttpFetcher(db) : new HttpFetcher(db, network),
+            Llm = new LlmClient(() => settings.Current.Ai, secrets),
             State = new HubState(db), Secrets = secrets, Platform = Platform,
         };
     }
@@ -146,14 +148,18 @@ public class AgentSchedulingTests
         private readonly Func<AgentResult> _run;
         private readonly string[] _after;
         private readonly TimeSpan _delay;
+        private readonly Func<bool>? _enabled;
+        private readonly TimeSpan _takes;
         public int Runs;
 
-        public TestAgent(string id, Func<AgentResult> run, string[]? after = null, TimeSpan? delay = null)
+        public TestAgent(string id, Func<AgentResult> run, string[]? after = null, TimeSpan? delay = null, Func<bool>? enabled = null, TimeSpan? takes = null)
         {
             _id = id;
             _run = run;
             _after = after ?? Array.Empty<string>();
             _delay = delay ?? TimeSpan.Zero;
+            _enabled = enabled;
+            _takes = takes ?? TimeSpan.Zero;
         }
 
         public override string Id => _id;
@@ -162,22 +168,28 @@ public class AgentSchedulingTests
         public override string[] After => _after;
         public override bool Stretchable => false;
         public override TimeSpan InitialDelay => _delay;
+        public override bool IsEnabled(HubContext ctx) => _enabled?.Invoke() ?? true;
         public override TimeSpan Interval(HubContext ctx) => TimeSpan.FromHours(1);
 
-        public override Task<AgentResult> RunAsync(HubContext ctx, CancellationToken ct)
+        public override async Task<AgentResult> RunAsync(HubContext ctx, CancellationToken ct)
         {
             Interlocked.Increment(ref Runs);
-            return Task.FromResult(_run());
+            if (_takes > TimeSpan.Zero) await Task.Delay(_takes, ct);
+            return _run();
         }
     }
 
+    /// <summary>A runtime that looks for due agents every 50 ms and runs followers 100 ms after (not 1 s and 2 s).</summary>
+    private static AgentRuntime Quick(TestContext t, bool paused = false) =>
+        new(t.Ctx) { Tick = TimeSpan.FromMilliseconds(50), FollowUpDelay = TimeSpan.FromMilliseconds(100), Paused = paused };
+
     private static async Task<AgentStatus> WaitForRuns(AgentRuntime runtime, string id, int runs)
     {
-        for (var i = 0; i < 150; i++)
+        for (var i = 0; i < 600; i++)
         {
             var s = runtime.Statuses.First(x => x.Id == id);
             if (s.Runs >= runs && s.State != AgentState.Running && s.State != AgentState.Waiting) return s;
-            await Task.Delay(100);
+            await Task.Delay(25);
         }
         throw new TimeoutException($"{id} did not reach {runs} run(s)");
     }
@@ -186,7 +198,7 @@ public class AgentSchedulingTests
     public async Task FailuresBackOffExponentially()
     {
         using var t = new TestContext();
-        using var runtime = new AgentRuntime(t.Ctx);
+        using var runtime = Quick(t);
         runtime.Register(new TestAgent("flaky", () => AgentResult.Fail("source down")));
         runtime.Start();
 
@@ -204,7 +216,7 @@ public class AgentSchedulingTests
     public async Task AChangedResultTriggersDependentAgentsSoon()
     {
         using var t = new TestContext();
-        using var runtime = new AgentRuntime(t.Ctx);
+        using var runtime = Quick(t);
         var scout = new TestAgent("scout", () => AgentResult.Success("3 new"));
         var curator = new TestAgent("curator", () => AgentResult.Success("clustered"), after: new[] { "scout" }, delay: TimeSpan.FromHours(1));
         runtime.Register(scout);
@@ -219,15 +231,69 @@ public class AgentSchedulingTests
     public async Task UnchangedResultsDoNotTriggerDependents()
     {
         using var t = new TestContext();
-        using var runtime = new AgentRuntime(t.Ctx);
+        using var runtime = Quick(t);
         runtime.Register(new TestAgent("scout", () => AgentResult.Unchanged("nothing new")));
         var curator = new TestAgent("curator", () => AgentResult.Success("clustered"), after: new[] { "scout" }, delay: TimeSpan.FromHours(1));
         runtime.Register(curator);
         runtime.Start();
 
         await WaitForRuns(runtime, "scout", 1);
-        await Task.Delay(3500);
+        await Task.Delay(600); // a dozen ticks, several times the follow-up delay
         Assert.Equal(0, curator.Runs);
+    }
+
+    [Fact]
+    public async Task RunAndWaitRunsAnAgentNowAndReportsHowItWent()
+    {
+        using var t = new TestContext();
+        using var runtime = Quick(t);
+        var scout = new TestAgent("scout", () => AgentResult.Success("12 new articles"), delay: TimeSpan.FromHours(1));
+        runtime.Register(scout);
+        runtime.Register(new TestAgent("off", () => AgentResult.Success("never"), delay: TimeSpan.FromHours(1), enabled: () => false));
+        runtime.Start();
+
+        var report = await runtime.RunAndWaitAsync("scout", TimeSpan.FromSeconds(10), CancellationToken.None);
+        Assert.Equal(AgentRunEnd.Finished, report!.End);
+        Assert.Equal("12 new articles", report.Status.LastMessage);
+        Assert.Equal(1, scout.Runs);
+
+        Assert.Null(await runtime.RunAndWaitAsync("nobody", TimeSpan.FromSeconds(1), CancellationToken.None));
+        var off = await runtime.RunAndWaitAsync("off", TimeSpan.FromSeconds(10), CancellationToken.None);
+        Assert.Equal(AgentRunEnd.Disabled, off!.End);
+    }
+
+    [Fact]
+    public async Task RunAndWaitWaitsOnARunUnderWayAndGivesUpAtItsTimeout()
+    {
+        using var t = new TestContext();
+        using var runtime = Quick(t);
+        var slow = new TestAgent("slow", () => AgentResult.Success("done"), takes: TimeSpan.FromMilliseconds(400));
+        runtime.Register(slow);
+        runtime.Start();
+        for (var i = 0; i < 60 && runtime.Statuses[0].State != AgentState.Running; i++) await Task.Delay(50);
+
+        var report = await runtime.RunAndWaitAsync("slow", TimeSpan.FromSeconds(10), CancellationToken.None);
+        Assert.Equal(AgentRunEnd.Finished, report!.End);
+        Assert.Equal(1, slow.Runs); // the run under way was waited on, not doubled
+
+        var tooSoon = await runtime.RunAndWaitAsync("slow", TimeSpan.FromMilliseconds(100), CancellationToken.None);
+        Assert.Equal(AgentRunEnd.StillRunning, tooSoon!.End);
+    }
+
+    [Fact]
+    public async Task RunAndWaitComesBackAtOnceWhileAgentsArePaused()
+    {
+        using var t = new TestContext();
+        using var runtime = Quick(t, paused: true);
+        var scout = new TestAgent("scout", () => AgentResult.Success("ok"));
+        runtime.Register(scout);
+        runtime.Start();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var report = await runtime.RunAndWaitAsync("scout", TimeSpan.FromSeconds(10), CancellationToken.None);
+        Assert.Equal(AgentRunEnd.Paused, report!.End);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2));
+        Assert.Equal(0, scout.Runs);
     }
 }
 

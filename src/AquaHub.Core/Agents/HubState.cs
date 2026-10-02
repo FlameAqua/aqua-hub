@@ -1,4 +1,5 @@
 using AquaHub.Core.Data;
+using AquaHub.Core.Markets;
 using AquaHub.Core.Models;
 using AquaHub.Core.Util;
 
@@ -42,6 +43,8 @@ public sealed class HubState
     public SocialPulse? Pulse { get; private set; }
     public IReadOnlyDictionary<string, Quote> Quotes { get; private set; } = new Dictionary<string, Quote>();
     public IReadOnlyDictionary<string, Indicators> Indicators { get; private set; } = new Dictionary<string, Indicators>();
+    /// <summary>Exchange rates for valuing holdings in your currency ("EURUSD" → dollars per euro).</summary>
+    public FxRates Fx { get; private set; } = FxRates.None;
     public MarketBrief? MarketBrief { get; private set; }
     public IReadOnlyList<PredictionMarket> Predictions { get; private set; } = Array.Empty<PredictionMarket>();
     public IReadOnlyList<HubEvent> Events { get; private set; } = Array.Empty<HubEvent>();
@@ -75,6 +78,7 @@ public sealed class HubState
             Pulse = _db.GetJson<SocialPulse>("state:pulse");
             Quotes = _db.GetJson<Dictionary<string, Quote>>("state:quotes") ?? new();
             Indicators = _db.GetJson<Dictionary<string, Indicators>>("state:indicators") ?? new();
+            Fx = new FxRates(_db.GetJson<Dictionary<string, double>>("state:fx") ?? new());
             MarketBrief = _db.GetJson<MarketBrief>("state:marketBrief");
             Predictions = _db.GetJson<List<PredictionMarket>>("state:predictions") ?? new();
             Events = _db.GetJson<List<HubEvent>>("state:events") ?? new();
@@ -117,6 +121,7 @@ public sealed class HubState
     }
 
     public void SetIndicators(Dictionary<string, Indicators> indicators) { Indicators = indicators; Save("indicators", indicators); Raise(Topics.Markets); }
+    public void SetFx(Dictionary<string, double> rates) { Fx = new FxRates(rates); Save("fx", rates); }
     public void SetMarketBrief(MarketBrief brief) { MarketBrief = brief; Save("marketBrief", brief); Raise(Topics.MarketBrief); }
     public void SetPredictions(List<PredictionMarket> markets) { Predictions = markets; Save("predictions", markets); Raise(Topics.Predictions); }
     public void SetEvents(List<HubEvent> events) { Events = events; Save("events", events); Raise(Topics.Events); }
@@ -150,6 +155,14 @@ public sealed class HubState
     {
         _db?.ClearAlerts();
         ReloadAlerts();
+    }
+
+    /// <summary>Removes the alerts that no longer hold (say, an update that has since been installed).</summary>
+    public void RemoveAlerts(Func<HubAlert, bool> which)
+    {
+        if (_db is null) return;
+        var ids = _db.GetAlerts(500).Where(which).Select(a => a.Id).ToList();
+        if (ids.Count > 0 && _db.DeleteAlerts(ids) > 0) ReloadAlerts();
     }
 
     /// <summary>Updates one story's summary without re-publishing everything else.</summary>

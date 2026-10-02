@@ -21,6 +21,10 @@
 .PARAMETER Filter
     Run part of the suite, e.g. -Filter A11 (one class) or -Filter A11_SettingsTests.T02_General (one test).
 
+.PARAMETER Smoke
+    A quick check (a few minutes, no model needed): start-up, every page, the command palette, Settings and its
+    search, the update banner and quitting. Combines with -Filter.
+
 .PARAMETER Setup
     Create the warm profile again (for example to change the model or place it uses).
 
@@ -32,6 +36,7 @@
 #>
 param(
     [string]$Filter = '',
+    [switch]$Smoke,
     [switch]$Setup,
     [switch]$NoBuild,
     [string]$Root = (Join-Path $env:LOCALAPPDATA 'AquaHub.E2E')
@@ -104,7 +109,10 @@ $env:AQUAHUB_E2E_EXE = $exe
 $env:AQUAHUB_E2E_PRISTINE = $pristine
 $env:AQUAHUB_E2E_RUNS = $runs
 $testArgs = @('test', (Join-Path $repo 'tests\AquaHub.E2E\AquaHub.E2E.csproj'), '-c', 'Release', '--no-build', '--logger', 'console;verbosity=normal')
-if ($Filter) { $testArgs += @('--filter', "FullyQualifiedName~$Filter") }
+$filters = @()
+if ($Smoke) { $filters += 'Category=Smoke' }
+if ($Filter) { $filters += "FullyQualifiedName~$Filter" }
+if ($filters.Count -gt 0) { $testArgs += @('--filter', ($filters -join '&')) }
 Write-Host ''
 Write-Host 'Running the suite: hands off the mouse and keyboard until it finishes.' -ForegroundColor Cyan
 dotnet @testArgs

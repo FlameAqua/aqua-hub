@@ -36,7 +36,7 @@ public sealed class Crawler
 
     // Destructive or process-level actions the crawler must not trigger blindly (dedicated tests cover them).
     // File and folder pickers are system dialogs; the Ask answer actions start long model runs (A09 covers them).
-    private static readonly Regex SkipNames = new(@"^(Quit|Quit Aqua Hub|Delete scene|Browse…)$|Quit|from Launchpad$|Turn off Ollama|Turn on Ollama|^Attach files|^Add a folder|^Ask again$|Research this properly|^Delete chat$|^Delete this skill|^Forget this$|^Draft the skill|^Save and try it|^Speak your question|^Try it in a new chat|^Improve$|^Answer it instead$|^Close app$|^End task$|^Force end$|^Run health check$|^Check again$|^Remove Whisper$", RegexOptions.IgnoreCase);
+    private static readonly Regex SkipNames = new(@"^(Quit|Quit Aqua Hub|Delete scene|Browse…)$|Quit|from Launchpad$|Turn off Ollama|Turn on Ollama|^Attach files|^Attach a folder|^Add a folder|^Reset the .* hotkey$|^Ask again$|Research this properly|^Delete chat$|^Delete this skill|^Forget this$|^Draft the skill|^Save and try it|^Speak your question|^Try it in a new chat|^Improve$|^Answer it instead$|^Close app$|^End task$|^Force end$|^Run health check$|^Check again$|^Remove Whisper$", RegexOptions.IgnoreCase);
     private static readonly Regex Destructive = new(@"^Remove|^Clear$|^Clear caches|^Local database \(2\)", RegexOptions.IgnoreCase);
     private static readonly Regex ObjectDump = new(@"^[A-Z][A-Za-z]+(VM|Item|Link|Source|Symbol|Entry|Match|Place|App)\s\{|^AquaHub\.|^System\.", RegexOptions.None);
 

@@ -79,7 +79,7 @@ public sealed class HubCore : IDisposable
         Workbench = new Ai.Assistant.Workbench(Db);
         Chats = new Ai.Assistant.ChatStore(Db);
         SkillDrafter = new Ai.Assistant.SkillDrafter(Llm);
-        Assistant = new Ai.Assistant.AskAgent(State, Db, Llm, () => Settings.Current, WebSearch, WebReader, Workbench);
+        Assistant = new Ai.Assistant.AskAgent(State, Db, Llm, () => Settings.Current, WebSearch, WebReader, Workbench) { RunAgent = Agents.RunAndWaitAsync };
         Commands = new CommandInterpreter(Llm, () => Settings.Current);
         Llm.HealthChanged += h => State.SetAi(h);
         Http.ConnectivityChanged += online =>

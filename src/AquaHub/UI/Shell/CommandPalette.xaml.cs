@@ -156,7 +156,7 @@ public partial class CommandPalette : Window
         if (Hub.Ask.Messages.Count > 0)
             all.Add(new PaletteItem
             {
-                Title = "Copy this chat", Subtitle = "The whole Ask chat as Markdown — questions, answers, plans, searches, reasoning and sources", Icon = "copy", Hint = "Ask",
+                Title = "Copy this chat", Subtitle = "The whole Ask chat as Markdown", Icon = "copy", Hint = "Ask",
                 Keywords = "copy chat export markdown share conversation transcript", Run = () => { Hub.Ask.CopyChat(); return Task.CompletedTask; },
             });
         if (s.Ask.Voice != "off")

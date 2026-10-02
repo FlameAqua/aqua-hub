@@ -19,11 +19,16 @@ public sealed record AskOptions
     public bool AsQuestion { get; init; }
     /// <summary>The model picked in Ask (null: the one set in Settings › AI). Planning, reading and writing all use it.</summary>
     public string? Model { get; init; }
+    /// <summary>
+    /// Folders attached to this chat (full paths): Ask may search and read inside them, with the same rules as the
+    /// folders Use my PC allows, even while Use my PC is off.
+    /// </summary>
+    public IReadOnlyList<string> Folders { get; init; } = Array.Empty<string>();
 
     public bool UsesWeb => Web || Research;
 }
 
-public enum AttachmentKind { Image, Document }
+public enum AttachmentKind { Image, Document, Folder }
 
 /// <summary>A file, screenshot or pasted image the user gave Ask.</summary>
 public sealed record AskAttachment

@@ -23,7 +23,8 @@ taskbar quick panel, a global command palette and toast alerts. All AI runs on t
 
 ```
 src/AquaHub.Core     platform-neutral engine (net10.0) — fully unit-tested
-  Settings/          HubSettings (JSON), copy-on-write SettingsStore, validation, ISecretStore
+  Settings/          HubSettings (JSON), copy-on-write SettingsStore, validation and versioned
+                     migrations, SettingsSearch, Shortcuts (clash rules), ISecretStore
   Data/              HubDatabase: items + FTS5, JSON snapshots, LLM cache, HTTP validators, alerts, runs, prices
   Net/               HttpFetcher: HTTPS-only, size caps, conditional GET, retries, per-host cool-down
   Feeds/             FeedParser: RSS 2.0 / RSS 1.0 (RDF) / Atom, XXE-safe
@@ -31,6 +32,8 @@ src/AquaHub.Core     platform-neutral engine (net10.0) — fully unit-tested
                      Yahoo Finance (batched), Polymarket, Kalshi, Open-Meteo, Nager.Date,
                      economic calendar, Finnhub earnings, ICS calendars (RRULE expansion)
   Analysis/          text tools, cross-source StoryClusterer + ranking, TechnicalIndicators
+  Markets/           FxRates (exchange rates), Portfolio (value, gain, history), MarketBar (the
+                     chart row), SymbolLinks (a symbol's page on quote sites)
   Ai/                LlmClient (Ollama/OpenAI-compatible, schema outputs, priority gate),
                      Prompts, AskService (RAG), CommandInterpreter (allow-listed intents)
   Agents/            AgentRuntime scheduler, HubState blackboard, 15 agents, fallbacks, digests
@@ -41,9 +44,13 @@ src/AquaHub          Windows shell (WPF)
                      taskbar integration (jump list, thumbnail media buttons, alerts badge)
   UI/                design system (Theme/*.xaml), controls (charts, gauges, icons, FlowGrid),
                      shell (MainWindow, FlyoutWindow, CommandPalette, Onboarding), pages
-tests/AquaHub.Tests  xUnit (550+): parsers, security cases, clustering, indicators, ICS, commands,
+tests/AquaHub.Tests  xUnit (750+): parsers, security cases, clustering, indicators, ICS, commands,
                      LLM plumbing, DB, settings merge, notification policy, scheduling/back-off,
-                     Sentinel de-duplication, fact checks; plus an opt-in live run (AQUAHUB_LIVE=1)
+                     Sentinel de-duplication, fact checks, the update flow (fake updater), your place,
+                     Ask's model picker, a XAML accessibility contract (no name or id on an element
+                     without an automation peer), the collectors and AI agents against a stand-in
+                     network (FakeNetwork) and model server (FakeOllama); plus an opt-in live run
+                     (AQUAHUB_LIVE=1)
 tests/AquaHub.E2E    UI Automation suite that drives the real app (every page, button, window)
                      in a sandboxed --e2e profile where side effects are journalled, not performed
 ```
@@ -66,6 +73,8 @@ tests/AquaHub.E2E    UI Automation suite that drives the real app (every page, b
 * **Scheduling** – `AgentRuntime` ticks every second; each agent declares its interval (adaptive:
   markets are fast only while an exchange is open) and `After` dependencies, so a collector finishing
   with new data triggers its consumers within ~2 s. Failures back off exponentially (30 s → 32 min).
+  `RunAndWaitAsync` runs one agent now and waits for that run — or for the one already under way, rather than
+  queuing another — up to a timeout: Ask's *run_agent* (§10).
 * **Concurrency** – collectors run in parallel (bounded), AI agents are serialised and share the single
   GPU slot through a **priority gate**: interactive requests (Ask, palette) jump ahead of background work.
 * **Eco mode** – intervals stretch ×3 while the user is idle and ×2 on battery (UI hidden).
@@ -121,6 +130,30 @@ through a `UiThrottle`, so a background refresh never costs more than one layout
 * **Settings forms merge** – a form saves only the fields it changed (a three-way merge against the copy it
   loaded), so a do-not-disturb toggle from the tray, a hotkey fallback or first-run app discovery made
   meanwhile is never reverted; forms also refresh when settings change elsewhere.
+* **Your place** – a new profile has none (`LocationSettings.IsSet`): until you choose one the weather agent and
+  the Google News search for your town don't run, the brief's local section is called *Local*, and prompts leave
+  the place out rather than guess (Ask's time zone is then Windows' own). Choosing a place, from the search or
+  *Use my location* (`WindowsLocation`: Windows' geolocator at town accuracy, rounded to about a kilometre, then
+  OpenStreetMap's Nominatim for the town and Open-Meteo for its time zone), goes through
+  `LocalePacks.ChoosePlace`: the country's outlets, subreddits, holidays, index, units and currency on a first
+  choice or a move abroad (only values that are still defaults or the previous country's), and within a country
+  the new town's subreddit and hashtag in place of the old town's. Profiles from before keep Dublin, as they
+  saved it.
+* **Markets** – the chart row is the `Indices` and `Macro` lists (`MarketBar` moves, removes and adds, and the page
+  keeps its tiles when nothing about them changed). The portfolio (`Portfolio`) values holdings in your base
+  currency with `FxRates`: Yahoo pairs such as `EURUSD=X`, inverse pairs and crosses through the dollar, and
+  quotes in minor units (GBp, ZAc, ILA) divided by 100. Market Watch fetches only the rates your holdings need (for
+  their prices and for the currency you paid in) and keeps their daily history; the chart replays today's
+  holdings over each day's closes at that day's rate, starting once every holding has a price. A holding without a
+  price or a rate is listed apart rather than added in the wrong currency. Typed numbers accept "0.5" and "0,5"
+  (`Numbers`, the culture deciding a thousands separator).
+* **Settings search and shortcuts** – `SettingsSearch` scores every row's title, extra keywords, section and
+  description (every word has to match; plurals count) and takes you to the row with its control focused.
+  `Shortcuts` checks a new global shortcut against the other one and Aqua's own keys, and asks Windows whether it's
+  free; the hotkey box also notices a combination Windows or another app keeps (its key-up arrives without the
+  key-down). Aqua's own global hotkeys pause while you record one.
+* **Settings versions** – `SettingsStore` migrates older files once, step by step (version 4 added the Gaming &
+  internet sources, matched by id or host so a source you already had isn't added twice).
 * **Only what changed** – the dashboard view model raises just the properties of the section that changed
   (telemetry every 2.5 s no longer re-evaluates the whole page).
 * **Alerts** – `HubContext.RaiseAlert` stores an alert (optionally once per key), refreshes the bell and hands it to
@@ -261,12 +294,12 @@ Ask is an agent with tools (`Core/Ai/Assistant`), not a single prompt. Every ans
 
 | Switch | What it adds |
 |---|---|
-| (none) | Feeds + `search_hub`, `get_story`. |
+| (none) | Feeds + `search_hub`, `get_story`, `run_agent` (below). |
 | **Web** | `web_search` (DuckDuckGo HTML by default, Google News for recent events, Wikipedia as fallback; SearXNG or Brave with your key), `read_webpage`. A provider's bot check is reported, never bypassed. |
 | **Research** | A fixed plan instead of the loop: the model writes 3–4 queries → parallel searches → up to *N* pages (relevance, established outlets, at most 2 per site) → a streamed report (answer, *Key findings*, *Where sources differ*, *What to watch*), every claim cited. |
-| **Think** | Reasoning on (`think: true`), shown collapsed as *Thought for n s*. |
+| **Think** | Reasoning on (`think: true`, sent only to a model with Ollama's `thinking` capability), shown collapsed as *Thought for n s*. |
 | **Use my PC** | `search_files` (name words, kind, folder), `read_file` (documents; pictures are shown to vision models), `list_folder`, `take_screenshot`, `system_status`, `read_clipboard`, `open_item`, `launch_app` (Launchpad, any Start-menu app, Windows Settings pages), `media_control`, `run_scene`, `do_not_disturb` (Aqua's own notifications); with *Let Ask operate apps*: `list_windows`, `read_window` (UI Automation: numbered buttons, fields, links, menu items), `focus_window`, `click` (invoke, toggle, select, expand), `type_text` (value or keystrokes, never password fields), `press_keys` (Ctrl/Shift/Alt with letters, digits, F-keys and navigation keys; never the Windows key or Alt+F4), `close_window` (a close request). |
-| Attachments | Files (text, code, CSV/JSON, HTML, Word, Excel, PowerPoint, OpenDocument, RTF, PDF, images), pasted images, a screenshot of the screen or a snip. Office files are read from their XML (`Documents`), PDFs are rendered and read with Windows OCR (`Windows.Data.Pdf` + `Windows.Media.Ocr`), and images go to vision models as images (with OCR text for the rest). |
+| Attachments | Files (text, code, CSV/JSON, HTML, Word, Excel, PowerPoint, OpenDocument, RTF, PDF, images), pasted images, a screenshot of the screen or a snip. Office files are read from their XML (`Documents`), PDFs are rendered and read with Windows OCR (`Windows.Data.Pdf` + `Windows.Media.Ocr`), and images go to vision models as images (with OCR text for the rest). A **folder** (`AskOptions.Folders`, kept with the open chat, not saved) gives that chat `search_files`, `list_folder` and `read_file` inside it, with Use my PC's rules, even while Use my PC is off; its newest entries go into the context. |
 
 **Safety.** Tool results are fenced as untrusted data. Tools are classed Hub / Web / Private / Act:
 *Act* tools (open, launch, media, clipboard) show **Allow / Allow for this chat / Don't allow** in the chat first
@@ -286,6 +319,20 @@ files or keys, and programs, scripts and shortcuts are never opened. `WebReader`
 (redirects included) at connect time and refuses loopback, private, link-local, CGNAT and unique-local
 addresses. Unanswered approvals are declined after three minutes.
 
+**Aqua's agents** (`AgentJobs`, `RunAgentTool`). A message that asks in so many words — *refresh the news*,
+*update my markets and the weather*, *get the latest prices*, *rerun the market analyst*, *write me a fresh brief*,
+or *refresh it* after a question about the weather — runs those agents before anything else (collectors side by
+side, then the AI ones), so even a model that never calls tools answers from what they brought in. The context says
+what each did and, after the news, lists the stories that weren't there before; the planner is told, so it doesn't
+search the web for "the news". *Run* and *rewrite* need a name straight after them ("run the numbers on my
+portfolio" runs nothing; "rewrite this story" is about your text). For follow-ups the model has `run_agent`, with
+a fixed list of jobs — news, social, markets, predictions, agenda, weather, brief, market analysis, pulse,
+Foresight — never an agent by id. Each job runs at most once per answer (a repeat returns the same outcome
+without a second activity line) through `AgentRuntime.RunAndWaitAsync`, which waits 45 s to 4 minutes depending on
+the job; the answer lets go of the model while an AI agent writes, as it does while you're asked for an OK. The
+prompt forbids claiming a refresh that no tool result shows. A question about your portfolio gets your holdings
+as the Markets page's card values them.
+
 **Answers** render as selectable rich text (`MarkdownView`): select and copy any part, right-click → *Ask about
 this* or *Search the web for this*, or use *Copy*, *Read aloud*, *Ask again* (the last answer is rewritten in
 place) and *Dig deeper* (the same question as research) under each answer. Citations open the page; a file
@@ -302,8 +349,19 @@ and stars, renames and deletes them. Unstarred chats not used for *Delete chats 
 or never) are deleted at start-up; *Keep Ask chats* off deletes them all. Each chat is a `ChatThread` with its
 own answer in flight, so an answer keeps streaming in a chat you've left.
 
+**Model.** A picker in the composer chooses the model Ask answers with (Settings › AI's model until you pick
+one). Every call of an answer goes to it (`LlmRequest.Model`): planning, reading a long page in parts, looking
+at pictures, writing, and the chat's title, so Ollama never swaps models in the middle of an answer; a pick
+that's since been uninstalled falls back to the usual model. Think and Research are remembered for each model
+(`AskSettings.ModelModes`), and Think is greyed out for a model without a thinking mode (Gemma 3, for one),
+which `LlmClient.CanThinkAsync` finds out without waking the model server.
+
 **Context.** Automatic by default: the window grows only when a prompt needs it (a new `num_ctx` reloads the
-model). A fixed window (8K–128K) leaves out the oldest messages first, then the end of the gathered material.
+model), up to 64K, or 128K on a graphics card with 24 GB or more: the model's memory for the conversation grows
+with the window, and once it doesn't fit on the card the model spills into system RAM and slows to a crawl.
+Past that limit a prompt is trimmed like a fixed window rather than sent whole (Ollama would quietly cut its
+start, the instructions). A fixed window (8K–128K) leaves out the oldest messages first, then the end of the
+gathered material.
 The meter under the Ask box shows the last answer's prompt + reply tokens against the window; its popup changes
 the window and how many earlier messages each question sends.
 
@@ -410,3 +468,11 @@ still not installed), which opens Settings › About. Nothing downloads
 until *Download* there; then *Restart now* hands over to Velopack's updater, which waits for Aqua to exit, swaps the
 versions and starts it again with the same profile. If you don't restart, the update installs at the next start.
 In an E2E session *Check now* is journalled instead of performed.
+
+A new version can't be missed: a banner across the main window (`UpdatePolicy.BannerFor`: *Download* with a
+progress bar, *Cancel*, *Restart now*, *What's new*) and an accent dot on Settings in the sidebar. *Not now* puts
+the banner away until the next version or step (`UpdatePolicy.BannerKey`: on offer, then ready to install); the dot
+stays. After an update, the alerts about that version are removed from the bell. The diagnostics summary says how
+this copy was installed and where the updater stands. `--demo-update [ready]` swaps GitHub for a pretend release
+(Debug builds and E2E dry runs only) that "downloads" in a few seconds and installs nothing, for trying all of
+this; the E2E suite's `A18_UpdateTests` uses it.

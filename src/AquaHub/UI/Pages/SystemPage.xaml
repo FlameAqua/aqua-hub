@@ -122,7 +122,7 @@
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="{Binding HealthVerdict}" FontSize="18" FontWeight="SemiBold" Foreground="{Binding HealthBrush}" Visibility="{Binding HasHealth, Converter={StaticResource Vis}}"/>
                             <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Visibility="{Binding HasHealth, Converter={StaticResource VisNot}}"
-                                       Text="Looks at drive space and drive health, Windows Update, crashes and blue screens, antivirus, devices, battery wear, startup apps and clutter — reading only, nothing is changed. Takes about ten seconds; then the local model sums it up."/>
+                                       Text="Checks drives, Windows Update, crashes, antivirus, devices, battery, startup apps and clutter. It only reads, and takes about ten seconds."/>
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="{Binding HealthRunning, Converter={StaticResource Vis}}">
                                 <ProgressBar IsIndeterminate="True" Width="90" Height="4" VerticalAlignment="Center"/>
                                 <TextBlock Text="{Binding HealthStep}" Style="{StaticResource T.Caption}" Margin="10,0,0,0" VerticalAlignment="Center"/>
@@ -169,7 +169,7 @@
                                 </Button>
                                 <Button Grid.Column="2" Style="{StaticResource Btn.Base}" Padding="4,1" Margin="0,0,-4,0" HorizontalAlignment="Right" Click="OnSortMemory"
                                         AutomationProperties.AutomationId="procs-sort-memory" AutomationProperties.Name="Sort by memory"
-                                        ToolTip="Sort by memory — private working set, the figure Task Manager shows">
+                                        ToolTip="Sort by memory (as Task Manager counts it)">
                                     <TextBlock Text="{Binding MemoryHeader}" Style="{StaticResource T.Caption}"/>
                                 </Button>
                             </Grid>
@@ -336,7 +336,7 @@
                             <TextBlock Text="No model loaded — VRAM is free for games and apps." Style="{StaticResource T.Body2}" Visibility="{Binding Loaded, Converter={StaticResource VisNot}}"/>
                             <Border Style="{StaticResource CardInner}" Margin="0,12,0,0" Visibility="{Binding ShowSetupHint, Converter={StaticResource Vis}}">
                                 <StackPanel>
-                                    <TextBlock Text="Aqua's AI runs in Ollama, on this PC. Install or start it, then pull a model such as qwen3.5:9b — everything else keeps working meanwhile."
+                                    <TextBlock Text="Install or start Ollama, then pull a model such as qwen3.5:9b."
                                                Style="{StaticResource T.Body2}" TextWrapping="Wrap"/>
                                     <Button Style="{StaticResource Btn.Link}" Click="OnGetOllama" HorizontalAlignment="Left" Margin="-6,4,0,0" Content="Get Ollama (ollama.com)"/>
                                 </StackPanel>
@@ -357,7 +357,7 @@
                     <c:Card Title="Aqua Hub itself" Icon="shield" Margin="0,16,0,0">
                         <StackPanel>
                             <TextBlock Text="{Binding SelfText}" Style="{StaticResource T.Body2}"/>
-                            <TextBlock Text="Closing the dashboard hides it (reopening is instant), and its memory is handed back to Windows while the agents work in the background." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            <TextBlock Text="Closing the window hands its memory back to Windows." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                         </StackPanel>
                     </c:Card>
                 </StackPanel>

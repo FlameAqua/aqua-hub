@@ -13,12 +13,15 @@ public class SettingRow : ContentControl
     public static readonly DependencyProperty DescriptionProperty = DependencyProperty.Register(nameof(Description), typeof(string), typeof(SettingRow), new PropertyMetadata(""));
     public static readonly DependencyProperty IconProperty = DependencyProperty.Register(nameof(Icon), typeof(string), typeof(SettingRow), new PropertyMetadata(null));
     public static readonly DependencyProperty BelowProperty = DependencyProperty.Register(nameof(Below), typeof(object), typeof(SettingRow), new PropertyMetadata(null));
+    public static readonly DependencyProperty KeywordsProperty = DependencyProperty.Register(nameof(Keywords), typeof(string), typeof(SettingRow), new PropertyMetadata(""));
 
     public string Title { get => (string)GetValue(TitleProperty); set => SetValue(TitleProperty, value); }
     public string Description { get => (string)GetValue(DescriptionProperty); set => SetValue(DescriptionProperty, value); }
     public string? Icon { get => (string?)GetValue(IconProperty); set => SetValue(IconProperty, value); }
     /// <summary>Optional full-width content under the row (lists, editors).</summary>
     public object? Below { get => GetValue(BelowProperty); set => SetValue(BelowProperty, value); }
+    /// <summary>Other words people might search Settings with ("dark mode" for Theme). Not shown.</summary>
+    public string Keywords { get => (string)GetValue(KeywordsProperty); set => SetValue(KeywordsProperty, value); }
 
     public SettingRow()
     {

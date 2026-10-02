@@ -24,7 +24,7 @@ public partial class NewsPage : UserControl, IPage
 
     private static readonly (string Id, string Label)[] FilterDefs =
     {
-        ("all", "All"), ("local", "Local"), ("world", "World"), ("europe", "Europe"), ("business", "Business"), ("tech", "Tech"), ("saved", "Saved"),
+        ("all", "All"), ("local", "Local"), ("world", "World"), ("europe", "Europe"), ("business", "Business"), ("tech", "Tech"), ("gaming", "Gaming & internet"), ("saved", "Saved"),
     };
 
     public NewsPage()

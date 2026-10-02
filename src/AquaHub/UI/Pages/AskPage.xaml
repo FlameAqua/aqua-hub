@@ -162,7 +162,7 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="CopyChatButton" Style="{StaticResource Btn.Icon}" Click="OnCopyChat" Margin="0,0,2,0" Visibility="Collapsed"
                             AutomationProperties.AutomationId="ask-copy-chat" AutomationProperties.Name="Copy chat"
-                            ToolTip="Copy the whole chat as Markdown — your questions, the answers, plans, searches, reasoning and sources (right-click to save it as a file)">
+                            ToolTip="Copy the chat as Markdown (right-click to save it as a file)">
                         <Button.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Copy chat (Markdown)" Click="OnCopyChat"/>
@@ -193,7 +193,7 @@
                     <c:Icon Kind="sparkle" Width="30" Height="30" Foreground="White"/>
                 </Border>
                 <TextBlock Text="What would you like to know?" Style="{StaticResource T.Subtitle}" FontSize="22" HorizontalAlignment="Center" Margin="0,16,0,6"/>
-                <TextBlock Text="Answers start from the news, social chatter, markets, weather and agenda your agents collected. Turn on Web to look things up, Research for a cited report, Think for harder questions, or Use my PC to find files, see your screen and work with your apps. Teach Aqua new skills in the Workbench. The model runs privately on this PC."
+                <TextBlock Text="Ask about your news, feeds, markets, weather and agenda. Web looks things up, Research writes a cited report, Think takes longer over hard questions, and Use my PC finds files and works with your apps."
                            Style="{StaticResource T.Body2}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,18"/>
                 <WrapPanel x:Name="Suggestions" HorizontalAlignment="Center"/>
             </StackPanel>
@@ -419,7 +419,7 @@
                                                         <c:Icon Kind="refresh" Width="13" Height="13"/>
                                                     </Button>
                                                     <Button Style="{StaticResource Btn.Link}" Command="{Binding DeeperCommand}" FontSize="12" Padding="6,2" Visibility="{Binding Question, Converter={StaticResource Vis}}"
-                                                            ToolTip="Research this properly: several searches, the best pages read, a cited report">
+                                                            ToolTip="Research it: several searches and a cited report">
                                                         <StackPanel Orientation="Horizontal"><c:Icon Kind="research" Width="12" Height="12"/><TextBlock Text="Dig deeper" Margin="5,0,0,0"/></StackPanel>
                                                     </Button>
                                                     <Button Style="{StaticResource Btn.Link}" Command="{Binding UndoMemoryCommand}" FontSize="12" Padding="6,2" Content="Undo"
@@ -478,7 +478,7 @@
                         </Grid.ColumnDefinitions>
                         <TextBox x:Name="Input" Background="Transparent" BorderBrush="Transparent" FontSize="14.5" Padding="10,8" AcceptsReturn="True" TextWrapping="Wrap"
                                  MaxHeight="160" VerticalScrollBarVisibility="Auto" AllowDrop="True" PreviewDragOver="OnDragOver" PreviewDrop="OnDrop"
-                                 ui:UiProps.Placeholder="Ask anything…" ToolTip="Enter sends · Shift+Enter adds a line · attach files or a screenshot, speak, or switch on Web, Research or Use my PC below"
+                                 ui:UiProps.Placeholder="Ask anything…" ToolTip="Enter sends · Shift+Enter adds a line"
                                  PreviewKeyDown="OnInputKey" TextChanged="OnInputChanged">
                             <TextBox.ContextMenu>
                                 <ContextMenu>
@@ -515,6 +515,10 @@
                                     AutomationProperties.AutomationId="ask-attach">
                                 <c:Icon Kind="paperclip" Width="15" Height="15"/>
                             </Button>
+                            <Button Style="{StaticResource Btn.Icon}" Width="30" Height="30" Click="OnAttachFolder" ToolTip="Attach a folder (Ask can search and read it in this chat)"
+                                    AutomationProperties.AutomationId="ask-attach-folder">
+                                <c:Icon Kind="folder" Width="15" Height="15"/>
+                            </Button>
                             <Button x:Name="ScreenshotButton" Style="{StaticResource Btn.Icon}" Width="30" Height="30" Click="OnScreenshotMenu" ToolTip="Add a screenshot"
                                     AutomationProperties.AutomationId="ask-screenshot" Margin="0,0,8,0">
                                 <c:Icon Kind="screenshot" Width="15" Height="15"/>
@@ -529,21 +533,21 @@
                             <Rectangle Width="1" Height="18" Fill="{DynamicResource B.Divider}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                             <ComboBox x:Name="ModelPicker" Width="170" Margin="0,0,8,0" VerticalAlignment="Center" FontSize="12" Visibility="Collapsed"
                                       SelectionChanged="OnModelPicked" AutomationProperties.Name="Model" AutomationProperties.AutomationId="ask-model"
-                                      ToolTip="The model that answers here. Think and Research are remembered for each model; a model that isn't loaded yet takes a few seconds the first time."/>
+                                      ToolTip="The model that answers. Think and Research are remembered for each model."/>
                             <ToggleButton x:Name="WebToggle" Style="{StaticResource ModeChip}" Checked="OnMode" Unchecked="OnMode" AutomationProperties.Name="Web"
-                                          ToolTip="Web: Aqua may search the internet and read pages when your feeds don't have the answer">
+                                          ToolTip="Web: search the internet and read pages">
                                 <StackPanel Orientation="Horizontal"><c:Icon Kind="globe" Width="12" Height="12"/><TextBlock Text="Web" Margin="5,0,0,0"/></StackPanel>
                             </ToggleButton>
                             <ToggleButton x:Name="ResearchToggle" Style="{StaticResource ModeChip}" Checked="OnMode" Unchecked="OnMode" AutomationProperties.Name="Research"
-                                          ToolTip="Research: plans several searches, reads the best pages and writes a cited report (takes a minute or two)">
+                                          ToolTip="Research: several searches and a cited report (a minute or two)">
                                 <StackPanel Orientation="Horizontal"><c:Icon Kind="research" Width="12" Height="12"/><TextBlock Text="Research" Margin="5,0,0,0"/></StackPanel>
                             </ToggleButton>
                             <ToggleButton x:Name="ThinkToggle" Style="{StaticResource ModeChip}" Checked="OnMode" Unchecked="OnMode" AutomationProperties.Name="Think"
-                                          ToolTip="Think: the model reasons step by step before answering — slower, better for tricky questions">
+                                          ToolTip="Think: reasons step by step first; slower, better for hard questions">
                                 <StackPanel Orientation="Horizontal"><c:Icon Kind="brain" Width="12" Height="12"/><TextBlock Text="Think" Margin="5,0,0,0"/></StackPanel>
                             </ToggleButton>
                             <ToggleButton x:Name="ComputerToggle" Style="{StaticResource ModeChip}" Checked="OnMode" Unchecked="OnMode" AutomationProperties.Name="Use my PC"
-                                          ToolTip="Use my PC: Aqua may find and read files in the folders you allowed, look at your screen, and — with your OK each time — open things, work with app windows or control media">
+                                          ToolTip="Use my PC: find and read files in your allowed folders, see your screen, and with your OK open things and work in apps">
                                 <StackPanel Orientation="Horizontal"><c:Icon Kind="computer" Width="12" Height="12"/><TextBlock Text="Use my PC" Margin="5,0,0,0"/></StackPanel>
                             </ToggleButton>
                             <TextBlock x:Name="ModeHint" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="4,0,0,0" TextWrapping="Wrap" MaxWidth="360"/>
@@ -552,7 +556,7 @@
                         </WrapPanel>
                         <!-- Context meter -->
                         <Button x:Name="ContextButton" Grid.Column="1" Style="{StaticResource Btn.Subtle}" Padding="8,4" Click="OnContext" VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="ask-context" ToolTip="How much of the model's context this chat uses — click for settings">
+                                AutomationProperties.AutomationId="ask-context" ToolTip="How much of the context window this chat uses">
                             <StackPanel Orientation="Horizontal">
                                 <Grid Width="54" Height="5" VerticalAlignment="Center" Margin="0,0,8,0">
                                     <Border CornerRadius="2.5" Background="{DynamicResource B.Track}"/>
@@ -584,7 +588,7 @@
                                         <ComboBoxItem Content="The last 40" Tag="40"/>
                                     </ComboBox>
                                     <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,10,0,6"
-                                               Text="A bigger window keeps more of the chat and the material Aqua found, but uses more graphics memory and is slower; changing it reloads the model. When a chat outgrows a fixed window, the oldest messages are left out."/>
+                                               Text="Bigger keeps more of the chat but is slower and uses more graphics memory. When a chat outgrows a fixed size, the oldest messages are left out."/>
                                     <Button Style="{StaticResource Btn.Link}" HorizontalAlignment="Left" Padding="0,2" Content="Start a new chat to clear it" Click="OnNewChat"/>
                                 </StackPanel>
                             </Border>

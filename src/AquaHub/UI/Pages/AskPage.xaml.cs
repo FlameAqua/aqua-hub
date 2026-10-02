@@ -211,10 +211,10 @@ public partial class AskPage : UserControl, IPage
         var ai = Hub.State.Ai;
         TurnOnAi.Visibility = ai?.Available != true && !Hub.Core.Llm.UserPaused && OllamaManager.IsLocalOllama && OllamaManager.Installed && !Hub.Ollama.Transitioning
             ? Visibility.Visible : Visibility.Collapsed;
-        Subtitle.Text = Hub.Core.Llm.UserPaused ? "AI is paused — answers list what your agents collected, with sources. Resume AI from the tray."
-            : ai?.Available == true ? $"Private answers from your agents, the web and your PC when you allow it · {Session.Model ?? ai.ActiveModel} on this PC"
-            : Hub.Ollama.UserTurnedOff ? "You turned the local model off — answers list what your agents collected, with sources."
-            : "The local model is offline — answers list what your agents collected, with sources. Start Ollama for written answers.";
+        Subtitle.Text = Hub.Core.Llm.UserPaused ? "AI is paused: answers list what your agents collected. Resume it from the tray."
+            : ai?.Available == true ? $"{Session.Model ?? ai.ActiveModel} on this PC"
+            : Hub.Ollama.UserTurnedOff ? "The local model is off: answers list what your agents collected."
+            : "The local model is offline: answers list what your agents collected.";
     }
 
     private async void OnTurnOnAi(object sender, RoutedEventArgs e)
@@ -344,7 +344,12 @@ public partial class AskPage : UserControl, IPage
             if (Clipboard.ContainsFileDropList())
             {
                 var files = Clipboard.GetFileDropList().Cast<string>().ToList();
-                if (files.Count > 0) { e.Handled = true; _ = Session.AttachFilesAsync(files); }
+                if (files.Count > 0)
+                {
+                    e.Handled = true;
+                    _ = Session.AttachFilesAsync(files.Where(f => !Directory.Exists(f)));
+                    foreach (var folder in files.Where(Directory.Exists)) _ = Session.AttachFolderAsync(folder);
+                }
             }
             else if (!Clipboard.ContainsText() && ScreenCapture.ClipboardImage() is { } png)
             {
@@ -368,7 +373,9 @@ public partial class AskPage : UserControl, IPage
         if (text.Length == 0 && !hasFiles) return;
         if (text.Length == 0)
             text = Session.Pending.Any(p => p.Attachment?.Kind == AttachmentKind.Image) && Session.Pending.All(p => p.Attachment is null || p.Attachment.Kind == AttachmentKind.Image)
-                ? "What's in this image?" : "Summarise what I attached.";
+                ? "What's in this image?"
+                : Session.Pending.All(p => p.Attachment is null || p.Attachment.Kind == AttachmentKind.Folder) ? "What's in this folder?"
+                : "Summarise what I attached.";
         Input.Text = "";
         Send(text);
     }
@@ -483,11 +490,11 @@ public partial class AskPage : UserControl, IPage
         VoiceMeter.Visibility = engine == "online" ? Visibility.Collapsed : Visibility.Visible;
         var suggest = engine != "whisper" && Hub.S.Ask.WhisperTip;
         WhisperTipLinks.Visibility = suggest ? Visibility.Visible : Visibility.Collapsed;
-        VoiceTip.Text = engine == "whisper" ? "Whisper writes down what you said when you stop — click the microphone, or just pause."
+        VoiceTip.Text = engine == "whisper" ? "Whisper writes when you stop."
             : !suggest ? ""
             : Hub.Core.Whisper.Installed() is not null
-                ? "Windows' speech recognition often mishears. Whisper is installed — switch voice input to it for much better results."
-                : "Windows' speech recognition isn't perfect and often mishears. For much better results, install Whisper — free, and it runs on this PC.";
+                ? "Whisper is installed: switch voice input to it for better results."
+                : "Windows' speech recognition often mishears. Whisper is much better.";
     }
 
     private void OnVoiceLevel(double level)
@@ -513,7 +520,7 @@ public partial class AskPage : UserControl, IPage
     {
         Hub.Core.Settings.Update(s => s.Ask.WhisperTip = false);
         WhisperTipLinks.Visibility = Visibility.Collapsed;
-        VoiceTip.Text = "Hidden. Whisper is in Settings › Ask Aqua › Voice if you change your mind.";
+        VoiceTip.Text = "Hidden. Whisper is in Settings › Ask Aqua › Voice.";
     }
 
     private void OnVoiceProblem(string advice)
@@ -617,7 +624,7 @@ public partial class AskPage : UserControl, IPage
         var mode = Hub.S.Ask.ContextWindow > 0 ? $"fixed at {Tokens(Hub.S.Ask.ContextWindow)} tokens" : "automatic (it grows when an answer needs more)";
         ContextDetail.Text = used == 0
             ? $"Nothing used in this chat yet. The window is {mode}."
-            : $"The last answer used about {used.ToString("N0", CultureInfo.CurrentCulture)} of {window.ToString("N0", CultureInfo.CurrentCulture)} tokens ({share:P0}) — your question, the earlier messages and everything Aqua gathered. The window is {mode}.";
+            : $"The last answer used about {used.ToString("N0", CultureInfo.CurrentCulture)} of {window.ToString("N0", CultureInfo.CurrentCulture)} tokens ({share:P0}). The window is {mode}.";
         _syncing = true;
         ContextWindowCombo.SelectedItem = ContextWindowCombo.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == Hub.S.Ask.ContextWindow.ToString(CultureInfo.InvariantCulture));
         HistoryCombo.SelectedItem = HistoryCombo.Items.Cast<ComboBoxItem>().OrderBy(i => Math.Abs(int.Parse((string)i.Tag, CultureInfo.InvariantCulture) - Hub.S.Ask.HistoryMessages)).First();
@@ -658,6 +665,12 @@ public partial class AskPage : UserControl, IPage
                      "*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp;*.tif;*.tiff;*.cs;*.js;*.ts;*.py;*.java;*.cpp;*.c;*.h;*.go;*.rs;*.sql;*.ps1;*.sh|All files|*.*",
         };
         if (dialog.ShowDialog(Window.GetWindow(this)) == true) _ = Session.AttachFilesAsync(dialog.FileNames);
+    }
+
+    private void OnAttachFolder(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Attach a folder to this chat" };
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true) _ = Session.AttachFolderAsync(dialog.FolderName);
     }
 
     private void OnScreenshotMenu(object sender, RoutedEventArgs e)
@@ -742,6 +755,7 @@ public partial class AskPage : UserControl, IPage
         {
             e.Handled = true;
             _ = Session.AttachFilesAsync(files.Where(File.Exists));
+            foreach (var folder in files.Where(Directory.Exists)) _ = Session.AttachFolderAsync(folder);
         }
     }
 
@@ -818,10 +832,10 @@ public partial class AskPage : UserControl, IPage
         ThinkToggle.IsChecked = Session.Think && !_cannotThink;
         ThinkToggle.IsEnabled = !_cannotThink;
         ThinkToggle.ToolTip = _cannotThink
-            ? $"{Session.Model} can't reason step by step (it has no thinking mode), so Think is off with it. Pick another model to use Think."
-            : "Think: the model reasons step by step before answering — slower, better for tricky questions";
+            ? $"{Session.Model} has no thinking mode."
+            : "Think: reasons step by step first; slower, better for hard questions";
         ComputerToggle.IsChecked = Session.Computer;
-        WebToggle.ToolTip = s.Web ? "Web: Aqua may search the internet and read pages when your feeds don't have the answer"
+        WebToggle.ToolTip = s.Web ? "Web: search the internet and read pages"
                                   : "The web is turned off for Ask in Settings › Ask Aqua";
         MicButton.Visibility = s.Voice == "off" ? Visibility.Collapsed : Visibility.Visible;
         _syncing = false;

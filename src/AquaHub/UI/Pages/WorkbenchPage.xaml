@@ -52,7 +52,7 @@
         <StackPanel>
             <TextBlock Text="Workbench" Style="{StaticResource T.Title}"/>
             <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,4,0,0" MaxWidth="820" HorizontalAlignment="Left"
-                       Text="Teach Aqua new skills and things to remember. Describe what you want in your own words and Aqua drafts a skill from its own tools — no code runs, and anything that acts on your PC still asks you first."/>
+                       Text="Teach Aqua skills and things to remember. Describe a skill and Aqua drafts it from its own tools."/>
         </StackPanel>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,16,0,12">
@@ -76,7 +76,7 @@
                         <StackPanel>
                             <TextBlock Text="Teach Aqua a skill" Style="{StaticResource T.CardTitle}"/>
                             <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,2,0,10"
-                                       Text="Say what it should do and when. Aqua turns it into instructions and, where it helps, fixed steps using its own tools — you check it, try it and save it."/>
+                                       Text="Say what it should do and when. Check the draft, try it, then save it."/>
                             <TextBox x:Name="TeachInput" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70" MaxHeight="180" VerticalScrollBarVisibility="Auto"
                                      ui:UiProps.Placeholder="e.g. When I say “focus time”, pause the music, turn on do not disturb and open my to-do list"
                                      AutomationProperties.AutomationId="wb-teach"/>
@@ -129,7 +129,7 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock x:Name="NoSteps" Style="{StaticResource T.Caption}" Text="No fixed steps — Aqua follows the instructions and uses whichever tools it needs." TextWrapping="Wrap"/>
+                            <TextBlock x:Name="NoSteps" Style="{StaticResource T.Caption}" Text="No fixed steps: Aqua follows the instructions." TextWrapping="Wrap"/>
                             <TextBlock x:Name="EditorNotes" Style="{StaticResource T.Caption}" Foreground="{DynamicResource B.Warn}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
 
                             <Border Style="{StaticResource CardInner}" Padding="12,10" Margin="0,14,0,0">
@@ -220,7 +220,7 @@
                         <StackPanel>
                             <TextBlock Text="Something Aqua should remember" Style="{StaticResource T.CardTitle}"/>
                             <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,2,0,10"
-                                       Text="Facts and preferences Aqua keeps in mind in every answer — where you keep things, how you like answers, names it should know. You can also say “remember that …” in Ask. Kept only on this PC."/>
+                                       Text="Facts and preferences Aqua uses in every answer. You can also say “remember that …” in Ask."/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -279,7 +279,7 @@
                 <!-- ═══ What Aqua can do ═══ -->
                 <StackPanel x:Name="AbilitiesPanel" Visibility="Collapsed">
                     <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="4,0,0,12"
-                               Text="Everything Ask can use, and what each needs. Skills are built from these; the switches under the Ask box (Web, Use my PC) and Settings › Ask Aqua decide what's available."/>
+                               Text="Everything Ask can use, and the switch each one needs."/>
                     <ItemsControl x:Name="AbilityGroups">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>

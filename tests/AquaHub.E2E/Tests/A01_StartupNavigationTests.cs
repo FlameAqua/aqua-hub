@@ -6,6 +6,7 @@ public sealed class A01_StartupNavigationTests : E2ETestBase
     public A01_StartupNavigationTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }
 
     [Fact]
+    [Trait("Category", "Smoke")]
     public void T01_StartsInDryRunModeOnToday() => Run(() =>
     {
         Check("Startup", "process running with main window 'Aqua Hub'", () =>
@@ -39,6 +40,7 @@ public sealed class A01_StartupNavigationTests : E2ETestBase
     });
 
     [Fact]
+    [Trait("Category", "Smoke")]
     public void T02_EveryPageViaNavRail() => Run(() =>
     {
         foreach (var page in AllPages.Skip(1).Append("today"))

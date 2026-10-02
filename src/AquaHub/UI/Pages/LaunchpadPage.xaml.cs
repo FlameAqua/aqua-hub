@@ -33,7 +33,9 @@ public partial class LaunchpadPage : UserControl, IPage
 
     public void OnNavigatedTo(string? arg)
     {
-        Subtitle.Text = $"Your apps, music and one-click scenes. Everything here is also in the command palette ({Hub.S.General.HotkeyPalette} anywhere, Ctrl+K in this window).";
+        Subtitle.Text = Hub.S.General.HotkeyPalette is { Length: > 0 } hotkey
+            ? $"Your apps, music and scenes. Also in the command palette ({hotkey})."
+            : "Your apps, music and scenes. Also in the command palette.";
         _vm.Today.Attach();
         Hub.Core.Settings.Changed -= OnSettingsChanged;
         Hub.Core.Settings.Changed += OnSettingsChanged;

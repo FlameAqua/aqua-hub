@@ -71,6 +71,8 @@ public sealed record PlanContext
     /// <summary>Names of the files the user attached to this message.</summary>
     public IReadOnlyList<string> Attachments { get; init; } = Array.Empty<string>();
     public bool Research { get; init; }
+    /// <summary>What Aqua's agents just refreshed for this message ("the news").</summary>
+    public IReadOnlyList<string> Refreshed { get; init; } = Array.Empty<string>();
 }
 
 public static partial class AskPlanner
@@ -135,12 +137,16 @@ public static partial class AskPlanner
             foreach (var m in turns) sb.Append(m.Role == "user" ? "User: " : "Aqua: ").Append(HtmlText.Truncate(m.Content.ReplaceLineEndings(" "), 280)).Append('\n');
         }
         sb.Append("Web: ").Append(o.UsesWeb ? "on" : "off").Append(". Use my PC: ").Append(o.Computer ? "on" : "off");
-        if (o.Computer && ctx.Folders.Count > 0) sb.Append(" (folders Aqua may search: ").Append(string.Join(", ", ctx.Folders.Take(8))).Append(')');
+        if ((o.Computer || o.Folders.Count > 0) && ctx.Folders.Count > 0) sb.Append(" (folders Aqua may search: ").Append(string.Join(", ", ctx.Folders.Take(8))).Append(')');
+        if (o.Folders.Count > 0) sb.Append(". The user attached a folder to this chat; questions are usually about its files");
         sb.Append(".\n");
         if (ctx.Memories.Count > 0) sb.Append("The user asked Aqua to remember: ").Append(string.Join(" | ", ctx.Memories.Take(12).Select(m => HtmlText.Truncate(m, 140)))).Append('\n');
         if (ctx.Skills.Count > 0)
             sb.Append("Skills the user taught Aqua (use one only if it clearly fits): ")
               .Append(string.Join(" | ", ctx.Skills.Take(20).Select(s => s.Name + ": " + HtmlText.Truncate(s.Description, 120)))).Append('\n');
+        if (ctx.Refreshed.Count > 0)
+            sb.Append("Aqua's agents just refreshed ").Append(string.Join(" and ", ctx.Refreshed)).Append(" in the user's feeds for this message: ")
+              .Append("asking for that needs no web search (intent feeds), unless the message also asks about something else.\n");
         if (ctx.FeedMatches.Count > 0) sb.Append("The user's own news feeds already have: ").Append(string.Join(" | ", ctx.FeedMatches.Take(3).Select(t => HtmlText.Truncate(t, 90)))).Append('\n');
         if (ctx.Attachments.Count > 0)
             sb.Append("Attached to this message: ").Append(string.Join(", ", ctx.Attachments.Take(6).Select(a => HtmlText.Truncate(a, 80))))
@@ -409,14 +415,16 @@ public static partial class AskPlanner
         var site = SiteOf(question, links);
         var screen = ScreenRx().IsMatch(question) && attachments == 0;
         var aboutAttachments = AboutTheAttachments(question, attachments);
+        // With a folder attached to the chat, questions are about its files unless they plainly look something up.
         var fileish = !aboutAttachments && (FileWordsRx().IsMatch(question) || FindVerbRx().IsMatch(question) && PossessiveRx().IsMatch(question) ||
-                                            o.Computer && PersonalRecordRx().IsMatch(question));
+                                            o.Computer && PersonalRecordRx().IsMatch(question)) ||
+                      o.Folders.Count > 0 && !OnlineRx().IsMatch(question);
         var feeds = FeedsRx().IsMatch(question);
         var siteSearch = links.Count > 0 && Regex.IsMatch(question, @"\b(search|look|find|anything|check|go) (through|on|in|for)\b|\bsearch\b", RegexOptions.IgnoreCase);
         var intent = screen ? "screen"
             : links.Count > 0 ? siteSearch ? "site" : "page"
             : aboutAttachments ? LookUpRx().IsMatch(question) && o.UsesWeb ? "web" : "chat"
-            : fileish && o.Computer && !feeds && site.Length == 0 ? "files"
+            : fileish && (o.Computer || o.Folders.Count > 0) && !feeds && site.Length == 0 ? "files"
             : feeds ? "feeds"
             : ActRx().IsMatch(question) && o.Computer && Regex.IsMatch(question, @"^\s*(?:please\s+)?(open|launch|start|close|quit|type|click|press|play|pause|mute|switch)", RegexOptions.IgnoreCase) ? "act"
             : o.UsesWeb ? "web" : "chat";
@@ -463,6 +471,10 @@ public static partial class AskPlanner
 
     [GeneratedRegex(@"\b(search|look up|google|online|on the web|internet|latest|news|is (?:it|this|that) true|fact.?check)\b", RegexOptions.IgnoreCase)]
     private static partial Regex LookUpRx();
+
+    /// <summary>A question that plainly wants the internet rather than the files in front of it.</summary>
+    [GeneratedRegex(@"\b(look (?:it |this |that )?up|google|online|on the web|internet|news|fact.?check)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex OnlineRx();
 
     [GeneratedRegex(@"[\p{L}\p{N}][\p{L}\p{N}'’.+-]*")]
     private static partial Regex WordRx();

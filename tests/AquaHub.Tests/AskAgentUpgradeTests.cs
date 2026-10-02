@@ -764,6 +764,108 @@ public class AskAgentBehaviourTests
         Assert.Contains(host.Steps, st => st.StartsWith("Didn't open royalroad.com", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task AQuestionAboutYourPortfolioSeesYourHoldingsAndNoOtherDoes()
+    {
+        using var server = new FakeOllama { Script = (_, _) => new[] { FakeOllama.Chunk("Nothing is priced yet.", done: true) } };
+        var s = new HubSettings();
+        s.Markets.BaseCurrency = "EUR";
+        s.Markets.Watchlist = new() { new WatchSymbol { Symbol = "NVDA", Name = "NVIDIA", Shares = 2, CostBasis = 150 } };
+        var (agent, _) = Build(server, s);
+
+        foreach (var q in new[] { "How is my portfolio doing?", "What's the weather like?" })
+            await agent.RunAsync(q, Array.Empty<LlmMessage>(), Array.Empty<AskAttachment>(), new AskOptions(), new NullHost(), null, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Contains("THE USER'S PORTFOLIO", System(server.Chats[0]));
+        Assert.Contains("Not valued yet (no price or exchange rate): NVDA", System(server.Chats[0]));
+        Assert.DoesNotContain("THE USER'S PORTFOLIO", System(server.Chats[1]));
+    }
+
+    [Fact]
+    public async Task AnAttachedFolderIsSearchedEvenWithUseMyPcOff()
+    {
+        // Not under %TEMP%: that's inside AppData, which Ask never reads.
+        using var dir = new TempDir(AppContext.BaseDirectory);
+        var project = Directory.CreateDirectory(Path.Combine(dir.Path, "Project")).FullName;
+        File.WriteAllText(Path.Combine(project, "acme invoice 2026.txt"), "Invoice total: 120 EUR");
+        File.WriteAllText(Path.Combine(project, "passwords.txt"), "hunter2");
+        var elsewhere = Directory.CreateDirectory(Path.Combine(dir.Path, "Elsewhere")).FullName;
+        File.WriteAllText(Path.Combine(elsewhere, "other invoice.txt"), "Invoice total: 999 EUR");
+        using var server = new FakeOllama
+        {
+            Json = _ => """{"intent":"files","web_queries":[],"file_terms":["invoice"],"file_kind":"any","looks":"","format":"direct"}""",
+            Script = (_, _) => new[] { FakeOllama.Chunk("It's acme invoice 2026.txt [1].", done: true) },
+        };
+        var s = new HubSettings();
+        s.Ask.Folders = new() { elsewhere }; // what Use my PC would search: it's off
+        var (agent, _) = Build(server, s);
+        var (count, _, newest) = LocalFiles.Survey(project);
+        var folder = new AskAttachment { Name = "Project", Kind = AttachmentKind.Folder, Path = project, Text = string.Join("\n", newest.Select(h => "- " + h.Name)), Note = $"{count} file" };
+
+        await agent.RunAsync("which invoices are in here?", Array.Empty<LlmMessage>(), new[] { folder },
+            new AskOptions { Folders = new[] { project } }, new NullHost(), new StubPlatform(), new HashSet<string>(), CancellationToken.None);
+
+        Assert.Equal(1, count); // passwords.txt isn't counted
+        var system = System(server.Chats[0]);
+        Assert.Contains("attached a folder to this chat", system);
+        Assert.Contains("acme invoice 2026.txt", system);
+        Assert.DoesNotContain("other invoice.txt", system);
+        Assert.DoesNotContain("passwords.txt", system);
+        var offered = server.Chats[0]["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
+        Assert.Contains("search_files", offered);
+        Assert.Contains("read_file", offered);
+    }
+
+    [Fact]
+    public async Task AnAttachedAppDataFolderIsIgnored()
+    {
+        using var dir = new TempDir();
+        var appData = Directory.CreateDirectory(Path.Combine(dir.Path, "AppData", "Roaming")).FullName;
+        File.WriteAllText(Path.Combine(appData, "tokens.txt"), "secret");
+        using var server = new FakeOllama { Script = (_, _) => new[] { FakeOllama.Chunk("I can't look in there.", done: true) } };
+        var (agent, _) = Build(server);
+        await agent.RunAsync("what's in it?", Array.Empty<LlmMessage>(), Array.Empty<AskAttachment>(),
+            new AskOptions { Folders = new[] { appData } }, new NullHost(), new StubPlatform(), new HashSet<string>(), CancellationToken.None);
+        var offered = server.Chats[0]["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
+        Assert.DoesNotContain("search_files", offered);
+        Assert.DoesNotContain("tokens.txt", System(server.Chats[0]));
+    }
+
+    [Fact]
+    public void WithAFolderAttachedQuestionsAreAboutItsFiles()
+    {
+        var o = new AskOptions { Folders = new[] { @"C:\Work\Project" } };
+        Assert.Equal("files", AskPlanner.Heuristic("which invoices are overdue?", Array.Empty<LlmMessage>(), o).Intent);
+        Assert.Equal("files", AskPlanner.Heuristic("summarise the reports in it", Array.Empty<LlmMessage>(), o).Intent);
+        Assert.NotEqual("files", AskPlanner.Heuristic("look up the exchange rate online", Array.Empty<LlmMessage>(), o with { Web = true }).Intent);
+        Assert.NotEqual("files", AskPlanner.Heuristic("what's the weather tomorrow?", Array.Empty<LlmMessage>(), o).Intent);
+        Assert.NotEqual("files", AskPlanner.Heuristic("which invoices are overdue?", Array.Empty<LlmMessage>(), new AskOptions()).Intent);
+    }
+
+    [Fact]
+    public void AFolderSurveyCountsWhatAskMayReadAndStopsAtTheCap()
+    {
+        using var dir = new TempDir();
+        for (var i = 0; i < 12; i++) File.WriteAllText(Path.Combine(dir.Path, $"note {i}.txt"), "x");
+        File.WriteAllText(Path.Combine(dir.Path, "secrets.env"), "KEY=1");
+        var modules = Directory.CreateDirectory(Path.Combine(dir.Path, "node_modules")).FullName;
+        File.WriteAllText(Path.Combine(modules, "lib.js"), "x");
+        var ssh = Directory.CreateDirectory(Path.Combine(dir.Path, ".ssh")).FullName;
+        File.WriteAllText(Path.Combine(ssh, "id_rsa"), "x");
+        var reports = Directory.CreateDirectory(Path.Combine(dir.Path, "Reports")).FullName;
+        File.WriteAllText(Path.Combine(reports, "q3.pdf"), "x");
+
+        var (count, more, newest) = LocalFiles.Survey(dir.Path);
+        Assert.Equal(13, count);
+        Assert.False(more);
+        Assert.Contains(newest, h => h.Name == "Reports\\");
+        Assert.DoesNotContain(newest, h => h.Name.Contains("secrets", StringComparison.Ordinal));
+
+        var capped = LocalFiles.Survey(dir.Path, cap: 5);
+        Assert.Equal(5, capped.Files);
+        Assert.True(capped.More);
+    }
+
     private sealed class StubPlatform(params AskTool[] tools) : IAskPlatform
     {
         public IEnumerable<AskTool> ComputerTools() => tools;

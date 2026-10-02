@@ -7,9 +7,14 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: nuget
-    directory: /
+    # The UI test project isn't in AquaHub.sln, so it's listed as well: a package it shares (xunit…) has to change
+    # in its lock file in the same pull request, or CI's locked restore fails.
+    directories: ['/', '/tests/AquaHub.E2E']
     schedule:
       interval: weekly
     groups:
       test-packages:
         patterns: ['xunit*', 'Microsoft.NET.Test.Sdk']
+        # One pull request per package covering both folders (by default each folder gets its own, and neither
+        # passes the locked restore alone).
+        group-by: dependency-name

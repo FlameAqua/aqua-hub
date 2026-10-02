@@ -29,8 +29,18 @@ public partial class Onboarding : UserControl
     {
         InitializeComponent();
         _original = SettingsStore.DeepCopy(_s);
-        HotkeyHint.Text = $"{_s.General.HotkeyFlyout} opens the quick panel · {_s.General.HotkeyPalette} asks Aqua anything.";
-        Shortcuts.Text = $"{_s.General.HotkeyFlyout}  —  quick panel above the taskbar\n{_s.General.HotkeyPalette}  —  ask or command from anywhere\nCtrl + K  —  command palette inside the app\nCtrl + 1…9  —  jump between pages";
+        string flyout = _s.General.HotkeyFlyout, palette = _s.General.HotkeyPalette;
+        var hints = new List<string>();
+        if (flyout.Length > 0) hints.Add($"{flyout} opens the quick panel");
+        if (palette.Length > 0) hints.Add($"{palette} asks Aqua anything");
+        HotkeyHint.Text = hints.Count > 0 ? string.Join(" · ", hints) + "." : "";
+        Shortcuts.Text = string.Join("\n", new[]
+        {
+            flyout.Length > 0 ? $"{flyout}  —  quick panel above the taskbar" : "",
+            palette.Length > 0 ? $"{palette}  —  ask or command from anywhere" : "",
+            "Ctrl + K  —  command palette inside the app",
+            "Ctrl + 1…9  —  jump between pages",
+        }.Where(t => t.Length > 0));
         CityChosen.Text = _s.Location.IsSet ? _s.Location.Label : NoPlace;
         Imperial.IsChecked = _s.Location.Units == "imperial";
         PlaceCredit.Text = WeatherSource.PlaceAttribution;
@@ -97,7 +107,7 @@ public partial class Onboarding : UserControl
         {
             AiTitle.Text = "No local model found (that's OK)";
             var suggestion = vram >= 10 ? "qwen3.5:9b" : vram >= 6 ? "qwen3.5:4b" : "gemma3:4b";
-            AiBody.Text = $"Aqua Hub works without AI using fast extractive summaries. For AI briefs, install Ollama from ollama.com and run:  ollama pull {suggestion}";
+            AiBody.Text = $"Aqua works without it, using simpler summaries. For AI briefs, install Ollama from ollama.com and run: ollama pull {suggestion}";
             AiBadge.Background = Fmt.Res("B.WarnSoft");
             AiIcon.Kind = "info";
             AiIcon.Foreground = Fmt.Res("B.Warn");

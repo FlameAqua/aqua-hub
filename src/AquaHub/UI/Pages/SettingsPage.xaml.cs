@@ -37,7 +37,7 @@ public partial class SettingsPage : UserControl, IPage
 
     private static readonly SectionVM[] SectionDefs =
     {
-        new("general", "General", "settings"), new("location", "Location & weather", "location"), new("news", "News", "news"),
+        new("general", "General", "settings"), new("shortcuts", "Shortcuts", "keyboard"), new("location", "Location & weather", "location"), new("news", "News", "news"),
         new("social", "Social", "social"), new("markets", "Markets", "markets"), new("agenda", "Agenda", "upcoming"),
         new("predictions", "Predictions", "target"), new("ai", "AI & models", "cube"), new("ask", "Ask Aqua", "ask"), new("apps", "Apps & scenes", "launchpad"),
         new("notifications", "Notifications", "bell"), new("privacy", "Privacy & data", "shield"), new("debug", "Debug", "bug"), new("about", "About", "info"),
@@ -55,7 +55,7 @@ public partial class SettingsPage : UserControl, IPage
 
         AddHandler(ToggleButton.CheckedEvent, new RoutedEventHandler(OnAnyChange));
         AddHandler(ToggleButton.UncheckedEvent, new RoutedEventHandler(OnAnyChange));
-        AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler((s, e) => { if (e.OriginalSource != CitySearch) OnAnyChange(s, e); }));
+        AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler((s, e) => { if (e.OriginalSource != CitySearch && e.OriginalSource != SearchBox) OnAnyChange(s, e); }));
         AddHandler(Selector.SelectionChangedEvent, new SelectionChangedEventHandler((s, e) => { if (e.OriginalSource is ComboBox) OnAnyChange(s, e); }));
 
         SetupChips();
@@ -66,6 +66,17 @@ public partial class SettingsPage : UserControl, IPage
             new IdleOption(180, "After 3 hours"),
         };
         SearchKeys.Attach(CitySearch, CityResults, () => OnPickCity(CityResults, null!), () => CityPopup.IsOpen = false);
+        SearchKeys.Attach(SearchBox, SearchResults, PickSearchResult, () => SearchPopup.IsOpen = false);
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && Keyboard.FocusedElement is not HotkeyBox)
+            {
+                SearchBox.Focus();
+                SearchBox.SelectAll();
+                e.Handled = true;
+            }
+        };
+        SetupHotkeys();
         ResearchPagesCombo.ItemsSource = new[] { 3, 4, 6, 8, 10, 12 };
         PdfPagesCombo.ItemsSource = new[] { 5, 10, 15, 30, 60 };
         ChatRetentionCombo.ItemsSource = new[]
@@ -117,19 +128,96 @@ public partial class SettingsPage : UserControl, IPage
         Scroller.ScrollToVerticalOffset(Math.Max(0, top - 12));
         var flash = new System.Windows.Media.Animation.DoubleAnimation(0.35, 1, TimeSpan.FromMilliseconds(900)) { EasingFunction = new System.Windows.Media.Animation.QuadraticEase() };
         row.BeginAnimation(OpacityProperty, flash);
-        var input = FindFirst<TextBox>(row);
-        input?.Focus();
+        FindFirst<Control>(row, c => c.Focusable && c.IsEnabled && c.IsVisible)?.Focus();
     }
 
-    private static T? FindFirst<T>(DependencyObject root) where T : DependencyObject
+    private static T? FindFirst<T>(DependencyObject root, Func<T, bool> fits) where T : DependencyObject
     {
         for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
         {
             var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is T hit) return hit;
-            if (FindFirst<T>(child) is { } deeper) return deeper;
+            if (child is T hit && fits(hit)) return hit;
+            if (FindFirst(child, fits) is { } deeper) return deeper;
         }
         return null;
+    }
+
+    // ───────────── Search ─────────────
+    /// <summary>A setting (or a whole section, with no row) the search box can take you to.</summary>
+    public sealed record SettingHit(SectionVM Section, SettingRow? Row, string Title, string Where)
+    {
+        public override string ToString() => $"{Title}, {Where}";
+    }
+
+    private List<(SectionVM Section, Panel Panel, SettingRow? Row)>? _searchable;
+
+    /// <summary>Every section and the rows in it, read from the page (each row's text is read when searching, as some change).</summary>
+    private List<(SectionVM Section, Panel Panel, SettingRow? Row)> Searchable()
+    {
+        if (_searchable is not null) return _searchable;
+        _searchable = new();
+        foreach (var section in SectionDefs)
+        {
+            if (FindName("P_" + section.Id) is not Panel panel) continue;
+            var rows = LogicalDescendants<SettingRow>(panel).ToList();
+            // A section whose first switch has its name (Notifications) is offered once, as that switch.
+            if (!rows.Any(r => r.Title == section.Name)) _searchable.Add((section, panel, null));
+            _searchable.AddRange(rows.Select(row => (section, panel, (SettingRow?)row)));
+        }
+        return _searchable;
+    }
+
+    private static IEnumerable<T> LogicalDescendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            if (child is T hit) yield return hit;
+            foreach (var deeper in LogicalDescendants<T>(child)) yield return deeper;
+        }
+    }
+
+    /// <summary>A row that's hidden right now (it belongs to an option that's off) isn't offered.</summary>
+    private static bool IsHidden(FrameworkElement row, Panel panel)
+    {
+        for (DependencyObject? e = row; e is not null && e != panel; e = LogicalTreeHelper.GetParent(e))
+            if (e is UIElement { Visibility: not Visibility.Visible }) return true;
+        return false;
+    }
+
+    private void OnSearch(object sender, TextChangedEventArgs e)
+    {
+        var query = SearchBox.Text.Trim();
+        if (query.Length == 0)
+        {
+            SearchPopup.IsOpen = false;
+            return;
+        }
+        var hits = SettingsSearch.Find(query,
+                Searchable().Where(x => x.Row is null || !IsHidden(x.Row, x.Panel)),
+                x => x.Row is { } row
+                    ? new SettingsSearch.Entry(x.Section.Name, row.Title, row.Description ?? "", row.Keywords ?? "")
+                    : new SettingsSearch.Entry(x.Section.Name, x.Section.Name))
+            .Select(x => x.Row is { } row
+                ? new SettingHit(x.Section, row, row.Title, string.IsNullOrEmpty(row.Description) ? x.Section.Name : $"{x.Section.Name} · {row.Description}")
+                : new SettingHit(x.Section, null, x.Section.Name, "Section"))
+            .ToList();
+        SearchResults.ItemsSource = hits;
+        SearchResults.SelectedIndex = hits.Count > 0 ? 0 : -1;
+        SearchResults.Visibility = hits.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SearchNothing.Text = $"No setting matches “{query}”.";
+        SearchNothing.Visibility = hits.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+        SearchPopup.IsOpen = true;
+    }
+
+    private void OnPickSearchResult(object sender, MouseButtonEventArgs e) => PickSearchResult();
+
+    private void PickSearchResult()
+    {
+        if (SearchResults.SelectedItem is not SettingHit hit) return;
+        SearchPopup.IsOpen = false;
+        SearchBox.Text = "";
+        Sections.SelectedItem = hit.Section;
+        if (hit.Row is { } row) Dispatcher.BeginInvoke(() => Reveal(row), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     public sealed record IdleOption(int Minutes, string Label);
@@ -150,6 +238,13 @@ public partial class SettingsPage : UserControl, IPage
         if (Hub.Ollama.Running == true) await Hub.Ollama.TurnOffAsync();
         else await Hub.Ollama.TurnOnAsync();
         UpdateOllamaStatus();
+    }
+
+    /// <summary>Saves what the form has waiting now (Aqua is about to quit, e.g. to install an update).</summary>
+    public void SaveNow()
+    {
+        _save.Stop();
+        Save();
     }
 
     public void OnNavigatedFrom()
@@ -226,8 +321,10 @@ public partial class SettingsPage : UserControl, IPage
     {
         SourcesList.ItemsSource = null;
         SourcesList.ItemsSource = _s.News.Sources;
-        WatchList.ItemsSource = null;
-        WatchList.ItemsSource = _s.Markets.Watchlist;
+        BaseCurrencyCombo.ItemsSource = WatchRowVM.CommonCurrencies.Prepend(_s.Markets.BaseCurrency).Distinct().ToList();
+        WatchList.ItemsSource = _s.Markets.Watchlist
+            .Select(w => new WatchRowVM(w, Hub.State.Quotes.GetValueOrDefault(w.Symbol)?.Currency ?? "", _s.Markets.BaseCurrency, () => _save.Request()))
+            .ToList();
         CalendarList.ItemsSource = null;
         CalendarList.ItemsSource = _s.Events.Calendars;
         AppsList.ItemsSource = null;
@@ -292,6 +389,40 @@ public partial class SettingsPage : UserControl, IPage
         Dispatcher.BeginInvoke(ShowHotkeyErrors, System.Windows.Threading.DispatcherPriority.Background);
     }
 
+    // ───────────── Shortcuts ─────────────
+    public sealed record ShortcutRow(string[] Caps, string Does, string Where)
+    {
+        public override string ToString() => $"{string.Join("+", Caps)}: {Does} ({Where})";
+    }
+
+    private void SetupHotkeys()
+    {
+        InAppShortcuts.ItemsSource = Shortcuts.InApp.Select(e => new ShortcutRow(e.Keys.Split('+'), e.Does, e.Where)).ToList();
+        FlyoutHotkey.Check = g => CheckHotkey(g, "the command palette", _s.General.HotkeyPalette);
+        PaletteHotkey.Check = g => CheckHotkey(g, "the quick panel", _s.General.HotkeyFlyout);
+        foreach (var box in new[] { FlyoutHotkey, PaletteHotkey })
+        {
+            box.Problem += ShowHotkeyProblem;
+            // Aqua takes its shortcuts back when the box lets go of the keyboard; say if that didn't work.
+            box.LostKeyboardFocus += (_, _) => Dispatcher.BeginInvoke(ShowHotkeyErrors, System.Windows.Threading.DispatcherPriority.Background);
+        }
+    }
+
+    private static string? CheckHotkey(string gesture, string otherName, string other) =>
+        Shortcuts.Clash(gesture, new Dictionary<string, string> { [otherName] = other })
+        ?? (Hub.Hotkeys?.IsFree(gesture) ?? true ? null : $"Windows or another app already uses {gesture}.");
+
+    private void ShowHotkeyProblem(string? problem)
+    {
+        HotkeyProblem.Text = problem ?? "";
+        HotkeyProblem.Visibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnResetHotkey(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is HotkeyBox box) box.Reset();
+    }
+
     private void ShowHotkeyErrors()
     {
         HotkeyErrors.Text = string.Join("\n", App.HotkeyErrors);
@@ -346,7 +477,7 @@ public partial class SettingsPage : UserControl, IPage
 
     private string CurrentPlace() => _s.Location.IsSet
         ? string.Create(CultureInfo.InvariantCulture, $"Currently {_s.Location.Label} ({_s.Location.Latitude:0.###}, {_s.Location.Longitude:0.###})")
-        : "Not set yet: there's no weather or local news until you choose a place.";
+        : "Not set yet.";
 
     private void OnPickCity(object sender, MouseButtonEventArgs e)
     {
@@ -472,10 +603,10 @@ public partial class SettingsPage : UserControl, IPage
     {
         var bsky = Hub.Core.Secrets.Get(SecretKeys.BlueskyAppPassword) is { Length: > 0 };
         BskyStatus.Text = bsky && _s.Social.BlueskyHandle.Length > 0
-            ? $"Connected as @{_s.Social.BlueskyHandle} · your Following timeline feeds the pulse"
+            ? $"Connected as @{_s.Social.BlueskyHandle}"
             : "Not connected — only public posts are read.";
         var masto = Hub.Core.Secrets.Get(SecretKeys.MastodonToken) is { Length: > 0 };
-        MastodonStatus.Text = masto ? $"Connected to {_s.Social.MastodonInstance} · your home timeline feeds the pulse" : "Not connected — only public hashtags are read.";
+        MastodonStatus.Text = masto ? $"Connected to {_s.Social.MastodonInstance}" : "Not connected — only public hashtags are read.";
     }
 
     private async void OnConnectBluesky(object sender, RoutedEventArgs e)
@@ -510,7 +641,7 @@ public partial class SettingsPage : UserControl, IPage
         Hub.Core.Secrets.Set(SecretKeys.MastodonToken, token);
         MastodonToken.Password = "";
         Save();
-        MastodonStatus.Text = $"Connected as @{account}@{instance} · your home timeline feeds the pulse";
+        MastodonStatus.Text = $"Connected as @{account}@{instance}";
         Hub.Core.Agents.RunNow("social-scout");
     }
 
@@ -928,8 +1059,8 @@ public partial class SettingsPage : UserControl, IPage
         UpdateActionButton.Visibility = stage is UpdateStage.Available or UpdateStage.Ready ? Visibility.Visible : Visibility.Collapsed;
         UpdateActionButton.Content = stage == UpdateStage.Ready ? "Restart now" : $"Download ({UpdatePolicy.Megabytes(u.DownloadSize)})";
         var downloading = stage == UpdateStage.Downloading;
-        UpdateProgressTrack.Visibility = UpdateCancelButton.Visibility = downloading ? Visibility.Visible : Visibility.Collapsed;
-        UpdateProgressFill.Width = downloading ? UpdateProgressTrack.ActualWidth * u.Percent / 100.0 : 0;
+        UpdateProgress.Visibility = UpdateCancelButton.Visibility = downloading ? Visibility.Visible : Visibility.Collapsed;
+        UpdateProgress.Value = downloading ? u.Percent : 0;
         UpdateStatus.Text = u.Status(_s.General.CheckForUpdates);
         var notes = stage is UpdateStage.Available or UpdateStage.Downloading or UpdateStage.Ready && u.Notes.Length > 0;
         UpdateNotes.Text = notes ? $"What's new in {u.NewVersion}:\n{u.Notes}" : "";
@@ -988,13 +1119,13 @@ public partial class SettingsPage : UserControl, IPage
         var choice = WhisperCatalog.Choice(_s.Ask.WhisperModel);
         var wanted = choice.For(_s.Location.Language);
         var runtime = WhisperCatalog.Runtime(RuntimeInformation.OSArchitecture);
-        WhisperProgressTrack.Visibility = WhisperCancelButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        WhisperProgress.Visibility = WhisperCancelButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         WhisperRemoveButton.Visibility = install is not null ? Visibility.Visible : Visibility.Collapsed;
         WhisperModelCombo.IsEnabled = !busy;
         if (busy)
         {
             var p = setup.Current;
-            WhisperProgressFill.Width = p is { Total: > 0 } ? WhisperProgressTrack.ActualWidth * p.Done / p.Total : 0;
+            WhisperProgress.Value = p is { Total: > 0 } ? (double)p.Done / p.Total : 0;
             WhisperStatus.Text = p is null ? "Starting…" : $"{p.Step}… {WhisperCatalog.Megabytes(p.Done)} of {WhisperCatalog.Megabytes(p.Total)}";
             WhisperInstallButton.Content = "Installing…";
             WhisperInstallButton.IsEnabled = false;
@@ -1156,8 +1287,8 @@ public partial class SettingsPage : UserControl, IPage
     /// <summary>After a test with Windows' recognizers, when Whisper isn't in use: where much better results are.</summary>
     private string WhisperHint() =>
         _s.Ask.Voice == "whisper" ? ""
-        : Hub.Core.Whisper.Installed() is not null ? " Whisper is installed — choose it under Voice input for much better results."
-        : " Not what you said? Whisper (above) is far more accurate, and runs on this PC.";
+        : Hub.Core.Whisper.Installed() is not null ? " Whisper is installed: choose it under Voice input."
+        : " Not right? Whisper (above) is far more accurate.";
 
     // ───────────── Data ─────────────
     private void OnOpenData(object sender, RoutedEventArgs e)

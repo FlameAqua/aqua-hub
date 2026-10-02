@@ -5,7 +5,7 @@ public sealed class A04_NewsTests : E2ETestBase
 {
     public A04_NewsTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }
 
-    private static readonly string[] Chips = { "All", "Local", "World", "Europe", "Business", "Tech", "Saved" };
+    private static readonly string[] Chips = { "All", "Local", "World", "Europe", "Business", "Tech", "Gaming & internet", "Saved" };
 
     private AutomationElement News() => GoTo("news");
     private AutomationElement List() => Ui.WaitFind(PageRoot("news"), Ui.Id("List"), "stories list");
@@ -43,7 +43,7 @@ public sealed class A04_NewsTests : E2ETestBase
                 var items = Items();
                 if (chip is "All")
                     Expect(items.Count > 0, "no stories under All");
-                if (chip is "Local" or "World" or "Europe" or "Business" or "Tech")
+                if (chip is "Local" or "World" or "Europe" or "Business" or "Tech" or "Gaming & internet")
                 {
                     var wrong = items.Take(6).Select(CategoryOf).Where(c => c != chip).ToList();
                     Expect(wrong.Count == 0, $"stories from other categories under '{chip}': {string.Join(", ", wrong)}");

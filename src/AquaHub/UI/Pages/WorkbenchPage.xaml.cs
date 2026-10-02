@@ -338,7 +338,7 @@ public partial class WorkbenchPage : UserControl, IPage
         {
             new()
             {
-                Title = "Your feeds", Icon = "layers", Note = "What your agents already collected — always available, never leaves this PC.",
+                Title = "Your feeds", Icon = "layers", Note = "What your agents collected. Always available.",
                 Tools = catalogue.Where(t => t.Access == ToolAccess.Hub).Select(t => Row(t, "")).ToList(),
             },
             new()

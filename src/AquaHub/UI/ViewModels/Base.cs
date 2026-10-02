@@ -140,6 +140,7 @@ public static class Fmt
         "europe" => "Europe",
         "business" => "Business",
         "tech" => "Tech",
+        "gaming" => "Gaming & internet",
         "science" => "Science",
         _ => CultureInfo.CurrentCulture.TextInfo.ToTitleCase(category),
     };

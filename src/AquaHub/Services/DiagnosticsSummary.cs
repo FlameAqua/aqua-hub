@@ -23,7 +23,10 @@ internal static class DiagnosticsSummary
         var s = Hub.S;
         var sb = new StringBuilder();
         sb.Append("Aqua Hub diagnostics — ").Append(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm zzz", Inv)).Append('\n');
-        sb.Append("Version: ").Append(typeof(App).Assembly.GetName().Version?.ToString(3)).Append('\n');
+        var updates = Hub.Updates;
+        sb.Append("Version: ").Append(updates.CurrentVersion).Append(" · ").Append(updates.InstallKind).Append('\n');
+        sb.Append("Updates: ").Append(Core.Updates.UpdatePolicy.Describe(updates.Stage, updates.NewVersion, updates.Error is { } ue ? Mask(ue) : null, updates.LastChecked))
+          .Append(", automatic checks ").Append(s.General.CheckForUpdates ? "on" : "off").Append('\n');
         sb.Append("Windows: ").Append(RuntimeInformation.OSDescription).Append(" (").Append(RuntimeInformation.OSArchitecture).Append(")\n");
         sb.Append(".NET: ").Append(RuntimeInformation.FrameworkDescription).Append('\n');
         var uptime = DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime;

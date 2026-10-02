@@ -94,24 +94,62 @@ public class FeedParserTests
         Assert.Equal("Item one", Assert.Single(feed.Entries).Title);
     }
 
+    /// <summary>
+    /// A DTD with external entities (pointing at a listener here, and at a file with a marker in it), a parameter entity
+    /// that would pull in more, and nested ones that would multiply: none of it is fetched or expanded.
+    /// </summary>
+    private static string HostileDtd(string root, int port, string secretFile) =>
+        $"""<!DOCTYPE {root} [ <!ENTITY web SYSTEM "http://127.0.0.1:{port}/entity"> <!ENTITY file SYSTEM "{new Uri(secretFile).AbsoluteUri}"> """ +
+        $"""<!ENTITY % remote SYSTEM "http://127.0.0.1:{port}/dtd"> %remote; <!ENTITY lol "lol"> <!ENTITY lots "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;"> ]>""";
+
     [Fact]
-    public void RejectsExternalEntitiesAndDtdExpansion()
+    public void AFeedsDtdIsNeverFetchedOrExpanded()
     {
-        // XXE / billion-laughs style payload must not be expanded or resolved.
-        const string evil = """
-            <?xml version="1.0"?>
-            <!DOCTYPE rss [ <!ENTITY xxe SYSTEM "file:///c:/windows/win.ini"> <!ENTITY lol "lol"> ]>
-            <rss version="2.0"><channel><title>t</title><item><title>&xxe;&lol;safe</title><link>https://x.example/</link></item></channel></rss>
-            """;
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        var secret = Path.Combine(AppContext.BaseDirectory, $"xxe-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(secret, "TOP-SECRET-MARKER");
         try
         {
-            var feed = FeedParser.Parse(evil);
-            foreach (var e in feed.Entries) Assert.DoesNotContain("[fonts]", e.Title, StringComparison.OrdinalIgnoreCase);
+            var dtd = HostileDtd("rss", port, secret);
+            // Declared but unused: the DTD is skipped and the feed reads as usual.
+            var quiet = FeedParser.Parse($"""<?xml version="1.0"?>{dtd}<rss version="2.0"><channel><title>t</title><item><title>Safe headline</title><link>https://x.example/</link></item></channel></rss>""");
+            Assert.Equal("Safe headline", Assert.Single(quiet.Entries).Title);
+            // Used: the entities were never defined, so the feed is refused rather than filled in — from text and from bytes.
+            foreach (var use in new[] { "&web;", "&file;", "&lots;" })
+            {
+                var xml = $"""<?xml version="1.0"?>{dtd}<rss version="2.0"><channel><title>t</title><item><title>{use} safe</title></item></channel></rss>""";
+                Assert.Throws<System.Xml.XmlException>(() => FeedParser.Parse(xml));
+                Assert.Throws<System.Xml.XmlException>(() => FeedParser.Parse(System.Text.Encoding.UTF8.GetBytes(xml)));
+            }
+            Assert.False(listener.Pending(), "the feed parser connected to the address in the DTD");
         }
-        catch (System.Xml.XmlException)
+        finally
         {
-            // Throwing is also an acceptable, safe outcome.
+            File.Delete(secret);
+            listener.Stop();
         }
+    }
+
+    [Fact]
+    public void AWordFilesDtdIsRefusedUnread()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var dir = new TempDir();
+        var secret = Path.Combine(dir.Path, "secret.txt");
+        File.WriteAllText(secret, "TOP-SECRET-MARKER");
+        var docx = Path.Combine(dir.Path, "letter.docx");
+        using (var zip = System.IO.Compression.ZipFile.Open(docx, System.IO.Compression.ZipArchiveMode.Create))
+        using (var writer = new StreamWriter(zip.CreateEntry("word/document.xml").Open()))
+            writer.Write($"""<?xml version="1.0"?>{HostileDtd("w:document", port, secret)}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>&file; &web; &lots;</w:t></w:r></w:p></w:body></w:document>""");
+
+        // Office never writes a DTD, so a document with one isn't read at all.
+        Assert.Throws<System.Xml.XmlException>(() => AquaHub.Core.Ai.Assistant.Documents.ReadText(docx));
+        Assert.False(listener.Pending(), "the document reader connected to the address in the DTD");
+        listener.Stop();
     }
 
     [Fact]

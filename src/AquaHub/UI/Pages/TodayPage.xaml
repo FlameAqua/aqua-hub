@@ -77,7 +77,7 @@
                         <StackPanel Visibility="{Binding HasBrief, Converter={StaticResource VisNot}}">
                             <c:Shimmer Height="18" Margin="0,2,80,8"/>
                             <c:Shimmer Height="18" Margin="0,0,160,16"/>
-                            <TextBlock Text="Your agents are reading the news, markets and your feeds — your brief will appear here in a moment."
+                            <TextBlock Text="Your brief appears here in a moment."
                                        Style="{StaticResource T.Body2}"/>
                         </StackPanel>
                     </Grid>
@@ -149,7 +149,7 @@
                             <c:Shimmer Height="120"/>
                         </StackPanel>
                         <StackPanel Visibility="{Binding NeedsPlace, Converter={StaticResource Vis}}">
-                            <TextBlock Text="Choose your town to see its weather here (and local news on the News page)." Style="{StaticResource T.Body2}" TextWrapping="Wrap"/>
+                            <TextBlock Text="Choose your town to see its weather." Style="{StaticResource T.Body2}" TextWrapping="Wrap"/>
                             <Button Style="{StaticResource Btn.Standard}" Command="{Binding SetPlace}" HorizontalAlignment="Left" Margin="0,12,0,0"
                                     AutomationProperties.Name="Choose a place" AutomationProperties.AutomationId="weather-set-place">
                                 <StackPanel Orientation="Horizontal"><c:Icon Kind="location" Width="14" Height="14"/><TextBlock Text="Choose a place" Margin="8,0,0,0"/></StackPanel>

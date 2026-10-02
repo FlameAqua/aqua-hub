@@ -11,7 +11,7 @@
         <Grid Margin="0,0,12,16">
             <StackPanel>
                 <TextBlock Text="Social pulse" Style="{StaticResource T.Title}"/>
-                <TextBlock x:Name="Subtitle" Style="{StaticResource T.Body2}" Margin="0,4,0,0" Text="What people around you are talking about — so you don't have to scroll."/>
+                <TextBlock x:Name="Subtitle" Style="{StaticResource T.Body2}" Margin="0,4,0,0" Text="What people around you are talking about."/>
             </StackPanel>
             <Button Style="{StaticResource Btn.Standard}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnConfigure">
                 <StackPanel Orientation="Horizontal"><c:Icon Kind="settings" Width="14" Height="14"/><TextBlock Text="Sources" Margin="8,0,0,0"/></StackPanel>

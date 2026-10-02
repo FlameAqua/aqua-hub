@@ -109,8 +109,7 @@ public partial class AgentsPage : UserControl, IPage
         var statuses = Hub.Core.Agents.Statuses;
         var ai = statuses.Count(s => s.UsesAi);
         var running = statuses.Count(s => s.State == Core.Models.AgentState.Running);
-        Subtitle.Text = $"{statuses.Count} agents keep your hub fresh — {ai} of them write with the local model. They run on schedules, trigger each other " +
-                        $"(scout → curator → editor), back off politely when a source fails and pause while you game. {(running > 0 ? $"{running} working right now." : "")}";
+        Subtitle.Text = $"{statuses.Count} agents, {ai} of them using the local model." + (running > 0 ? $" {running} working now." : "");
         PauseText.Text = Hub.Core.Agents.Paused ? "Resume all" : "Pause all";
         PauseIcon.Kind = Hub.Core.Agents.Paused ? "play" : "pause";
 

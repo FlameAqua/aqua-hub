@@ -6,6 +6,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using AquaHub.Core.Agents;
 using AquaHub.Core.Models;
+using AquaHub.Core.Updates;
 using AquaHub.Core.Util;
 using AquaHub.Platform;
 using AquaHub.Services;
@@ -49,6 +50,7 @@ public partial class MainWindow : Window
             Hub.Theme.Changed += ApplyBackdrop;
             Hub.Core.Settings.Changed += OnSettingsChanged;
             Hub.Ollama.Changed += OnOllamaChanged;
+            Hub.Updates.Changed += OnUpdatesChanged;
             _clock.Start();
             UpdateStatus();
             UpdateNavMode();
@@ -62,6 +64,7 @@ public partial class MainWindow : Window
             Hub.Theme.Changed -= ApplyBackdrop;
             Hub.Core.Settings.Changed -= OnSettingsChanged;
             Hub.Ollama.Changed -= OnOllamaChanged;
+            Hub.Updates.Changed -= OnUpdatesChanged;
             _clock.Stop();
             (PageHost.Content as IPage)?.OnNavigatedFrom();
             PageHost.Content = null;
@@ -224,6 +227,65 @@ public partial class MainWindow : Window
 
         var errors = Hub.Core.Agents.Statuses.Any(s => s.State == AgentState.Error);
         foreach (var rb in NavRadios()) if ((string)rb.Tag == "agents") UiProps.SetBadge(rb, errors ? "dot" : null);
+        UpdateUpdateBar();
+    }
+
+    // ───────────────────────── Updates ─────────────────────────
+
+    /// <summary>The banner "Not now" put away (<see cref="UpdatePolicy.BannerKey"/>): the next version or step brings it back.</summary>
+    private string? _updateDismissed;
+
+    private void OnUpdatesChanged() => Hub.OnUi(UpdateUpdateBar);
+
+    /// <summary>A new version can't be missed: a dot on Settings and a banner across the top, from on offer to installed.</summary>
+    private void UpdateUpdateBar()
+    {
+        var u = Hub.Updates;
+        var key = UpdatePolicy.BannerKey(u.Stage, u.NewVersion);
+        UiProps.SetBadge(SettingsNav, key is null ? null : "new");
+        System.Windows.Automation.AutomationProperties.SetHelpText(SettingsNav,
+            key is null ? "" : $"Aqua Hub {u.NewVersion} is {(u.Stage == UpdateStage.Ready ? "ready to install" : "available")}");
+        var banner = key is null || key == _updateDismissed ? null : UpdatePolicy.BannerFor(u.Stage, u.NewVersion, u.DownloadSize, u.Percent, u.Error);
+        if (banner is null)
+        {
+            UpdateBar.Visibility = Visibility.Collapsed;
+            return;
+        }
+        UpdateBar.CornerRadius = OfflineBar.Visibility == Visibility.Visible ? new CornerRadius(0) : new CornerRadius(10, 0, 0, 0);
+        UpdateBarText.Text = banner.Text;
+        UpdateBarProgress.Value = u.Percent;
+        UpdateBarProgress.Visibility = banner.Progress ? Visibility.Visible : Visibility.Collapsed;
+        UpdateBarAction.Content = banner.Action;
+        UpdateBarAction.Style = (Style)FindResource(u.Stage == UpdateStage.Downloading ? "Btn.Standard" : "Btn.Accent");
+        UpdateBarNotes.Content = u.Notes.Length > 0 ? "What's new" : "Details";
+        UpdateBarNotes.Visibility = banner.Notes ? Visibility.Visible : Visibility.Collapsed;
+        UpdateBar.Visibility = Visibility.Visible;
+    }
+
+    private async void OnUpdateBarAction(object sender, RoutedEventArgs e)
+    {
+        switch (Hub.Updates.Stage)
+        {
+            case UpdateStage.Ready:
+                // Aqua quits for the installer: what Settings has waiting is saved first.
+                (PageHost.Content as SettingsPage)?.SaveNow();
+                Hub.Updates.RestartToInstall();
+                break;
+            case UpdateStage.Downloading:
+                Hub.Updates.CancelDownload();
+                break;
+            case UpdateStage.Available:
+                await Hub.Updates.DownloadAsync();
+                break;
+        }
+    }
+
+    private void OnUpdateBarNotes(object sender, RoutedEventArgs e) => Navigate("settings", "about:updates");
+
+    private void OnUpdateBarDismiss(object sender, RoutedEventArgs e)
+    {
+        _updateDismissed = UpdatePolicy.BannerKey(Hub.Updates.Stage, Hub.Updates.NewVersion);
+        UpdateUpdateBar();
     }
 
     private static readonly (string Area, string Label)[] FreshAreas =
@@ -245,8 +307,8 @@ public partial class MainWindow : Window
             SyncText.Text = "Offline";
             SyncText.Foreground = Fmt.Res("B.Warn");
             OfflineText.Text = news is { } n
-                ? $"You're offline — showing what your agents collected up to {n.ToLocalTime():HH:mm}. Aqua catches up by itself when you're back."
-                : "You're offline — Aqua will collect news, markets and posts as soon as you're back.";
+                ? $"You're offline. Showing what was collected up to {n.ToLocalTime():HH:mm}."
+                : "You're offline. Aqua catches up when you're back.";
             OfflineBar.Visibility = Visibility.Visible;
             return;
         }
@@ -494,6 +556,8 @@ public partial class MainWindow : Window
 
     private void OnKey(object sender, KeyEventArgs e)
     {
+        // A shortcut box is recording: every key is for it (Esc included).
+        if (Keyboard.FocusedElement is Controls.HotkeyBox) return;
         var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
         if (ctrl && e.Key == Key.K) { Hub.Windows.ShowPalette(this); e.Handled = true; return; }
         if (e.Key == Key.F5) { OnRefreshClick(this, new RoutedEventArgs()); e.Handled = true; return; }

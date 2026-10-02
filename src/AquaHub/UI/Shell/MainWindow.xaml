@@ -130,20 +130,49 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <!-- Offline notice: the hub keeps working from what it already collected -->
-                    <c:GroupBorder x:Name="OfflineBar" Background="{DynamicResource B.WarnSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
-                            AutomationProperties.AutomationId="offline-bar" AutomationProperties.Name="Offline">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <c:Icon Kind="wifi-off" Width="16" Height="16" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="OfflineText" Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13"/>
-                            <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Padding="12,4" FontSize="12.5" Click="OnRefreshClick" Content="Try again"/>
-                        </Grid>
-                    </c:GroupBorder>
+                    <StackPanel>
+                        <!-- Offline notice: the hub keeps working from what it already collected -->
+                        <c:GroupBorder x:Name="OfflineBar" Background="{DynamicResource B.WarnSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
+                                AutomationProperties.AutomationId="offline-bar" AutomationProperties.Name="Offline">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <c:Icon Kind="wifi-off" Width="16" Height="16" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="OfflineText" Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13"/>
+                                <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Padding="12,4" FontSize="12.5" Click="OnRefreshClick" Content="Try again"/>
+                            </Grid>
+                        </c:GroupBorder>
+                        <!-- A new version: on offer, downloading, ready to install ("Not now" puts it away until the next step) -->
+                        <c:GroupBorder x:Name="UpdateBar" Background="{DynamicResource B.AccentSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
+                                AutomationProperties.AutomationId="update-bar" AutomationProperties.Name="Update">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <c:Icon Kind="download" Width="16" Height="16" Foreground="{DynamicResource B.AccentText}" VerticalAlignment="Center"/>
+                                <StackPanel Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center">
+                                    <TextBlock x:Name="UpdateBarText" TextWrapping="Wrap" FontSize="13" AutomationProperties.AutomationId="update-bar-text"/>
+                                    <ProgressBar x:Name="UpdateBarProgress" Height="4" Maximum="100" Margin="0,6,0,1" Visibility="Collapsed"
+                                                 AutomationProperties.Name="Update download" AutomationProperties.AutomationId="update-bar-progress"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button x:Name="UpdateBarNotes" Style="{StaticResource Btn.Link}" Content="What's new" Click="OnUpdateBarNotes" Margin="0,0,10,0" VerticalAlignment="Center"
+                                            AutomationProperties.AutomationId="update-bar-notes"/>
+                                    <Button x:Name="UpdateBarAction" Style="{StaticResource Btn.Accent}" Padding="12,4" FontSize="12.5" Click="OnUpdateBarAction"
+                                            AutomationProperties.AutomationId="update-bar-action"/>
+                                    <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Margin="6,0,0,0" Click="OnUpdateBarDismiss" ToolTip="Not now"
+                                            AutomationProperties.Name="Not now" AutomationProperties.AutomationId="update-bar-dismiss">
+                                        <c:Icon Kind="close" Width="12" Height="12"/>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </c:GroupBorder>
+                    </StackPanel>
                     <ContentControl x:Name="PageHost" Grid.Row="1" Focusable="False">
                         <ContentControl.RenderTransform>
                             <TranslateTransform x:Name="PageShift"/>

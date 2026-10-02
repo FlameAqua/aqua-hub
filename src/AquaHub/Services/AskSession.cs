@@ -20,6 +20,8 @@ public sealed class ChatThread
     public ChatSummary? Summary { get; set; }
     public ObservableCollection<ChatMessageVM> Messages { get; } = new();
     public HashSet<string> AllowedForChat { get; } = new(StringComparer.Ordinal);
+    /// <summary>Folders attached to this chat: Ask may search and read them while the chat is open (not kept with it).</summary>
+    public List<string> Folders { get; } = new();
     public CancellationTokenSource? Cts { get; set; }
     public bool IsBusy { get; set; }
     /// <summary>Tokens the last answer used and the window it had (the context meter).</summary>
@@ -296,6 +298,10 @@ public sealed class AskSession
         if (opts.Model is null) opts = opts with { Model = Model };
         var attachments = Pending.Where(p => p.Attachment is not null).ToList();
         Pending.Clear();
+        foreach (var a in attachments)
+            if (a.Attachment is { Kind: AttachmentKind.Folder, Path: { } folder } && !thread.Folders.Contains(folder, StringComparer.OrdinalIgnoreCase))
+                thread.Folders.Add(folder);
+        if (thread.Folders.Count > 0) opts = opts with { Folders = thread.Folders.ToList() };
         var history = HistoryOf(thread);
         var user = new ChatMessageVM
         {
@@ -612,6 +618,51 @@ public sealed class AskSession
             }
             finally { chip.IsLoading = false; }
         }
+    }
+
+    /// <summary>
+    /// Lets this chat search and read a folder, with the rules Use my PC's folders follow (never app data, system or key
+    /// folders, nor password or key files inside), until the chat is closed.
+    /// </summary>
+    public async Task AttachFolderAsync(string path)
+    {
+        if (Pending.Count >= 8) return;
+        string full;
+        try { full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            AddFailedChip(path, "That isn't a folder");
+            return;
+        }
+        if (full.EndsWith(':')) full += Path.DirectorySeparatorChar;
+        var name = Path.GetFileName(full) is { Length: > 0 } n ? n : full;
+        if (!Directory.Exists(full))
+        {
+            AddFailedChip(name, "That folder isn't there");
+            return;
+        }
+        if (LocalFiles.IsSensitiveFolder(full))
+        {
+            AddFailedChip(name, "Aqua doesn't read app data, system or key folders");
+            return;
+        }
+        var chip = new AttachmentChipVM { Name = name, Icon = "folder", IsLoading = true, Note = "Looking inside…" };
+        chip.RemoveCommand = new RelayCommand(() => Pending.Remove(chip));
+        Pending.Add(chip);
+        try
+        {
+            var (count, more, newest) = await Task.Run(() => LocalFiles.Survey(full));
+            var listing = string.Join("\n", newest.Select(h => $"- {h.Name} ({LocalFiles.Size(h.Size)}, {h.Modified.ToString("d MMM yyyy", CultureInfo.CurrentCulture)})"));
+            var note = (more ? $"{count.ToString("N0", CultureInfo.CurrentCulture)}+ files" : Plural.Of(count, "file")) + " · for this chat";
+            chip.Attachment = new AskAttachment { Name = name, Kind = AttachmentKind.Folder, Path = full, Text = listing, Note = note };
+            chip.Note = note;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("ask", $"Couldn't look inside {full}", ex);
+            chip.Note = "Couldn't look inside this folder";
+        }
+        finally { chip.IsLoading = false; }
     }
 
     private static System.Windows.Media.ImageSource? SafeThumb(string path)

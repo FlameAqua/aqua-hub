@@ -6,15 +6,21 @@ using System.Windows.Input;
 namespace AquaHub.UI.Controls;
 
 /// <summary>
-/// Records a global shortcut: click it and press the keys (e.g. Ctrl+Alt+H) instead of typing their names.
-/// Backspace/Delete restores <see cref="DefaultGesture"/>; Esc cancels; Tab still moves focus.
+/// Records a shortcut for any app: click it and press the keys (e.g. Ctrl+Alt+H) instead of typing their names.
+/// Esc puts back what was there, Backspace or Delete leaves it empty (no shortcut), Tab still moves focus. Keys that
+/// <see cref="Check"/> refuses aren't taken; <see cref="Problem"/> says why.
 /// </summary>
 public sealed class HotkeyBox : TextBox
 {
     public static readonly DependencyProperty DefaultGestureProperty =
         DependencyProperty.Register(nameof(DefaultGesture), typeof(string), typeof(HotkeyBox), new PropertyMetadata(""));
 
+    /// <summary>True while a box has the keyboard, so Aqua can let go of its own shortcuts and they can be recorded too.</summary>
+    public static event Action<bool>? Listening;
+
     private string _before = "";
+    /// <summary>Keys pressed while listening, to notice a key let go whose press went to another app.</summary>
+    private readonly HashSet<Key> _down = new();
 
     public HotkeyBox()
     {
@@ -23,47 +29,100 @@ public sealed class HotkeyBox : TextBox
         IsReadOnlyCaretVisible = false;
         Cursor = Cursors.Hand;
         UiProps.SetPlaceholder(this, "Press a shortcut…");
-        ToolTip = "Click, then press the keys you want (Backspace restores the default)";
-        GotKeyboardFocus += (_, _) => _before = Text;
+        ToolTip = "Click, then press the keys. Esc cancels, Backspace clears.";
     }
 
     public string DefaultGesture { get => (string)GetValue(DefaultGestureProperty); set => SetValue(DefaultGestureProperty, value); }
+
+    /// <summary>Why the keys can't be used, or null when they can.</summary>
+    public Func<string, string?>? Check { get; set; }
+
+    /// <summary>Why the last keys weren't taken, or null once a shortcut is.</summary>
+    public event Action<string?>? Problem;
+
+    protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnGotKeyboardFocus(e);
+        _before = Text;
+        _down.Clear();
+        Listening?.Invoke(true);
+    }
+
+    protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnLostKeyboardFocus(e);
+        Listening?.Invoke(false);
+    }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         if (key == Key.Tab) return;
         e.Handled = true;
+        _down.Add(key);
         switch (key)
         {
             case Key.Escape:
+                Problem?.Invoke(null);
                 Commit(_before);
                 MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
                 return;
             case Key.Back or Key.Delete:
-                Commit(DefaultGesture);
-                return;
-            case Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin:
+                Problem?.Invoke(null);
+                Commit("");
                 return;
         }
-        var name = KeyName(key);
-        var mods = Keyboard.Modifiers;
-        var win = Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin);
-        // Global shortcuts need Ctrl, Alt or Win so they don't swallow ordinary typing.
-        if (name is null || ((mods & (ModifierKeys.Control | ModifierKeys.Alt)) == 0 && !win)) return;
-        var parts = new List<string>();
-        if ((mods & ModifierKeys.Control) != 0) parts.Add("Ctrl");
-        if ((mods & ModifierKeys.Alt) != 0) parts.Add("Alt");
-        if ((mods & ModifierKeys.Shift) != 0) parts.Add("Shift");
-        if (win) parts.Add("Win");
-        parts.Add(name);
-        Commit(string.Join("+", parts));
+        if (Gesture(key) is not { } gesture) return;
+        Take(gesture);
+    }
+
+    protected override void OnPreviewKeyUp(KeyEventArgs e)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        // Windows hands a shortcut's press to the app that registered it, but the release still arrives here.
+        if (!_down.Remove(key) && IsKeyboardFocused && Gesture(key) is { } gesture)
+            Problem?.Invoke($"Windows or another app already uses {gesture}.");
+        base.OnPreviewKeyUp(e);
+    }
+
+    /// <summary>Puts back <see cref="DefaultGesture"/>, if nothing else has it.</summary>
+    public void Reset()
+    {
+        if (Text != DefaultGesture) Take(DefaultGesture);
+    }
+
+    private void Take(string gesture)
+    {
+        if (Check?.Invoke(gesture) is { } problem)
+        {
+            Problem?.Invoke(problem);
+            return;
+        }
+        Problem?.Invoke(null);
+        Commit(gesture);
     }
 
     private void Commit(string gesture)
     {
         Text = gesture;
         GetBindingExpression(TextProperty)?.UpdateSource();
+    }
+
+    /// <summary>"Ctrl+Alt+Shift+Win+K" for a key pressed with what's held now; null for a lone key or a modifier.</summary>
+    private static string? Gesture(Key key)
+    {
+        var name = KeyName(key);
+        var mods = Keyboard.Modifiers;
+        var win = Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin);
+        // Shortcuts for any app need Ctrl, Alt or Win so they don't swallow ordinary typing.
+        if (name is null || ((mods & (ModifierKeys.Control | ModifierKeys.Alt)) == 0 && !win)) return null;
+        var parts = new List<string>();
+        if ((mods & ModifierKeys.Control) != 0) parts.Add("Ctrl");
+        if ((mods & ModifierKeys.Alt) != 0) parts.Add("Alt");
+        if ((mods & ModifierKeys.Shift) != 0) parts.Add("Shift");
+        if (win) parts.Add("Win");
+        parts.Add(name);
+        return string.Join("+", parts);
     }
 
     private static string? KeyName(Key k) => k switch

@@ -46,6 +46,12 @@ public abstract class AskTool
     /// <summary>This call opens a web link, so the rules for reaching the internet apply to it too.</summary>
     public virtual bool OpensLink(JsonElement args) => false;
 
+    /// <summary>This call waits on work that needs the model itself (an AI agent), so the answer lets go of it meanwhile.</summary>
+    public virtual bool WaitsForModel(JsonElement args) => false;
+
+    /// <summary>This call repeats one already made for this answer: it runs without a second line in the activity list.</summary>
+    public virtual bool AlreadyDone(JsonElement args, AskRun run) => false;
+
     /// <summary>What the step list and approval card show, e.g. "Search the web for “x”".</summary>
     public abstract string Describe(JsonElement args);
     public abstract Task<ToolResult> RunAsync(JsonElement args, AskRun run, CancellationToken ct);
@@ -88,6 +94,8 @@ public sealed class AskRun
     public WebSearch? Web { get; init; }
     public WebReader? Reader { get; init; }
     public LocalFiles? Files { get; init; }
+    /// <summary>Runs one of Aqua's agents and waits for it (null: none can be run from here).</summary>
+    public AgentRunner? RunAgent { get; init; }
     public bool Vision { get; init; }
     public string Question { get; init; } = "";
     /// <summary>Set once the answer has looked at files, the screen, the clipboard or attachments.</summary>

@@ -12,8 +12,15 @@ namespace AquaHub.Tests;
 
 public sealed class TempDir : IDisposable
 {
-    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "aquahub-tests-" + Guid.NewGuid().ToString("N")[..8]);
-    public TempDir() => Directory.CreateDirectory(Path);
+    public string Path { get; }
+    public TempDir() : this(System.IO.Path.GetTempPath()) { }
+
+    /// <param name="parent">Where to make it (the default is %TEMP%).</param>
+    public TempDir(string parent)
+    {
+        Path = System.IO.Path.Combine(parent, "aquahub-tests-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(Path);
+    }
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
