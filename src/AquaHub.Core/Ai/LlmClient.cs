@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using AquaHub.Core.Ai.Local;
 using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
 
@@ -42,7 +43,28 @@ public sealed record LlmToolCallsDelta(IReadOnlyList<LlmToolCall> Calls) : LlmDe
 /// The last piece of a streamed turn: tokens in the prompt and the reply, the context window used, and why the model
 /// stopped ("stop", or "length" when it ran out of room).
 /// </summary>
-public sealed record LlmUsageDelta(int PromptTokens, int OutputTokens, int ContextTokens, string DoneReason) : LlmDelta;
+public sealed record LlmUsageDelta(int PromptTokens, int OutputTokens, int ContextTokens, string DoneReason) : LlmDelta
+{
+    /// <summary>Where the call's time went, when the server says (Aqua's own runtime); null otherwise.</summary>
+    public LlmTimings? Timings { get; init; }
+}
+
+/// <summary>
+/// Where a model call's time went, from llama.cpp's timings: starting or waking the model, reading the prompt (and how much
+/// of it was reused from the cache of the call before), and writing.
+/// </summary>
+public sealed record LlmTimings(TimeSpan Load, int PromptTokens, int CachedTokens, TimeSpan Prompt, int OutputTokens, TimeSpan Output)
+{
+    public double OutputPerSecond => Output.TotalSeconds > 0 ? OutputTokens / Output.TotalSeconds : 0;
+
+    /// <summary>The timings in a llama-server reply ("timings": {cache_n, prompt_n, prompt_ms, predicted_n, predicted_ms}), or null.</summary>
+    public static LlmTimings? From(JsonElement root, TimeSpan load)
+    {
+        if (!root.TryProp("timings", out var t) || t.ValueKind != JsonValueKind.Object) return null;
+        return new LlmTimings(load, (int)(t.Lng("prompt_n") ?? 0), (int)(t.Lng("cache_n") ?? 0), TimeSpan.FromMilliseconds(t.Dbl("prompt_ms") ?? 0),
+            (int)(t.Lng("predicted_n") ?? 0), TimeSpan.FromMilliseconds(t.Dbl("predicted_ms") ?? 0));
+    }
+}
 
 public sealed record LlmRequest
 {
@@ -76,6 +98,8 @@ public sealed record LlmRequest
 public sealed record LlmResult(string Text, string Model, int PromptTokens, int OutputTokens, TimeSpan Duration)
 {
     public double TokensPerSecond => Duration.TotalSeconds > 0 ? OutputTokens / Duration.TotalSeconds : 0;
+    /// <summary>Where the time went, when the server says (Aqua's own runtime); null otherwise.</summary>
+    public LlmTimings? Timings { get; init; }
 }
 
 public sealed record LlmModelInfo(string Name, long SizeBytes, string Family, string Parameters, string Quantization);
@@ -110,7 +134,8 @@ public sealed class LlmUnavailableException(string message) : Exception(message)
 
 /// <summary>
 /// Client for local model servers. Supports Ollama's native API (structured outputs via JSON schema,
-/// thinking control, keep-alive) and any OpenAI-compatible server (LM Studio, llama.cpp, vLLM).
+/// thinking control, keep-alive), Aqua's own runtime (<see cref="Llama"/>: llama.cpp servers it starts per model, with a
+/// key each) and any OpenAI-compatible server (LM Studio, a llama.cpp you run, vLLM).
 /// Non-loopback endpoints are refused unless explicitly allowed, so personal data stays on this PC.
 /// </summary>
 public sealed partial class LlmClient : IDisposable
@@ -118,7 +143,10 @@ public sealed partial class LlmClient : IDisposable
     private readonly Func<AiSettings> _settings;
     private readonly ISecretStore _secrets;
     private readonly HttpClient _http;
+    /// <summary>The graphics card: one request at a time (the only lane for Ollama and other servers).</summary>
     private readonly PriorityGate _gate = new();
+    /// <summary>Aqua's runtime's processor models (background and search), which run beside the card's.</summary>
+    private readonly PriorityGate _cpuGate = new();
     private readonly Dictionary<string, HashSet<string>> _capabilities = new(StringComparer.OrdinalIgnoreCase);
     private LlmHealth _health = new() { CheckedAt = DateTimeOffset.MinValue };
 
@@ -187,7 +215,15 @@ public sealed partial class LlmClient : IDisposable
         return uri;
     }
 
-    private bool IsOllama => !_settings().Provider.Equals("openai", StringComparison.OrdinalIgnoreCase);
+    private bool IsOllama => _settings().Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Aqua's own runtime answers (Provider "llamacpp", with the runtime set by the app).</summary>
+    private bool IsLlama => Llama is not null && _settings().Provider.Equals("llamacpp", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Aqua's own model runtime (llama.cpp servers per model), set by the app; used when Settings' provider is "llamacpp".
+    /// </summary>
+    public LlamaRuntime? Llama { get; set; }
 
     // ───────────────────────────── Health & models ─────────────────────────────
 
@@ -203,6 +239,8 @@ public sealed partial class LlmClient : IDisposable
         {
             try
             {
+                if (s.Provider.Equals("llamacpp", StringComparison.OrdinalIgnoreCase) && Llama is null)
+                    throw new LlmUnavailableException("Aqua's model runtime isn't running.");
                 var models = await ListModelsAsync(ct).ConfigureAwait(false);
                 string? version = null;
                 if (IsOllama)
@@ -210,19 +248,24 @@ public sealed partial class LlmClient : IDisposable
                     using var vdoc = await GetJsonAsync("api/version", TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
                     version = vdoc?.RootElement.Str("version");
                 }
-                var active = Pick(s.Model, s.PreferredModels, models);
-                var deep = string.IsNullOrWhiteSpace(s.DeepModel) ? active : Pick(s.DeepModel, s.PreferredModels, models) ?? active;
+                else if (IsLlama) version = "llama.cpp " + Llama!.Build;
+                var active = IsLlama ? PickLocal(s.Model, s.PreferredModels) : Pick(s.Model, s.PreferredModels, models);
+                var deep = string.IsNullOrWhiteSpace(s.DeepModel) ? active
+                    : (IsLlama ? PickLocal(s.DeepModel, s.PreferredModels) : Pick(s.DeepModel, s.PreferredModels, models)) ?? active;
+                var ready = !IsLlama || Llama!.Ready;
                 health = new LlmHealth
                 {
                     Enabled = true,
-                    Available = models.Count > 0 && active is not null,
+                    Available = ready && models.Count > 0 && active is not null,
                     Provider = s.Provider,
-                    Endpoint = s.Endpoint,
+                    Endpoint = IsLlama ? "Aqua's runtime" : s.Endpoint,
                     ActiveModel = active,
                     DeepModel = deep,
                     Models = models,
                     Version = version,
-                    Error = models.Count == 0 ? "No models installed — run: ollama pull qwen3.5:9b" : active is null ? $"Model '{s.Model}' is not installed" : null,
+                    Error = !ready ? "Aqua's model runtime isn't installed — install it in Settings › AI & models."
+                        : models.Count == 0 ? (IsLlama ? "No models yet — add one from the model library, or pull one with Ollama." : "No models installed — run: ollama pull qwen3.5:9b")
+                        : active is null ? $"Model '{s.Model}' is not installed" : null,
                     CheckedAt = DateTimeOffset.Now,
                 };
             }
@@ -265,9 +308,36 @@ public sealed partial class LlmClient : IDisposable
                         .OrderBy(m => m.SizeBytes).FirstOrDefault()?.Name ?? installed[0].Name;
     }
 
+    /// <summary>
+    /// Aqua's runtime's model for a setting: the one it names (a library id or an Ollama name), or for "auto" the largest
+    /// chat model that fits on the graphics card with a 16K context (Settings' preferred list is Ollama's), else the
+    /// smallest one there is.
+    /// </summary>
+    private string? PickLocal(string configured, IEnumerable<string> preferred)
+    {
+        var library = Llama!.Library;
+        var chat = library.Models.Where(m => !m.Embedding).ToList();
+        if (chat.Count == 0) return null;
+        if (!configured.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            return library.Find(configured) is { Embedding: false } named ? named.Id : null;
+        var gpu = Llama.Gpu;
+        return chat.Where(m => HardwareFit.Estimate(m, 16384, _settings().Llama.CacheType, gpu).Verdict is FitVerdict.Fits or FitVerdict.Tight)
+                   .OrderByDescending(m => m.Info.Parameters).FirstOrDefault()?.Id
+               ?? chat.OrderBy(m => m.Size).First().Id;
+    }
+
     public async Task<List<LlmModelInfo>> ListModelsAsync(CancellationToken ct = default)
     {
         var list = new List<LlmModelInfo>();
+        if (IsLlama)
+        {
+            // The library's chat models; their headers are read off the caller's thread the first time.
+            var library = Llama!.Library;
+            var models = library.Models.Count > 0 ? library.Models : await Task.Run(library.Refresh, ct).ConfigureAwait(false);
+            foreach (var m in models.Where(m => !m.Embedding))
+                list.Add(new LlmModelInfo(m.Id, m.Bytes, m.Info.Architecture, m.Info.SizeLabel ?? (m.Info.Parameters > 0 ? $"{m.Info.Parameters / 1e9:0.#}B" : ""), m.Quant ?? ""));
+            return list;
+        }
         if (IsOllama)
         {
             using var doc = await GetJsonAsync("api/tags", TimeSpan.FromSeconds(4), ct).ConfigureAwait(false);
@@ -291,10 +361,16 @@ public sealed partial class LlmClient : IDisposable
         return list.OrderBy(m => m.Name).ToList();
     }
 
-    /// <summary>Loaded models and their VRAM usage (Ollama only).</summary>
+    /// <summary>Loaded models and their VRAM usage (Ollama; Aqua's runtime lists its running servers, without a VRAM figure).</summary>
     public async Task<List<(string Name, long VramBytes, DateTimeOffset? ExpiresAt)>> RunningModelsAsync(CancellationToken ct = default)
     {
         var list = new List<(string, long, DateTimeOffset?)>();
+        if (IsLlama)
+        {
+            foreach (var i in Llama!.Instances.Where(i => i.State is LlamaInstanceState.Ready or LlamaInstanceState.Starting))
+                list.Add((i.ModelId, 0, null));
+            return list;
+        }
         if (!IsOllama) return list;
         try
         {
@@ -310,6 +386,11 @@ public sealed partial class LlmClient : IDisposable
     /// <summary>Frees VRAM immediately (useful before gaming).</summary>
     public async Task UnloadAsync(CancellationToken ct = default)
     {
+        if (IsLlama)
+        {
+            await Llama!.UnloadGpuAsync("to free the graphics card", ct).ConfigureAwait(false);
+            return;
+        }
         if (!IsOllama) return;
         foreach (var (name, _, _) in await RunningModelsAsync(ct).ConfigureAwait(false))
         {
@@ -332,6 +413,7 @@ public sealed partial class LlmClient : IDisposable
     /// </summary>
     public async Task<bool?> CanThinkAsync(string model, CancellationToken ct = default)
     {
+        if (IsLlama) return Llama!.Library.Find(model)?.Thinking;
         if (!IsOllama || !_health.Available || !_health.Models.Any(m => m.Name.Equals(model, StringComparison.OrdinalIgnoreCase))) return null;
         var caps = await CapabilitiesAsync(model, ct).ConfigureAwait(false);
         return caps.Count == 0 ? null : caps.Contains("thinking");
@@ -384,6 +466,13 @@ public sealed partial class LlmClient : IDisposable
     {
         if (!_settings().Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(wake: true, ct).ConfigureAwait(false);
+        if (IsLlama)
+        {
+            // What the model's own template and files say: tools and thinking from its chat template, pictures when it has
+            // a vision projector.
+            var local = ResolveLocal(model, deep);
+            return new LlmCapabilities(local.Id, local.Tools, local.Vision, local.Thinking);
+        }
         model = ModelFor(model, deep);
         if (!IsOllama) return new LlmCapabilities(model, Tools: true, Vision: false, Thinking: false);
         var caps = await CapabilitiesAsync(model, ct).ConfigureAwait(false);
@@ -395,6 +484,139 @@ public sealed partial class LlmClient : IDisposable
     /// model calls. Pass <c>reserved: true</c> to <see cref="ChatStreamAsync"/> while holding it.
     /// </summary>
     public Task<IDisposable> ReserveAsync(CancellationToken ct) => _gate.AcquireAsync(interactive: true, ct);
+
+    // ───────────────────────────── Aqua's runtime ─────────────────────────────
+
+    private PriorityGate GateFor(LlamaLane lane) => lane == LlamaLane.Cpu ? _cpuGate : _gate;
+
+    /// <summary>The library model a name means (Ask's pick, the deep or the active one); throws when there's none.</summary>
+    private LocalModel ResolveLocal(string? requested, bool deep)
+    {
+        var library = Llama!.Library;
+        return (library.Find(requested) is { Embedding: false } named ? named : null)
+               ?? (deep ? library.Find(_health.DeepModel) : null)
+               ?? library.Find(_health.ActiveModel)
+               ?? throw new LlmUnavailableException(_health.Error ?? "No model available");
+    }
+
+    /// <summary>
+    /// Where a request runs on Aqua's runtime. A model it names (Ask's picker) runs on the graphics card. Background work
+    /// runs on Settings' processor model when there is one that can do it (pictures need a vision model); else on the
+    /// model already on the card — so the agents never swap out the model you're using — and else on the main model.
+    /// </summary>
+    private (LocalModel Model, LlamaLane Lane) RouteLocal(LlmRequest request)
+    {
+        var library = Llama!.Library;
+        if (!string.IsNullOrWhiteSpace(request.Model) && library.Find(request.Model) is { Embedding: false } named) return (named, LlamaLane.Gpu);
+        if (request.Priority == LlmPriority.Background && !request.Deep)
+        {
+            var pictures = request.Messages.Any(m => m.Images is { Count: > 0 });
+            if (library.Find(_settings().Llama.BackgroundModel) is { Embedding: false } background && (!pictures || background.Vision)
+                && (request.Tools is not { Count: > 0 } || background.Tools))
+                return (background, LlamaLane.Cpu);
+            if (Llama.OnGpu?.Model is { Embedding: false } loaded && library.Find(loaded.Id) is { } still && (!pictures || still.Vision)) return (still, LlamaLane.Gpu);
+        }
+        return (ResolveLocal(null, request.Deep), LlamaLane.Gpu);
+    }
+
+    /// <summary>
+    /// The OpenAI-style body for a llama.cpp server, plus its own switches: thinking on or off through the model's template,
+    /// the effort level its template knows (Settings' choice, or the nearest), and usage with the last streamed piece.
+    /// </summary>
+    private JsonObject LlamaBody(LlamaEndpoint endpoint, LlmRequest request, AiSettings s, bool stream)
+    {
+        var body = OpenAiBody(endpoint.Alias, request, s, stream);
+        var model = endpoint.Model;
+        var think = request.Think ?? (s.Think || request.ForceThink);
+        if (model.Thinking)
+        {
+            body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = think };
+            if (think && EffortFor(model, s.Llama.ReasoningEffort) is { } effort) body["reasoning_effort"] = effort;
+        }
+        if (stream) body["stream_options"] = new JsonObject { ["include_usage"] = true };
+        return body;
+    }
+
+    /// <summary>The reasoning level to send: Settings' when the template has it, else the nearest it has (higher on a tie); null without levels.</summary>
+    internal static string? EffortFor(LocalModel model, string wanted)
+    {
+        var levels = model.Info.EffortLevels;
+        if (levels.Count == 0) return null;
+        if (levels.Contains(wanted)) return wanted;
+        var order = new[] { "minimal", "low", "medium", "high", "xhigh", "max" };
+        var at = Array.IndexOf(order, wanted);
+        return levels.OrderBy(l => Math.Abs(Array.IndexOf(order, l) - at)).ThenByDescending(l => Array.IndexOf(order, l)).First();
+    }
+
+    /// <summary>Sends a request to a model's server; a server that has gone away (crashed, or stopped) is started again once.</summary>
+    private async Task<(HttpResponseMessage Response, LlamaEndpoint Endpoint, TimeSpan Load)> LlamaSendAsync(LocalModel model, LlamaLane lane,
+        LlmRequest request, AiSettings s, bool stream, CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var started = Stopwatch.StartNew();
+            var endpoint = await Llama!.EnsureAsync(model, lane, request.ContextTokens, ct).ConfigureAwait(false);
+            var load = started.Elapsed;
+            var req = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint.BaseUri, "v1/chat/completions"))
+            { Content = new StringContent(LlamaBody(endpoint, request, s, stream).ToJsonString(), Encoding.UTF8, "application/json") };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Key);
+            try
+            {
+                var response = await _http.SendAsync(req, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
+                return (response, endpoint, load);
+            }
+            catch (HttpRequestException ex) when (attempt == 0 && ex.StatusCode is null && !ct.IsCancellationRequested)
+            {
+                Log.Info("ai", $"{model.Name}'s server didn't answer ({ex.Message}); starting it again");
+                await Llama.UnloadAsync(model.Id, "after it stopped answering", ct).ConfigureAwait(false);
+            }
+            finally { req.Dispose(); }
+        }
+    }
+
+    private async Task<LlmResult> LlamaCompleteAsync(LlmRequest request, AiSettings s, CancellationToken ct)
+    {
+        var (model, lane) = RouteLocal(request);
+        using var lease = await GateFor(lane).AcquireAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(30 * model.Bytes / 1_000_000_000.0));
+            var (response, endpoint, load) = await LlamaSendAsync(model, lane, request, s, stream: false, cts.Token).ConfigureAwait(false);
+            using (response)
+            {
+                var json = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                    throw new HttpRequestException($"Model server error {(int)response.StatusCode}: {HtmlText.Truncate(json, 200)}");
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                var choice = root.Arr("choices").FirstOrDefault();
+                var content = choice.ValueKind == JsonValueKind.Object && choice.TryProp("message", out var m) ? m.Str("content") ?? "" : "";
+                var usage = root.TryProp("usage", out var u) ? u : default;
+                var outTok = usage.ValueKind == JsonValueKind.Object ? (int)(usage.Lng("completion_tokens") ?? 0) : content.Length / 4;
+                var inTok = usage.ValueKind == JsonValueKind.Object ? (int)(usage.Lng("prompt_tokens") ?? 0) : 0;
+                var timings = LlmTimings.From(root, load);
+                if (timings is not null) Llama!.Record(endpoint, timings.OutputTokens, timings.OutputPerSecond);
+                var result = new LlmResult(StripThinking(content), model.Id, inTok, outTok, timings?.Output ?? sw.Elapsed) { Timings = timings };
+                Interlocked.Increment(ref Stats.Calls);
+                Interlocked.Add(ref Stats.OutputTokens, result.OutputTokens);
+                Stats.LastTokensPerSecond = result.TokensPerSecond;
+                Stats.LastCall = DateTimeOffset.Now;
+                Remember(request.Purpose, model.Id, result.Text);
+                Log.Info("ai", $"{request.Purpose} via {model.Name}: {result.OutputTokens} tok in {sw.Elapsed.TotalSeconds:0.0}s ({result.TokensPerSecond:0} tok/s"
+                               + (timings is { CachedTokens: > 0 } t ? $", {t.CachedTokens} of {t.CachedTokens + t.PromptTokens} prompt tokens from the cache" : "")
+                               + (load.TotalSeconds >= 1 ? $", {load.TotalSeconds:0.0}s to load" : "") + ")");
+                return result;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Interlocked.Increment(ref Stats.Failures);
+            Stats.LastError = ex.Message;
+            throw ex is LlamaRuntimeException ? new LlmUnavailableException(ex.Message) : ex;
+        }
+    }
 
     // ───────────────────────────── Completion ─────────────────────────────
 
@@ -412,6 +634,7 @@ public sealed partial class LlmClient : IDisposable
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(request.Priority == LlmPriority.Interactive || request.WakeServer, ct).ConfigureAwait(false);
+        if (IsLlama) return await LlamaCompleteAsync(request, s, ct).ConfigureAwait(false);
         var model = ModelFor(request.Model, request.Deep);
 
         using var lease = await _gate.AcquireAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
@@ -829,25 +1052,51 @@ public sealed partial class LlmClient : IDisposable
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(wake: true, ct).ConfigureAwait(false);
-        var model = ModelFor(request.Model, request.Deep);
-        using var lease = reserved ? null : await _gate.AcquireAsync(interactive: true, ct).ConfigureAwait(false);
-
-        HttpRequestMessage req;
-        if (IsOllama)
+        string model;
+        IDisposable? lease;
+        HttpResponseMessage? sent = null;
+        LlamaEndpoint? endpoint = null;
+        var load = TimeSpan.Zero;
+        HttpRequestMessage? req = null;
+        if (IsLlama)
         {
-            var body = await OllamaBodyAsync(model, request, s, stream: true, ct).ConfigureAwait(false);
-            req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "api/chat"))
-            { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+            // Aqua's runtime: the routed model's server (started, or woken, as needed), with its key.
+            var (local, lane) = RouteLocal(request);
+            model = local.Id;
+            lease = reserved && lane == LlamaLane.Gpu ? null : await GateFor(lane).AcquireAsync(interactive: true, ct).ConfigureAwait(false);
+            try { (sent, endpoint, load) = await LlamaSendAsync(local, lane, request, s, stream: true, ct).ConfigureAwait(false); }
+            catch (LlamaRuntimeException ex)
+            {
+                lease?.Dispose();
+                throw new LlmUnavailableException(ex.Message);
+            }
+            catch
+            {
+                lease?.Dispose();
+                throw;
+            }
         }
         else
         {
-            req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "v1/chat/completions"))
-            { Content = new StringContent(OpenAiBody(model, request, s, stream: true).ToJsonString(), Encoding.UTF8, "application/json") };
-            AddAuth(req);
+            model = ModelFor(request.Model, request.Deep);
+            lease = reserved ? null : await _gate.AcquireAsync(interactive: true, ct).ConfigureAwait(false);
+            if (IsOllama)
+            {
+                var body = await OllamaBodyAsync(model, request, s, stream: true, ct).ConfigureAwait(false);
+                req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "api/chat"))
+                { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+            }
+            else
+            {
+                req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "v1/chat/completions"))
+                { Content = new StringContent(OpenAiBody(model, request, s, stream: true).ToJsonString(), Encoding.UTF8, "application/json") };
+                AddAuth(req);
+            }
         }
 
+        using (lease)
         using (req)
-        using (var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
+        using (var resp = sent ?? await _http.SendAsync(req!, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
         {
             if (!resp.IsSuccessStatusCode)
             {
@@ -862,6 +1111,7 @@ public sealed partial class LlmClient : IDisposable
             var tokens = 0;
             var promptTokens = 0;
             var doneReason = "";
+            LlmTimings? timings = null;
             var sw = Stopwatch.StartNew();
             var answer = new StringBuilder();
             // OpenAI-compatible servers stream tool calls in pieces, keyed by index.
@@ -923,6 +1173,13 @@ public sealed partial class LlmClient : IDisposable
                                 partial[index] = entry;
                             }
                         }
+                        // llama.cpp ends with its timings and the usage (stream_options.include_usage).
+                        if (endpoint is not null && root.TryProp("timings", out _)) timings = LlmTimings.From(root, load);
+                        if (root.TryProp("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+                        {
+                            if (usage.Lng("prompt_tokens") is { } inputTokens) promptTokens = (int)inputTokens;
+                            if (usage.Lng("completion_tokens") is { } outputTokens) tokens = (int)outputTokens;
+                        }
                     }
                 }
                 catch (JsonException) { continue; }
@@ -972,10 +1229,13 @@ public sealed partial class LlmClient : IDisposable
             if (calls is { Count: > 0 }) yield return new LlmToolCallsDelta(calls);
 
             if (tokens == 0) tokens = answer.Length / 4;
-            yield return new LlmUsageDelta(promptTokens, tokens, request.ContextTokens ?? s.ContextTokens, doneReason);
+            if (endpoint is not null && timings is not null) Llama!.Record(endpoint, timings.OutputTokens, timings.OutputPerSecond);
+            // On Aqua's runtime the window is the one the model's server was started with.
+            yield return new LlmUsageDelta(promptTokens, tokens, endpoint?.ContextTokens ?? request.ContextTokens ?? s.ContextTokens, doneReason) { Timings = timings };
             Interlocked.Increment(ref Stats.Calls);
             Interlocked.Add(ref Stats.OutputTokens, tokens);
-            if (sw.Elapsed.TotalSeconds > 0) Stats.LastTokensPerSecond = tokens / sw.Elapsed.TotalSeconds;
+            if (timings is { OutputPerSecond: > 0 }) Stats.LastTokensPerSecond = timings.OutputPerSecond;
+            else if (sw.Elapsed.TotalSeconds > 0) Stats.LastTokensPerSecond = tokens / sw.Elapsed.TotalSeconds;
             Stats.LastCall = DateTimeOffset.Now;
             Remember(request.Purpose, model, answer.ToString() + (calls is { Count: > 0 } ? "\n[tool calls] " + string.Join(", ", calls.Select(c => c.Name + c.ArgumentsJson)) : ""));
         }

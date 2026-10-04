@@ -379,6 +379,100 @@ public class LocalFileTests
         Assert.Contains("never", secret);
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "GetShortPathNameW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern uint GetShortPathName(string longPath, [System.Runtime.InteropServices.Out] char[] shortPath, int bufferLength);
+
+    [Fact]
+    public void AShortNameDoesntSlipPastTheFolderRules()
+    {
+        using var dir = new TempDir();
+        var home = Directory.CreateDirectory(Path.Combine(dir.Path, "Home")).FullName;
+        var keys = Directory.CreateDirectory(Path.Combine(home, ".ssh")).FullName;
+        File.WriteAllText(Path.Combine(keys, "notes.txt"), "x");
+        var files = new LocalFiles(() => new[] { home });
+        Assert.False(files.CanRead(Path.Combine(keys, "notes.txt"), out _, out _));
+
+        // The same folder by its 8.3 name ("SSH~1"), where the volume keeps them: Path.GetFullPath spells it out first.
+        var buffer = new char[1024];
+        var n = GetShortPathName(keys, buffer, buffer.Length);
+        var shortName = n > 0 ? Path.GetFileName(new string(buffer, 0, (int)n)) : ".ssh";
+        Assert.False(files.CanRead(Path.Combine(home, shortName, "notes.txt"), out var full, out var why), $"read through {shortName}");
+        Assert.Contains("never", why);
+        Assert.EndsWith(Path.Combine(".ssh", "notes.txt"), full);
+    }
+
+    [LinkFact]
+    public void ALinkInsideAnAllowedFolderIsNotFollowed()
+    {
+        using var dir = new TempDir();
+        var allowed = Directory.CreateDirectory(Path.Combine(dir.Path, "Allowed")).FullName;
+        var elsewhere = Directory.CreateDirectory(Path.Combine(dir.Path, "Elsewhere")).FullName;
+        File.WriteAllText(Path.Combine(elsewhere, "private.txt"), "x");
+        File.WriteAllText(Path.Combine(allowed, "public.txt"), "x");
+        var link = Path.Combine(allowed, "link");
+        Directory.CreateSymbolicLink(link, elsewhere);
+        var files = new LocalFiles(() => new[] { allowed });
+
+        Assert.True(files.CanRead(Path.Combine(allowed, "public.txt"), out _, out _));
+        Assert.False(files.CanRead(Path.Combine(link, "private.txt"), out _, out var why));
+        Assert.Contains("links", why);
+        Assert.False(files.CanRead(link, out _, out _));
+        // A file that is itself a link, with an innocent name.
+        var notes = Path.Combine(allowed, "notes.txt");
+        File.CreateSymbolicLink(notes, Path.Combine(elsewhere, "private.txt"));
+        Assert.False(files.CanRead(notes, out _, out why));
+        Assert.Contains("links", why);
+    }
+
+    /// <summary>The same with a junction, which any user can make (a symbolic link needs Developer Mode or admin).</summary>
+    [Fact]
+    public void AJunctionInsideAnAllowedFolderIsNotFollowed()
+    {
+        using var dir = new TempDir();
+        var allowed = Directory.CreateDirectory(Path.Combine(dir.Path, "Allowed")).FullName;
+        var elsewhere = Directory.CreateDirectory(Path.Combine(dir.Path, "Elsewhere")).FullName;
+        File.WriteAllText(Path.Combine(elsewhere, "private.txt"), "x");
+        var link = Path.Combine(allowed, "Notes");
+        Junction.Create(link, elsewhere);
+        var files = new LocalFiles(() => new[] { allowed });
+        Assert.False(files.CanRead(Path.Combine(link, "private.txt"), out _, out var why));
+        Assert.Contains("links", why);
+        Assert.DoesNotContain(files.Find(new FileQuery { Terms = new[] { "private" } }), h => h.Name == "private.txt");
+    }
+
+    [Fact]
+    public void TheFolderSurveyDoesntCountWhatAJunctionLeadsTo()
+    {
+        using var dir = new TempDir();
+        var project = Directory.CreateDirectory(Path.Combine(dir.Path, "Project")).FullName;
+        File.WriteAllText(Path.Combine(project, "readme.md"), "x");
+        var other = Directory.CreateDirectory(Path.Combine(dir.Path, "Other")).FullName;
+        for (var i = 0; i < 5; i++) File.WriteAllText(Path.Combine(other, $"f{i}.txt"), "x");
+        Junction.Create(Path.Combine(project, "elsewhere"), other);
+        Assert.Equal(1, LocalFiles.Survey(project).Files);
+    }
+
+    /// <summary>A folder offered as a root is judged by where it leads: a junction named "Notes" to .ssh is .ssh (the review's L12).</summary>
+    [ReadableFolderFact]
+    public void AFolderThatIsReallyALinkIsJudgedByWhereItLeads()
+    {
+        // Under the test binaries, not %TEMP%: anything in AppData is a folder Ask never reads.
+        var top = Path.Combine(AppContext.BaseDirectory, "links-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var keys = Directory.CreateDirectory(Path.Combine(top, ".ssh")).FullName;
+            var docs = Directory.CreateDirectory(Path.Combine(top, "Docs")).FullName;
+            var notes = Path.Combine(docs, "Notes");
+            Junction.Create(notes, keys);
+            Assert.False(LocalFiles.IsSensitiveFolder(notes)); // its own name looks harmless
+            Assert.True(LocalFiles.IsSensitiveRoot(notes));
+            Assert.True(LocalFiles.IsSensitiveRoot(Path.Combine(notes, "sub")));
+            Assert.False(LocalFiles.IsSensitiveRoot(docs));
+            Assert.Equal(keys, LocalFiles.RealPath(notes));
+        }
+        finally { Junction.DeleteTree(top); }
+    }
+
     [Fact]
     public void ExpandsFolderTokens()
     {

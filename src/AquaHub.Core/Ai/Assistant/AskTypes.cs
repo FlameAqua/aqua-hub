@@ -21,8 +21,11 @@ public sealed record AskOptions
     public string? Model { get; init; }
     /// <summary>
     /// Folders attached to this chat (full paths): Ask may search and read inside them, with the same rules as the
-    /// folders Use my PC allows, even while Use my PC is off.
+    /// folders Use my PC allows, even while Use my PC is off. Never saved with a message: each question is given the
+    /// chat's folders as they are now, so one you took back (or the app was restarted without) can't come back through
+    /// Retry, Dig deeper or Edit, and the database never holds their paths.
     /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public IReadOnlyList<string> Folders { get; init; } = Array.Empty<string>();
 
     public bool UsesWeb => Web || Research;
@@ -121,6 +124,8 @@ public sealed record AskChatContext
     public string Summary { get; init; } = "";
     /// <summary>How many of the chat's first messages <see cref="Summary"/> stands in for.</summary>
     public int SummaryCovers { get; init; }
+    /// <summary>An earlier answer in this chat used the user's files, screen, attachments or holdings (kept with the chat).</summary>
+    public bool ReadPrivate { get; init; }
 }
 
 /// <summary>What happened while answering, for the footer and the conversation history.</summary>
@@ -133,6 +138,8 @@ public sealed record AskResult
     public int ToolCalls { get; init; }
     public bool UsedWeb { get; init; }
     public bool UsedPc { get; init; }
+    /// <summary>The answer used the user's files, screen, clipboard, attachments or holdings (the chat then counts as having read private data).</summary>
+    public bool SawPrivate { get; init; }
     public string Thinking { get; init; } = "";
     /// <summary>research | think | "" — how the answer was made.</summary>
     public string Mode { get; init; } = "";
@@ -148,6 +155,8 @@ public sealed record AskResult
     public bool ReasoningCut { get; init; }
     /// <summary>What this answer read (cited first), for the chat to keep.</summary>
     public List<ChatSource> Sources { get; init; } = new();
+    /// <summary>The chat's notes being brought up to date after the answer (a plain chat's small background call).</summary>
+    public Task NoteTaking { get; init; } = Task.CompletedTask;
 }
 
 /// <summary>

@@ -278,8 +278,8 @@ public partial class CommandPalette : Window
         // "research …", "what's on my screen", "find my file …": straight to the Ask page in that mode.
         if (fast is { Action: "ask" } f && f.Target.StartsWith('@'))
         {
-            var (label, icon) = f.Target.StartsWith("@research:") ? ("Research", "research") : f.Target.StartsWith("@web:") ? ("Search the web", "globe")
-                : f.Target.StartsWith("@pc:") ? ("Search my PC", "folder") : ("Ask about my screen", "screenshot");
+            var (label, icon) = f.Target.StartsWith("@research:", StringComparison.Ordinal) ? ("Research", "research") : f.Target.StartsWith("@web:", StringComparison.Ordinal) ? ("Search the web", "globe")
+                : f.Target.StartsWith("@pc:", StringComparison.Ordinal) ? ("Search my PC", "folder") : ("Ask about my screen", "screenshot");
             var target = f.Target;
             ranked.Insert(0, new PaletteItem
             {
@@ -326,9 +326,9 @@ public partial class CommandPalette : Window
         var title = item.Title.ToLowerInvariant();
         var query = q.ToLowerInvariant();
         if (title == query) return 120;
-        if (title.StartsWith(query)) return 100;
-        if (title.Split(' ', '(', ')', '/').Any(w => w.StartsWith(query))) return 85;
-        if (item.Keywords.Split(' ').Any(k => k.Length > 0 && (k.StartsWith(query) || query.StartsWith(k) && k.Length >= 4))) return 70;
+        if (title.StartsWith(query, StringComparison.Ordinal)) return 100;
+        if (title.Split(' ', '(', ')', '/').Any(w => w.StartsWith(query, StringComparison.Ordinal))) return 85;
+        if (item.Keywords.Split(' ').Any(k => k.Length > 0 && (k.StartsWith(query, StringComparison.Ordinal) || query.StartsWith(k, StringComparison.Ordinal) && k.Length >= 4))) return 70;
         if (title.Contains(query)) return 60;
         var i = 0;
         foreach (var ch in title)

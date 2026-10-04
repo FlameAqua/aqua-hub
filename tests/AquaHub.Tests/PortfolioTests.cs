@@ -46,11 +46,42 @@ public class PortfolioTests
     }
 
     [Theory]
+    // A fraction with three decimals isn't a thousand, whichever separator the place uses for thousands.
+    [InlineData("0,125", "en-IE", 0.125)]
+    [InlineData("0.125", "de-DE", 0.125)]
+    [InlineData("0.125", "fr-FR", 0.125)]
+    [InlineData("00,125", "en-US", 0.125)]
+    [InlineData("1.234", "de-DE", 1234)]
+    [InlineData("12,345", "en-US", 12345)]
+    [InlineData("-1,234", "en-IE", -1234)]
+    [InlineData("1234,567", "en-IE", 1234.567)]
+    [InlineData("1,00,000", "en-IN", 100000)]
+    [InlineData("1.234.567,5", "de-DE", 1234567.5)]
+    // Places that group thousands with a space: a lone "." or "," is the decimal point (the audit's TM8).
+    [InlineData("12.345", "fr-FR", 12.345)]
+    [InlineData("12,345", "fr-FR", 12.345)]
+    [InlineData("12.345", "sv-SE", 12.345)]
+    [InlineData("1.234", "ru-RU", 1.234)]
+    [InlineData("9.999", "pl-PL", 9.999)]
+    [InlineData("123.456", "fr-FR", 123.456)]
+    [InlineData("1 234,5", "fr-FR", 1234.5)]
+    [InlineData("1.234.567", "fr-FR", 1234567)]
+    public void OnlyARealThousandsGroupIsReadAsOne(string typed, string culture, double expected)
+    {
+        Assert.True(Numbers.TryParse(typed, CultureInfo.GetCultureInfo(culture), out var value));
+        Assert.Equal(expected, value, 6);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("  ")]
     [InlineData("abc")]
     [InlineData(",")]
     [InlineData("1e400")]
+    [InlineData("1.5.2")]
+    [InlineData("1,234,5")]
+    [InlineData("1.2,5")]
+    [InlineData("1,2.3.4")]
     public void NotANumber(string typed) => Assert.False(Numbers.TryParse(typed, English, out _));
 
     [Fact]
@@ -175,6 +206,10 @@ public class PortfolioTests
             ["NVDA"] = Q("NVDA", 1, 1, "USD"), ["VOD.L"] = Q("VOD.L", 1, 1, "GBp"), ["SAP.DE"] = Q("SAP.DE", 1, 1, "EUR"), ["AAPL"] = Q("AAPL", 1, 1, "USD"),
         };
         Assert.Equal(new[] { "USDEUR=X", "GBPEUR=X" }, MarketWatchAgent.FxPairs(m, quotes));
+
+        // A cost paid in a currency nothing is priced in still needs its rate, or that holding's gain can't be worked out.
+        m.Watchlist[0].CostCurrency = "CHF";
+        Assert.Equal(new[] { "USDEUR=X", "CHFEUR=X", "GBPEUR=X" }, MarketWatchAgent.FxPairs(m, quotes));
     }
 
     private static long Day(int year, int month, int day) => new DateTimeOffset(year, month, day, 14, 30, 0, TimeSpan.Zero).ToUnixTimeSeconds();
@@ -215,6 +250,24 @@ public class PortfolioTests
         Assert.Equal(new[] { "NEW" }, missing);
     }
 
+    [Fact]
+    public void TheChartEndsTodayWhereTheCardIs()
+    {
+        var m = Holdings("EUR", new WatchSymbol { Symbol = "NVDA", Shares = 2 }, new WatchSymbol { Symbol = "VOD.L", Shares = 100 });
+        var quotes = new Dictionary<string, Quote> { ["NVDA"] = Q("NVDA", 120, 110, "USD"), ["VOD.L"] = Q("VOD.L", 70, 69, "GBp") };
+        var closes = new Dictionary<string, List<(long, double)>>
+        {
+            ["NVDA"] = new() { (Day(2026, 9, 1), 100) }, ["VOD.L"] = new() { (Day(2026, 9, 1), 65) },
+        };
+        var fx = Rates(("USDEUR", 0.9), ("GBPEUR", 1.2));
+        var points = Portfolio.History(m, quotes, fx, s => closes.GetValueOrDefault(s) ?? new(), new DateOnly(2026, 8, 1), out _, today: new DateOnly(2026, 9, 5));
+
+        Assert.Equal(new[] { new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 5) }, points.Select(p => p.Day));
+        Assert.Equal(Portfolio.Value(m, quotes, fx).Value, points[^1].Value, 6); // 2 × 120 × 0.9 + 100 × 0.70 × 1.2
+        // When today's close is already stored, nothing is added.
+        Assert.Single(Portfolio.History(m, quotes, fx, s => closes.GetValueOrDefault(s) ?? new(), new DateOnly(2026, 8, 1), out _, today: new DateOnly(2026, 9, 1)));
+    }
+
     private static MarketSettings Bar() => new()
     {
         Indices = new() { new() { Symbol = "^GSPC" }, new() { Symbol = "^FTSE" } },
@@ -251,6 +304,12 @@ public class PortfolioTests
         Assert.True(MarketBar.Remove(m, "eurusd=x"));
         Assert.False(MarketBar.Remove(m, "^FTSE"));
         Assert.Equal("^GSPC BTC-USD GC=F", Order(m));
+
+        // The row holds nine: a tenth isn't saved (it would never show).
+        for (var i = 0; MarketBar.Items(m).Count < MarketBar.MaxCharts; i++) Assert.True(MarketBar.Add(m, new WatchSymbol { Symbol = "X" + i }));
+        Assert.True(MarketBar.IsFull(m));
+        Assert.False(MarketBar.Add(m, new WatchSymbol { Symbol = "SI=F" }));
+        Assert.Equal(MarketBar.MaxCharts, MarketBar.Items(m).Count);
     }
 
     [Theory]

@@ -37,6 +37,13 @@ public sealed class ChatThread
     public bool Compressing { get; set; }
     /// <summary>How many messages the chat had when an automatic compression last failed (it waits for the chat to grow).</summary>
     public int AutoFailedAt { get; set; }
+    /// <summary>Stops the summary being written (a question asked meanwhile stops an automatic one; deleting the chat, any).</summary>
+    public CancellationTokenSource? CompressCts { get; set; }
+    public bool CompressingAutomatically { get; set; }
+    /// <summary>An answer in this chat used your files, screen, attachments or holdings: later answers ask before reaching the web.</summary>
+    public bool ReadPrivate { get; set; }
+    /// <summary>Deleted: an answer still streaming when it was must not save it again.</summary>
+    public bool Deleted { get; set; }
     public string Id => Summary?.Id ?? "";
 }
 
@@ -54,11 +61,14 @@ public sealed class AskSession
 
     public AskSession()
     {
-        // Turning "Keep Ask chats" off deletes the stored ones straight away; "Keep pictures with chats" off, their pictures.
+        // Turning "Keep Ask chats" off deletes the stored ones straight away; "Keep pictures with chats" off, their pictures
+        // and what the messages kept about them (the pictures' paths and what they showed).
+        var keptPictures = Hub.S.Ask.KeepPictures;
         Hub.Core.Settings.Changed += s =>
         {
             if (!s.Privacy.KeepAskHistory && Hub.Core.Chats.List().Count > 0) Hub.Core.Chats.DeleteAll();
-            if (!s.Ask.KeepPictures) Hub.Core.Chats.DeleteAllMedia();
+            if (keptPictures && !s.Ask.KeepPictures) InBackground("forget the chats' pictures", Hub.Core.Chats.ForgetPictures);
+            keptPictures = s.Ask.KeepPictures;
         };
         Hub.Core.Chats.Changed += () => Hub.OnUi(RefreshChats);
         Web = Hub.S.Ask.Web;
@@ -111,6 +121,14 @@ public sealed class AskSession
     public event Action? ContextChanged;
     /// <summary>Raised on the UI thread when the notes of the chat on screen change (Aqua's or yours).</summary>
     public event Action? NotesChanged;
+    /// <summary>Raised on the UI thread when the folders the chat on screen may read change.</summary>
+    public event Action? FoldersChanged;
+
+    /// <summary>Takes a folder back from the chat on screen: from the next message on, Ask no longer searches or reads it.</summary>
+    public void RemoveFolder(string folder)
+    {
+        if (Current.Folders.RemoveAll(f => string.Equals(f, folder, StringComparison.OrdinalIgnoreCase)) > 0) FoldersChanged?.Invoke();
+    }
     /// <summary>Raised on the UI thread when a chat is being compressed, has been, or its compression was undone.</summary>
     public event Action? CompressionChanged;
 
@@ -126,7 +144,9 @@ public sealed class AskSession
                 Hub.Core.Chats.Prune(DateTimeOffset.Now, Hub.S.Ask.ChatRetentionDays);
                 // Pictures of chats that are gone — or all of them, if keeping pictures was switched off while Aqua was closed.
                 if (Hub.S.Ask.KeepPictures) Hub.Core.Chats.PruneMedia();
-                else Hub.Core.Chats.DeleteAllMedia();
+                else InBackground("forget the chats' pictures", Hub.Core.Chats.ForgetPictures);
+                // Chats from before 1.3 kept attached folders' paths with each message: once, they go.
+                InBackground("forget the chats' folders", Hub.Core.Chats.ForgetFolders);
                 // The last chat comes back if it was used today (like the single conversation used to).
                 if (Hub.Core.Chats.List().FirstOrDefault() is { } recent && DateTimeOffset.Now - recent.Updated < TimeSpan.FromHours(12))
                     Current = Load(recent);
@@ -135,6 +155,16 @@ public sealed class AskSession
         }
         RefreshChats();
     }
+
+    /// <summary>Tidies the stored chats off the UI thread (the store is thread-safe); logs how many changed.</summary>
+    private static void InBackground(string what, Func<int> work) => _ = Task.Run(() =>
+    {
+        try
+        {
+            if (work() is var n and > 0) Log.Info("ask", $"Did {what}: {Plural.Of(n, "chat")} changed");
+        }
+        catch (Exception ex) { Log.Warn("ask", "Couldn't " + what, ex); }
+    });
 
     // ───────────────────────────── Chats ─────────────────────────────
 
@@ -222,7 +252,9 @@ public sealed class AskSession
         thread.ContextWindow = summary.ContextWindow;
         thread.Compression = Hub.Core.Chats.LoadCompression(summary.Id);
         var folder = Hub.Core.Chats.MediaFolder(summary.Id);
-        foreach (var m in Hub.Core.Chats.Load(summary.Id))
+        var saved = Hub.Core.Chats.Load(summary.Id);
+        thread.ReadPrivate = summary.ReadPrivate || ChatStore.ShowsPrivate(saved);
+        foreach (var m in saved)
         {
             // Pictures still there to show: none once keeping them was switched off (their files went with it), and a
             // screenshot only while its file is (a picture on the PC can still be opened from its path).
@@ -300,7 +332,10 @@ public sealed class AskSession
     {
         if (_open.TryGetValue(id, out var t))
         {
+            // The answer may still be streaming: when it stops it mustn't save the chat (or its notes and pictures) again.
+            t.Deleted = true;
             t.Cts?.Cancel();
+            t.CompressCts?.Cancel();
             _open.Remove(id);
         }
         var wasCurrent = Current.Id == id;
@@ -339,11 +374,7 @@ public sealed class AskSession
     {
         var list = new List<(ChatMessageVM, ChatTurn)>();
         foreach (var m in thread.Messages)
-        {
-            if (!m.IsChat || m.Text.Length == 0) continue;
-            if (m.IsUser) list.Add((m, new ChatTurn(true, m.Text + (m.Attachments.Count > 0 ? $" [attached: {string.Join(", ", m.Attachments.Select(a => a.Name))}]" : ""))));
-            else if (m.IsDone && m.Footer != "Stopped.") list.Add((m, new ChatTurn(false, m.Text, m.Citations)));
-        }
+            if (ChatCompressor.TurnOf(m.IsUser, m.Text, m.IsChat, m.IsDone, m.Footer, m.Attachments.Select(a => a.Name), m.Citations) is { } turn) list.Add((m, turn));
         return list;
     }
 
@@ -356,16 +387,22 @@ public sealed class AskSession
         EnsureLoaded();
         var thread = Current;
         thread.Cts?.Cancel();
+        // A summary being written on its own would make the question wait for the model: it can be written after the answer.
+        if (thread.CompressingAutomatically) thread.CompressCts?.Cancel();
         var cts = thread.Cts = new CancellationTokenSource();
         var opts = options ?? CurrentOptions(null);
         // Every question goes to the composer's model, however it was asked (a chip, a skill, "Look it up").
         if (opts.Model is null) opts = opts with { Model = Model };
         var attachments = Pending.Where(p => p.Attachment is not null).ToList();
         Pending.Clear();
+        var granted = thread.Folders.Count;
         foreach (var a in attachments)
             if (a.Attachment is { Kind: AttachmentKind.Folder, Path: { } folder } && !thread.Folders.Contains(folder, StringComparer.OrdinalIgnoreCase))
                 thread.Folders.Add(folder);
-        if (thread.Folders.Count > 0) opts = opts with { Folders = thread.Folders.ToList() };
+        if (thread.Folders.Count != granted) FoldersChanged?.Invoke();
+        // Always the chat's folders as they are now (none, once you've taken them back): Retry, Dig deeper and Edit send a
+        // message's old options again, and they mustn't bring back a folder whose chip is gone.
+        opts = opts with { Folders = thread.Folders.ToList() };
         var compression = ValidCompression(thread);
         var history = HistoryOf(thread, compression);
         var user = new ChatMessageVM
@@ -404,14 +441,21 @@ public sealed class AskSession
             }
             if (unavailable is not null)
             {
-                await AnswerOfflineAsync(answer, question, unavailable, opts);
+                // "Refresh the news" still refreshes it: the collectors don't need the model.
+                var refreshed = attachments.Count > 0 || opts.Folders.Count > 0 ? ""
+                    : await Hub.Core.Assistant.RefreshWithoutModelAsync(question, history.LastOrDefault(m => m.Role == "user")?.Content, host, cts.Token);
+                await AnswerOfflineAsync(answer, question, unavailable, opts, refreshed);
                 return;
             }
 
             var files = attachments.Select(a => a.Attachment!).ToList();
             var earlier = EarlierSources(thread, answer);
-            var chat = new AskChatContext { Notes = thread.Notes, Summary = compression?.Summary ?? "", SummaryCovers = compression?.Covers ?? 0 };
+            var chat = new AskChatContext
+            {
+                Notes = thread.Notes, Summary = compression?.Summary ?? "", SummaryCovers = compression?.Covers ?? 0, ReadPrivate = thread.ReadPrivate,
+            };
             var result = await Task.Run(() => Hub.Core.Assistant.RunAsync(question, history, files, opts, host, Platform, thread.AllowedForChat, cts.Token, earlier, chat), cts.Token);
+            if (result.SawPrivate) thread.ReadPrivate = true;
             host.Flush();
             host.Close();
             answer.Text = result.Text.Length > 0 ? result.Text
@@ -469,6 +513,7 @@ public sealed class AskSession
             if (answer.Steps.Count > 0) answer.FoldSteps();
             answer.IsDone = true;
             if (ReferenceEquals(thread.Cts, cts)) SetBusy(thread, false);
+            await KeepPicturesAsync(thread, answer.Pictures.ToList());
             Persist(thread);
             // A "remember …"/"forget …" chat keeps its question as the title: it was answered without the model, so
             // there's nothing worth waking it for.
@@ -559,10 +604,12 @@ public sealed class AskSession
     /// No model: what the agents collected for this question, plus — when Web is on — the top web results with links
     /// (a search needs no model), so Ask still finds things.
     /// </summary>
-    private static async Task AnswerOfflineAsync(ChatMessageVM answer, string question, string reason, AskOptions? options = null)
+    /// <param name="refreshed">What the agents the question asked for did (it goes first).</param>
+    private static async Task AnswerOfflineAsync(ChatMessageVM answer, string question, string reason, AskOptions? options = null, string refreshed = "")
     {
         var ctx = await Task.Run(() => Hub.Core.Ask.BuildContext(question));
         var text = Hub.Core.Ask.OfflineAnswer(question, ctx, reason);
+        if (refreshed.Length > 0) text = refreshed + "\n\n" + text;
         var citations = ctx.Citations.Where(c => text.Contains($"[{c.Number}]")).ToList();
         var fromWeb = 0;
         if (options?.UsesWeb == true && Hub.S.Ask.Web)
@@ -647,9 +694,15 @@ public sealed class AskSession
 
     public async Task AttachFilesAsync(IEnumerable<string> paths)
     {
-        foreach (var path in paths.Take(8))
+        var list = paths.ToList();
+        for (var i = 0; i < list.Count; i++)
         {
-            if (Pending.Count >= 8) break;
+            var path = list[i];
+            if (IsFull)
+            {
+                NoteLeftOut(list.Count - i);
+                break;
+            }
             if (!Documents.IsSupported(path))
             {
                 AddFailedChip(Path.GetFileName(path), "Can't read this kind of file — Aqua reads " + Documents.SupportedSummary);
@@ -695,7 +748,11 @@ public sealed class AskSession
     /// </summary>
     public async Task AttachFolderAsync(string path)
     {
-        if (Pending.Count >= 8) return;
+        if (IsFull)
+        {
+            NoteLeftOut(1);
+            return;
+        }
         string full;
         try { full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
@@ -710,7 +767,7 @@ public sealed class AskSession
             AddFailedChip(name, "That folder isn't there");
             return;
         }
-        if (LocalFiles.IsSensitiveFolder(full))
+        if (LocalFiles.IsSensitiveRoot(full))
         {
             AddFailedChip(name, "Aqua doesn't read app data, system or key folders");
             return;
@@ -747,18 +804,52 @@ public sealed class AskSession
         Pending.Add(chip);
     }
 
-    /// <summary>Your own screenshot (the button, or "Ask about my screen"): never needs an extra OK.</summary>
-    /// <summary>Attaches a capture of one screen, all screens or one app window (the composer's screenshot menu).</summary>
+    /// <summary>The most one message takes: files, pictures and folders together.</summary>
+    public const int MaxAttachments = 8;
+
+    // Chips saying why something wasn't attached count too (removing one makes room); the "not attached" one doesn't.
+    private bool IsFull => Pending.Count(p => p.LeftOut == 0) >= MaxAttachments;
+
+    /// <summary>One chip says how many were left out once the message was full, rather than they vanish.</summary>
+    private void NoteLeftOut(int count)
+    {
+        var old = Pending.FirstOrDefault(p => p.LeftOut > 0);
+        var total = count + (old?.LeftOut ?? 0);
+        var chip = new AttachmentChipVM
+        {
+            Name = "Not attached", Icon = "warning", LeftOut = total,
+            Note = $"{total.ToString(CultureInfo.CurrentCulture)} more: a message takes {MaxAttachments} at most",
+        };
+        chip.RemoveCommand = new RelayCommand(() => Pending.Remove(chip));
+        if (old is not null) Pending[Pending.IndexOf(old)] = chip;
+        else Pending.Add(chip);
+    }
+
+    /// <summary>
+    /// Attaches a capture of one screen, all screens or one app window (the composer's screenshot menu). False when no
+    /// capture arrived; a full message isn't captured at all (its chip says why).
+    /// </summary>
     public async Task<bool> AttachCaptureAsync(Func<Task<byte[]?>> capture, string label)
     {
+        if (IsFull)
+        {
+            NoteLeftOut(1);
+            return true;
+        }
         var png = await capture();
         if (png is null) return false;
         await AttachImageAsync(png, $"{label} {DateTime.Now:HH.mm.ss}.png");
         return true;
     }
 
+    /// <summary>Your own screenshot (the button, or "Ask about my screen"): never needs an extra OK.</summary>
     public async Task<bool> AttachScreenshotAsync(bool snip)
     {
+        if (IsFull)
+        {
+            NoteLeftOut(1);
+            return true;
+        }
         var png = snip ? await ScreenCapture.SnipAsync() : await ScreenCapture.CaptureScreenAsync();
         if (png is null) return false;
         await AttachImageAsync(png, snip ? $"Snip {DateTime.Now:HH.mm.ss}.png" : $"Screenshot {DateTime.Now:HH.mm.ss}.png");
@@ -767,6 +858,11 @@ public sealed class AskSession
 
     public async Task AttachImageAsync(byte[] bytes, string name)
     {
+        if (IsFull)
+        {
+            NoteLeftOut(1);
+            return;
+        }
         var chip = new AttachmentChipVM { Name = name, Icon = "image", IsLoading = true, Note = "Reading…", Thumbnail = Images.Thumbnail(bytes, 96) };
         chip.RemoveCommand = new RelayCommand(() => Pending.Remove(chip));
         Pending.Add(chip);
@@ -862,24 +958,8 @@ public sealed class AskSession
             Hub.Speech.StateChanged -= Done;
         }
         Hub.Speech.StateChanged += Done;
-        await Hub.Speech.SpeakAsync(PlainText(vm.Text), Hub.S.Location.Language);
+        await Hub.Speech.SpeakAsync(AnswerText.Spoken(vm.Text), Hub.S.Location.Language);
         if (!Hub.Speech.IsSpeaking) Done();
-    }
-
-    /// <summary>An answer without Markdown and citation marks, for reading aloud.</summary>
-    internal static string PlainText(string markdown)
-    {
-        var t = Regex.Replace(markdown, @"\[(\d+)\]", "");
-        t = Regex.Replace(t, @"\[([^\]]+)\]\((https?://[^)]+)\)", "$1");
-        t = Regex.Replace(t, @"^#{1,6}\s*", "", RegexOptions.Multiline);
-        // Tables read row by row ("Basic, €5, monthly"); their divider rows, rules and quote marks aren't read.
-        t = Regex.Replace(t, @"^\s*(?:\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?|[-*_](?:\s*[-*_]){2,})\s*$", "", RegexOptions.Multiline);
-        t = Regex.Replace(t, @"^[ \t]*\|[ \t]*|[ \t]*\|[ \t]*$", "", RegexOptions.Multiline);
-        t = Regex.Replace(t, @"[ \t]*\|[ \t]*", ", ");
-        t = Regex.Replace(t, @"^\s*>+\s?", "", RegexOptions.Multiline);
-        t = Regex.Replace(t, @"^\s*[-*•]\s+", "", RegexOptions.Multiline);
-        t = t.Replace("**", "").Replace("__", "").Replace("`", "");
-        return Regex.Replace(t, @"[ \t]+", " ").Trim();
     }
 
     public static void Copy(string text)
@@ -938,6 +1018,25 @@ public sealed class AskSession
         return list.Count > 0 ? list : null;
     }
 
+    /// <summary>
+    /// Writes the pictures an answer looked at to its chat's folder off the UI thread (a thumbnail of a picture on the PC is
+    /// re-encoded, tens of milliseconds each, up to eight an answer), so saving the chat afterwards only records their names.
+    /// </summary>
+    private static async Task KeepPicturesAsync(ChatThread thread, IReadOnlyList<PictureVM> pictures)
+    {
+        if (!Hub.S.Ask.KeepPictures || !Hub.S.Privacy.KeepAskHistory || thread.Deleted || thread.Summary is not { } summary) return;
+        if (Hub.Core.Chats.MediaFolder(summary.Id) is not { } folder) return;
+        var todo = pictures.Where(p => p.File is null && p.Bytes is not null).Select(p => (Picture: p, Bytes: p.Bytes!, Linked: p.Path is { Length: > 0 })).ToList();
+        if (todo.Count == 0) return;
+        try
+        {
+            var names = await Task.Run(() => todo.Select(t => ChatMedia.Save(folder, t.Linked ? Images.Prepare(t.Bytes, 320) : t.Bytes, thumbnail: t.Linked)).ToList());
+            for (var i = 0; i < todo.Count; i++)
+                if (names[i] is { } name) (todo[i].Picture.File, todo[i].Picture.Bytes) = (name, null);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log.Warn("ask", "Couldn't keep the answer's pictures", ex); }
+    }
+
     /// <summary>A picture Ask looked at, for the answer to show.</summary>
     private PictureVM PictureFor(ChatThread thread, AskPicture picture, System.Windows.Media.ImageSource? thumbnail)
     {
@@ -977,11 +1076,12 @@ public sealed class AskSession
 
     /// <summary>
     /// Opens a picture: one on the PC with its app (as files in answers open); a screenshot or pasted picture — or a
-    /// picture whose file has gone, as its thumbnail — in a window of its own.
+    /// picture whose file has gone, as its thumbnail — in a window of its own. The original's path comes from the
+    /// database, so it gets a file link's rule: a drive path only (a network path would be reached just by checking it).
     /// </summary>
     private static void OpenPicture(ChatThread thread, PictureVM picture)
     {
-        if (picture.Path is { Length: > 0 } path && File.Exists(path))
+        if (picture.Path is { Length: > 0 } saved && AnswerText.LocalPath(saved) is { } path && File.Exists(path))
         {
             UI.Controls.MarkdownView.OpenFile(path);
             return;
@@ -1034,7 +1134,7 @@ public sealed class AskSession
     /// <summary>Saves a chat (created in the history with its first message). Nothing is kept when Privacy says so.</summary>
     private void Persist(ChatThread thread)
     {
-        if (!Hub.S.Privacy.KeepAskHistory || thread.Messages.Count == 0) return;
+        if (!Hub.S.Privacy.KeepAskHistory || thread.Messages.Count == 0 || thread.Deleted) return;
         try
         {
             var now = DateTimeOffset.Now;
@@ -1047,6 +1147,7 @@ public sealed class AskSession
             thread.Summary.Updated = now;
             thread.Summary.ContextUsed = thread.ContextUsed;
             thread.Summary.ContextWindow = thread.ContextWindow;
+            thread.Summary.ReadPrivate |= thread.ReadPrivate;
             Hub.Core.Chats.Save(thread.Summary, Snapshot(thread, forExport: false));
             // Notes typed before the chat's first question are saved once it exists.
             if (thread.Notes.Count > 0) SaveNotes(thread);
@@ -1058,14 +1159,14 @@ public sealed class AskSession
 
     private static void SaveNotes(ChatThread thread)
     {
-        if (thread.Summary is not { } summary || !Hub.S.Privacy.KeepAskHistory) return;
+        if (thread.Summary is not { } summary || !Hub.S.Privacy.KeepAskHistory || thread.Deleted) return;
         try { Hub.Core.Chats.SaveNotes(summary.Id, thread.Notes.Items); }
         catch (Exception ex) { Log.Warn("ask", "Couldn't save the chat's notes", ex); }
     }
 
     private static void SaveCompression(ChatThread thread)
     {
-        if (thread.Summary is not { } summary || !Hub.S.Privacy.KeepAskHistory) return;
+        if (thread.Summary is not { } summary || !Hub.S.Privacy.KeepAskHistory || thread.Deleted) return;
         try { Hub.Core.Chats.SaveCompression(summary.Id, thread.Compression); }
         catch (Exception ex) { Log.Warn("ask", "Couldn't save the chat's compression", ex); }
     }
@@ -1143,12 +1244,14 @@ public sealed class AskSession
                 : "Everything but the last two exchanges is already compressed.";
         if (Hub.Core.Llm.UserPaused || !Hub.Core.Llm.Health.Available) return "The local model isn't available, so the chat can't be compressed now.";
         thread.Compressing = true;
+        thread.CompressingAutomatically = automatic;
+        using var cts = thread.CompressCts = new CancellationTokenSource();
         CompressionChanged?.Invoke();
         try
         {
             var model = Model;
             var window = thread.ContextWindow;
-            var made = await Task.Run(() => ChatCompressor.CompressAsync(Hub.Core.Llm, Hub.S, model, current, turns, covers, automatic, window, DateTimeOffset.Now, CancellationToken.None));
+            var made = await Task.Run(() => ChatCompressor.CompressAsync(Hub.Core.Llm, Hub.S, model, current, turns, covers, automatic, window, DateTimeOffset.Now, cts.Token));
             if (made is null)
             {
                 if (automatic) thread.AutoFailedAt = turns.Count;
@@ -1166,6 +1269,11 @@ public sealed class AskSession
             MarkCompressed(thread);
             return $"Compressed {Plural.Of(made.Covers, "earlier message")}: about {TokenCount(made.TokensBefore)} → {TokenCount(made.TokensAfter)} tokens.";
         }
+        catch (OperationCanceledException)
+        {
+            // A question came first (it's tried again after the answer), or the chat was deleted.
+            return "Compressing stopped: you asked a question, and it went first.";
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log.Warn("ask", "Couldn't compress the chat", ex);
@@ -1175,6 +1283,8 @@ public sealed class AskSession
         finally
         {
             thread.Compressing = false;
+            thread.CompressingAutomatically = false;
+            thread.CompressCts = null;
             CompressionChanged?.Invoke();
         }
     }

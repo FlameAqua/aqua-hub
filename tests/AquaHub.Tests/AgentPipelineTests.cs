@@ -73,11 +73,16 @@ public class AgentPipelineTests
     [Fact]
     public async Task NewsIsFetchedSortedIntoStoriesAndOnlyDownloadedAgainWhenItChanged()
     {
+        var conditional = 0;
         var net = new FakeNetwork()
             .On(u => u.AbsoluteUri == "https://wire.example/news.xml", req =>
             {
                 // A conditional request for what it already has gets "not modified".
-                if (req.Headers.TryGetValues("If-None-Match", out var tags) && tags.Contains("\"v1\"")) return new HttpResponseMessage(HttpStatusCode.NotModified);
+                if (req.Headers.TryGetValues("If-None-Match", out var tags) && tags.Contains("\"v1\""))
+                {
+                    Interlocked.Increment(ref conditional);
+                    return new HttpResponseMessage(HttpStatusCode.NotModified);
+                }
                 var ok = FakeNetwork.Ok(Rss("The Wire",
                     ("Dublin Bus drivers to strike on Friday over pay", "https://wire.example/bus", 1),
                     ("Budget 2027 increases childcare subsidies", "https://wire.example/budget", 2)), "application/rss+xml");
@@ -96,7 +101,7 @@ public class AgentPipelineTests
         var scout = await new NewsScoutAgent().RunAsync(t.Ctx, CancellationToken.None);
         Assert.True(scout.Ok);
         Assert.True(scout.Changed);
-        Assert.Equal("3 new from 2/3 sources · unavailable: gone", scout.Message);
+        Assert.Equal("3 new from 2/3 sources · unavailable: Gone", scout.Message);
         Assert.NotNull(t.Ctx.State.FreshAt("news"));
 
         var curator = await new StoryCuratorAgent().RunAsync(t.Ctx, CancellationToken.None);
@@ -109,9 +114,10 @@ public class AgentPipelineTests
 
         // Nothing new: the wire answers "not modified", the paper's items are already stored.
         var again = await new NewsScoutAgent().RunAsync(t.Ctx, CancellationToken.None);
-        Assert.Equal("0 new from 2/3 sources · unavailable: gone", again.Message);
+        Assert.Equal("0 new from 2/3 sources · unavailable: Gone", again.Message);
         Assert.False(again.Changed); // so the curator and editor aren't woken for nothing
         Assert.Equal(2, net.Count("https://wire.example/"));
+        Assert.Equal(1, conditional); // the second time, it asked only for what had changed since "v1"
     }
 
     [Fact]
@@ -203,6 +209,11 @@ public class AgentPipelineTests
         Assert.Equal(2 * 180.5 * 0.92, value.Value, 6);
         Assert.Equal("1 quotes (1 live), 1 with indicators, refreshed history for 2", result.Message);
         Assert.NotNull(t.Ctx.State.FreshAt("markets"));
+        // The rates are kept: after a restart the portfolio is valued at once, before the next price run.
+        var restarted = new HubState(t.Ctx.Db);
+        restarted.Load();
+        Assert.True(restarted.Fx.TryRate("USD", "EUR", out var kept));
+        Assert.Equal(0.92, kept, 6);
 
         // History is kept for a day: the next run only asks for today's prices.
         var charts = net.Count("https://query1.finance.yahoo.com/v8/finance/chart/");
@@ -346,7 +357,7 @@ public class AgentPipelineTests
     {
         var tomorrow = DateTime.Today.AddDays(1);
         var ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:dentist-1\r\nSUMMARY:Dentist\r\n" +
-                  $"DTSTART:{tomorrow.AddHours(10).ToUniversalTime():yyyyMMdd'T'HHmmss'Z'}\r\nDURATION:PT30M\r\nEND:VEVENT\r\n" +
+                  $"DTSTART:{tomorrow.AddHours(10).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'", Inv)}\r\nDURATION:PT30M\r\nEND:VEVENT\r\n" +
                   "BEGIN:VEVENT\r\nUID:old-1\r\nSUMMARY:Last year's party\r\nDTSTART:20251201T190000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         var holiday = DateTime.Today.AddDays(5);
         var holidays = new JsonArray(
@@ -429,6 +440,13 @@ public class AgentPipelineTests
         var again = await new NewsEditorAgent().RunAsync(t.Ctx, CancellationToken.None);
         Assert.Equal("All top stories summarised", again.Message);
         Assert.Equal(2, server.JsonChats.Count);
+
+        // The same coverage clustered again (the curator's next pass, a restart) gets the kept summaries back, still without the model.
+        t.Ctx.State.SetStories(TwoStories());
+        var reclustered = await new NewsEditorAgent().RunAsync(t.Ctx, CancellationToken.None);
+        Assert.True(reclustered.Ok, reclustered.Message);
+        Assert.Equal(2, server.JsonChats.Count);
+        Assert.Equal("Budget raises childcare subsidies", t.Ctx.State.Stories.First(c => c.Id == "s-budget").Summary!.Headline);
     }
 
     [Fact]

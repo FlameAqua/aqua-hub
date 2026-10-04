@@ -11,6 +11,7 @@
                 <ResourceDictionary>
                     <vm:BoolToVisibility x:Key="Vis"/>
                     <vm:BoolToVisibility x:Key="VisNot" Invert="True"/>
+                    <vm:SourceProblemText x:Key="SourceProblem"/>
                 </ResourceDictionary>
                 <ResourceDictionary Source="/UI/Theme/Templates.xaml"/>
             </ResourceDictionary.MergedDictionaries>

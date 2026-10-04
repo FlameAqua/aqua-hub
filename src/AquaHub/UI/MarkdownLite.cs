@@ -53,7 +53,7 @@ public static partial class MarkdownLite
 
             var bullet = false;
             var trimmed = line.TrimStart();
-            if (trimmed.StartsWith("- ") || trimmed.StartsWith("* ") || trimmed.StartsWith("• "))
+            if (trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed.StartsWith("* ", StringComparison.Ordinal) || trimmed.StartsWith("• ", StringComparison.Ordinal))
             {
                 bullet = true;
                 line = trimmed[2..];
@@ -73,7 +73,7 @@ public static partial class MarkdownLite
             foreach (var part in Tokens().Split(line))
             {
                 if (part.Length == 0) continue;
-                if (part.StartsWith("**") && part.EndsWith("**") && part.Length > 4)
+                if (part.StartsWith("**", StringComparison.Ordinal) && part.EndsWith("**", StringComparison.Ordinal) && part.Length > 4)
                     target.Inlines.Add(new Run(part[2..^2]) { FontWeight = FontWeights.SemiBold });
                 else if (part.StartsWith('`') && part.EndsWith('`') && part.Length > 2)
                     target.Inlines.Add(new Run(part[1..^1]) { FontFamily = new System.Windows.Media.FontFamily("Cascadia Mono, Consolas"), Background = Fmt.Res("B.Subtle") });

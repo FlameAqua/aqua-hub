@@ -302,6 +302,8 @@ public sealed record AgentStatus
     public TimeSpan? LastDuration { get; init; }
     public DateTimeOffset? NextRun { get; init; }
     public string LastMessage { get; init; } = "";
+    /// <summary>The last run finished without anything new (nothing rewritten, nothing to fetch).</summary>
+    public bool NothingNew { get; init; }
     public int Runs { get; init; }
     public int Errors { get; init; }
     public bool UsesAi { get; init; }

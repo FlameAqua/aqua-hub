@@ -59,7 +59,8 @@ public sealed class UpdateService
                 Log.Warn("update", "The updater isn't available", ex);
             }
         }
-        _machine = new UpdateMachine(source, Announce, a => Hub.OnUi(a));
+        // The pretend release shows in the banner only: an alert for 9.9.9 would stay in the profile (it's never "installed").
+        _machine = new UpdateMachine(source, Demo ? _ => { } : Announce, a => Hub.OnUi(a));
         _machine.Changed += () => Changed?.Invoke();
     }
 

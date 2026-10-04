@@ -317,6 +317,7 @@ public sealed class AgentRuntime : IDisposable
                 LastDuration = sw.Elapsed,
                 NextRun = slot.NextRun,
                 LastMessage = result.Message,
+                NothingNew = result.Ok && !result.Changed,
                 Runs = slot.Status.Runs + 1,
                 Errors = slot.Status.Errors + (result.Ok ? 0 : 1),
             });

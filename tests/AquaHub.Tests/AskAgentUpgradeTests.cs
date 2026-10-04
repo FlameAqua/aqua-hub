@@ -110,6 +110,18 @@ public class AskPlannerTests
         Assert.Contains("Logos are in Pictures\\Brand", text);
         Assert.Contains("Web: on. Use my PC: on", text);
     }
+
+    [Fact]
+    public void ThePlannerHearsWhatWasJustRefreshedSoItDoesntSearchTheWebForIt()
+    {
+        var o = new AskOptions { Web = true };
+        var refreshed = AskPlanner.Request("refresh the news and tell me what's new", Array.Empty<LlmMessage>(), o,
+            new PlanContext { Refreshed = new[] { "the news" } }, DateTimeOffset.Now).Messages[0].Content;
+        Assert.Contains("Aqua's agents just refreshed the news in the user's feeds for this message", refreshed);
+        Assert.Contains("needs no web search (intent feeds)", refreshed);
+        var plain = AskPlanner.Request("what's new?", Array.Empty<LlmMessage>(), o, new PlanContext(), DateTimeOffset.Now).Messages[0].Content;
+        Assert.DoesNotContain("just refreshed", plain);
+    }
 }
 
 /// <summary>File search: any of the words, your folders first, system and app folders never walked.</summary>
@@ -781,10 +793,41 @@ public class AskAgentBehaviourTests
         Assert.DoesNotContain("THE USER'S PORTFOLIO", System(server.Chats[1]));
     }
 
+    [Theory]
+    [InlineData("How is my portfolio doing?", true)]
+    [InlineData("how are my tech shares today", true)]
+    [InlineData("Should I rebalance our ETF holdings?", true)]
+    [InlineData("What's the portfolio worth?", true)]
+    [InlineData("Review my portfolio website", false)]
+    [InlineData("What are Berkshire's holdings?", false)]
+    [InlineData("What is a stock portfolio?", false)]
+    public void OnlyAQuestionAboutYourOwnHoldingsBringsThemIn(string question, bool yours) =>
+        Assert.Equal(yours, AskAgent.AsksAboutPortfolio(question));
+
     [Fact]
+    public async Task AfterYourHoldingsALinkIsOpenedOnlyWithYourOk()
+    {
+        using var server = new FakeOllama
+        {
+            Json = _ => """{"intent":"page","web_queries":[],"urls":["https://example.com/markets"],"file_terms":[],"format":"direct"}""",
+            Script = (_, _) => new[] { FakeOllama.Chunk("I didn't open the page.", done: true) },
+        };
+        var s = new HubSettings();
+        s.Markets.Watchlist = new() { new WatchSymbol { Symbol = "NVDA", Name = "NVIDIA", Shares = 2, CostBasis = 150 } };
+        var (agent, _) = Build(server, s);
+        var host = new NullHost { Approve = _ => false };
+
+        await agent.RunAsync("How is my portfolio doing, given https://example.com/markets?", Array.Empty<LlmMessage>(), Array.Empty<AskAttachment>(),
+            new AskOptions { Web = true }, host, new StubPlatform(), new HashSet<string>(), CancellationToken.None);
+
+        Assert.Contains("THE USER'S PORTFOLIO", System(server.Chats[^1]));
+        Assert.Contains(host.Asked, a => a.Tool == "web-after-private" && a.Title.Contains("https://example.com/markets", StringComparison.Ordinal));
+    }
+
+    [ReadableFolderFact]
     public async Task AnAttachedFolderIsSearchedEvenWithUseMyPcOff()
     {
-        // Not under %TEMP%: that's inside AppData, which Ask never reads.
+        // Not under %TEMP%: that's inside AppData, which Ask never reads (skipped when the checkout itself is there).
         using var dir = new TempDir(AppContext.BaseDirectory);
         var project = Directory.CreateDirectory(Path.Combine(dir.Path, "Project")).FullName;
         File.WriteAllText(Path.Combine(project, "acme invoice 2026.txt"), "Invoice total: 120 EUR");
@@ -814,6 +857,26 @@ public class AskAgentBehaviourTests
         var offered = server.Chats[0]["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
         Assert.Contains("search_files", offered);
         Assert.Contains("read_file", offered);
+    }
+
+    [Theory]
+    [InlineData("which invoices are in here?", false, "files")]
+    [InlineData("What's in this project?", false, "files")]
+    [InlineData("find the budget spreadsheet", false, "files")]
+    [InlineData("Summarise it for me", true, "files")] // sent with the folder
+    [InlineData("Tell me a joke", false, "chat")]
+    [InlineData("What's the capital of France?", false, "web")]
+    [InlineData("Explain how TCP congestion control works", false, "web")]
+    public void InAChatWithAFolderOnlyQuestionsAboutFilesSearchIt(string question, bool sentWithIt, string intent)
+    {
+        var o = new AskOptions { Web = intent == "web", Folders = new[] { @"D:\Work\Project" } };
+        var plan = AskPlanner.Heuristic(question, Array.Empty<LlmMessage>(), o, folderNow: sentWithIt);
+        Assert.Equal(intent, plan.Intent);
+        Assert.Equal(intent == "files", plan.FileTerms.Count > 0 || sentWithIt);
+
+        // The model's own words for a file name don't make a joke a file search either.
+        using var doc = JsonDocument.Parse("""{"intent":"chat","web_queries":[],"file_terms":["joke"],"format":"direct"}""");
+        if (intent == "chat") Assert.Empty(AskPlanner.Merge(doc.RootElement, plan, question, o).FileTerms);
     }
 
     [Fact]

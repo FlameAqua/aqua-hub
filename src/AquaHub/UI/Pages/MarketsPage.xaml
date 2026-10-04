@@ -267,6 +267,8 @@
                             <c:LineChart x:Name="PortfolioChart" LabelBrush="{DynamicResource B.Text3}" GridBrush="{DynamicResource B.Divider}"/>
                             <TextBlock x:Name="PortfolioChartStatus" Style="{StaticResource T.Caption}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
                         </Grid>
+                        <TextBlock x:Name="PortfolioChartMissing" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,6" Visibility="Collapsed"
+                                   AutomationProperties.AutomationId="portfolio-chart-missing"/>
                         <ItemsControl ItemsSource="{Binding PortfolioLines}" Focusable="False">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -401,7 +403,7 @@
                             </Grid.ColumnDefinitions>
                             <c:Icon Kind="shield" Width="15" Height="15" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Top" Margin="0,1,10,0"/>
                             <TextBlock Grid.Column="1" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Foreground="{DynamicResource B.Text2}"
-                                       Text="For information only, from delayed prices, indicators and headlines. Not financial advice, and it can be wrong. Aqua Hub never trades."/>
+                                       Text="For information only, made on this PC from delayed prices, indicators and headlines. Not financial advice, and it can be wrong: for advice, see a licensed adviser. Aqua Hub never trades."/>
                         </Grid>
                     </Border>
                 </StackPanel>

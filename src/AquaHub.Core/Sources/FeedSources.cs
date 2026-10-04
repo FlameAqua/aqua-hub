@@ -29,7 +29,11 @@ public sealed record FeedSpec
     public IReadOnlyList<string>? LocalPublisherHints { get; init; }
 }
 
-public sealed record FetchOutcome(string SourceId, bool Ok, bool NotModified, List<FeedItem> Items, string? Error);
+public sealed record FetchOutcome(string SourceId, bool Ok, bool NotModified, List<FeedItem> Items, string? Error)
+{
+    /// <summary>The server's answer when it refused (404 when the feed isn't there); 0 otherwise.</summary>
+    public int HttpCode { get; init; }
+}
 
 /// <summary>RSS / Atom based sources: news outlets, Google News queries, Reddit, YouTube and custom feeds.</summary>
 public static partial class RssSource
@@ -87,7 +91,7 @@ public static partial class RssSource
     {
         var res = await http.GetAsync(spec.Url, conditional: true, maxBytes: 6 * 1024 * 1024, ct: ct).ConfigureAwait(false);
         if (res.Status == FetchStatus.NotModified) return new FetchOutcome(spec.Id, true, true, new(), null);
-        if (!res.Ok) return new FetchOutcome(spec.Id, false, false, new(), res.Error);
+        if (!res.Ok) return new FetchOutcome(spec.Id, false, false, new(), res.Error) { HttpCode = res.HttpCode };
         try
         {
             var feed = FeedParser.Parse(res.Bytes);

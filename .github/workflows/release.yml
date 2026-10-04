@@ -54,7 +54,20 @@ jobs:
       - name: Build
         run: dotnet build AquaHub.sln -c Release --no-restore -p:Version=${{ steps.version.outputs.version }}
       - name: Unit & behaviour tests
-        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build
+        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx" --blame-hang-timeout 5m -- RunConfiguration.TreatNoTestsAsError=true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: unit-test-results
+          path: tests/AquaHub.Tests/TestResults
+      # As in CI: nothing known to be vulnerable is released (an advisory can appear between the push and the tag).
+      - name: Vulnerability audit (fails on any known-vulnerable package)
+        shell: pwsh
+        run: |
+          $out = dotnet list AquaHub.sln package --vulnerable --include-transitive 2>&1 | Out-String
+          $out
+          if ($LASTEXITCODE -ne 0) { throw 'The audit could not run (see above).' }
+          if ($out -match 'has the following vulnerable packages') { throw 'Known-vulnerable packages (see above).' }
 
       - name: Publish the app (framework-dependent, ReadyToRun)
         run: >

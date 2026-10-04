@@ -55,6 +55,9 @@ public sealed class HubState
     public SystemSnapshot? System { get; private set; }
     public Ai.LlmHealth? Ai { get; private set; }
 
+    /// <summary>The feeds that keep failing, so their collectors log them less, rest the ones that are gone and say so.</summary>
+    public AquaHub.Core.Sources.SourceHealth Sources { get; } = new();
+
     /// <summary>When each area (news, social, markets, predictions, events, weather) last fetched successfully.</summary>
     public IReadOnlyDictionary<string, DateTimeOffset> Fresh { get; private set; } = new Dictionary<string, DateTimeOffset>();
 

@@ -89,10 +89,20 @@ public sealed class MediaController
 
     public Task RefreshAsync() => RefreshAsync(artwork: true);
 
+    /// <summary>A player that doesn't answer in this long is treated as gone (the refreshes take turns, so one hang would stop them all).</summary>
+    private static readonly TimeSpan PlayerTimeout = TimeSpan.FromSeconds(3);
+
+    /// <summary>When the title last changed: a picture the same as the last track's is held back only for a moment after.</summary>
+    private DateTime _titleChangedAt;
+
+    /// <summary>An artwork read was asked for by a refresh that a newer one replaced: the newer one does it.</summary>
+    private int _artworkWanted;
+
     /// <param name="artwork">Read the artwork again (the media changed), not just the playback state.</param>
     private async Task RefreshAsync(bool artwork)
     {
         var generation = Interlocked.Increment(ref _generation);
+        if (artwork) Volatile.Write(ref _artworkWanted, 1);
         // Only the latest refresh may change what's shown: an older one finishing late would bring back the previous
         // title or picture. They also take turns, as events arrive on several threads at once.
         bool Stale() => generation != Volatile.Read(ref _generation);
@@ -100,6 +110,7 @@ public sealed class MediaController
         try
         {
             if (Stale()) return;
+            artwork = Interlocked.Exchange(ref _artworkWanted, 0) == 1 || artwork;
             var session = _session;
             if (session is null)
             {
@@ -111,11 +122,11 @@ public sealed class MediaController
             GlobalSystemMediaTransportControlsSessionTimelineProperties timeline;
             try
             {
-                props = await session.TryGetMediaPropertiesAsync();
+                props = await session.TryGetMediaPropertiesAsync().AsTask().WaitAsync(PlayerTimeout);
                 playback = session.GetPlaybackInfo();
                 timeline = session.GetTimelineProperties();
             }
-            catch (COMException)
+            catch (Exception ex) when (ex is COMException or TimeoutException)
             {
                 // The player has gone (its process ended): look again at what Windows has now.
                 if (Stale()) return;
@@ -137,14 +148,22 @@ public sealed class MediaController
                 _key = key;
                 _album = props.AlbumTitle;
                 _thumb = null;
+                _titleChangedAt = DateTime.UtcNow;
             }
             if (titleChanged || artwork)
             {
                 var art = await ReadArtworkAsync(props);
                 if (Stale()) return;
-                _thumb = art is not null && NowPlayingRules.IsStaleArtwork(art, _previousArt, props.AlbumTitle, _previousAlbum) ? null : art;
-                // The new picture often follows a moment later; look once more in case no event says so.
-                if (titleChanged) _ = Task.Delay(1500).ContinueWith(_ => RefreshAsync(artwork: true), TaskScheduler.Default);
+                // Right after a change, the last track's picture is usually the player not having caught up; still the
+                // same a few seconds on, it's the real cover (two albums can share one).
+                var settling = DateTime.UtcNow - _titleChangedAt < TimeSpan.FromSeconds(3);
+                _thumb = art is not null && settling && NowPlayingRules.IsStaleArtwork(art, _previousArt, props.AlbumTitle, _previousAlbum) ? null : art;
+                // The new picture often follows a moment later; look again in case no event says so.
+                if (titleChanged)
+                {
+                    _ = Task.Delay(1500).ContinueWith(_ => RefreshAsync(artwork: true), TaskScheduler.Default);
+                    _ = Task.Delay(3500).ContinueWith(_ => { if (_thumb is null) _ = RefreshAsync(artwork: true); }, TaskScheduler.Default);
+                }
             }
 
             var controls = playback?.Controls;
@@ -185,11 +204,12 @@ public sealed class MediaController
         if (props.Thumbnail is null) return null;
         try
         {
-            using var stream = await props.Thumbnail.OpenReadAsync();
+            using var timeout = new CancellationTokenSource(PlayerTimeout);
+            using var stream = await props.Thumbnail.OpenReadAsync().AsTask(timeout.Token);
             if (stream.Size is not (> 0 and < 4_000_000)) return null;
             await using var net = stream.AsStreamForRead();
             using var ms = new MemoryStream();
-            await net.CopyToAsync(ms);
+            await net.CopyToAsync(ms, timeout.Token);
             return ms.ToArray();
         }
         catch { return null; }

@@ -3,8 +3,31 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:AquaHub.UI.Controls"
              xmlns:ui="clr-namespace:AquaHub.UI"
+             xmlns:vm="clr-namespace:AquaHub.UI.ViewModels"
              AllowDrop="True" DragOver="OnDragOver" Drop="OnDrop">
     <UserControl.Resources>
+        <!-- The compression line, drawn only where a message has one (a ContentTemplate would be made for every message,
+             with nothing in it): the messages above go to the model as a summary. -->
+        <DataTemplate DataType="{x:Type vm:CompressionVM}">
+            <Border Margin="0,0,0,12" Padding="10,6" CornerRadius="8" Background="{DynamicResource B.Subtle}" ToolTip="{Binding Tooltip}">
+                <StackPanel>
+                    <DockPanel LastChildFill="True">
+                        <c:Icon Kind="compress" Width="13" Height="13" Foreground="{DynamicResource B.Text3}" Margin="0,0,8,0" DockPanel.Dock="Left" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="8,0,0,0">
+                            <Button Style="{StaticResource Btn.Link}" FontSize="12" Padding="6,0" Content="{Binding ToggleLabel}"
+                                    Command="{Binding ToggleCommand}" AutomationProperties.AutomationId="ask-compression-summary"/>
+                            <Button Style="{StaticResource Btn.Link}" FontSize="12" Padding="6,0" Content="Undo" Command="{Binding UndoCommand}"
+                                    AutomationProperties.AutomationId="ask-compression-undo" ToolTip="Send these messages to the model in full again"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding Label}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <!-- Laid out like an answer (the model writes it with headings and lists) -->
+                    <c:MarkdownView Markdown="{Binding Summary}" FontSize="12.5" Margin="21,8,0,2"
+                                    AutomationProperties.Name="Summary of the earlier messages" AutomationProperties.AutomationId="ask-compression-text"
+                                    Visibility="{Binding SummaryOpen, Converter={StaticResource Vis}}"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
         <!-- Composer switches: compact chips with an icon -->
         <Style x:Key="ModeChip" TargetType="ToggleButton" BasedOn="{StaticResource Chip}">
             <Setter Property="Padding" Value="9,4"/>
@@ -15,6 +38,39 @@
             <Setter Property="Width" Value="28"/>
             <Setter Property="Height" Value="28"/>
             <Setter Property="ui:UiProps.CornerRadius" Value="7"/>
+        </Style>
+        <!-- What a sent question's attachment chip shows -->
+        <DataTemplate x:Key="SentChipContent">
+            <StackPanel Orientation="Horizontal">
+                <Border Width="28" Height="28" CornerRadius="5" Visibility="{Binding HasThumbnail, Converter={StaticResource Vis}}" Margin="0,0,6,0">
+                    <Border.Background><ImageBrush ImageSource="{Binding Thumbnail}" Stretch="UniformToFill"/></Border.Background>
+                </Border>
+                <c:Icon Kind="{Binding Icon}" Width="13" Height="13" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center"
+                        Visibility="{Binding HasThumbnail, Converter={StaticResource VisNot}}" Margin="0,0,6,0"/>
+                <TextBlock Text="{Binding Name}" FontSize="12" VerticalAlignment="Center" MaxWidth="220" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+        </DataTemplate>
+        <!-- A picture you attached: the chip is a button (click, Enter or Space opens it) -->
+        <Style x:Key="SentChipButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="10" BorderThickness="1" BorderBrush="Transparent" Background="{DynamicResource B.Subtle}" Padding="7,4">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource B.Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource B.Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <!-- A picture in the chat: its thumbnail, framed; click opens it -->
         <Style x:Key="PictureButton" TargetType="Button">
@@ -183,8 +239,11 @@
                     </WrapPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- What changed, for screen readers (Aqua noting something, the chat compressed, a folder taken back); not drawn -->
+                    <TextBlock x:Name="Announcer" Width="1" Height="1" Opacity="0" IsHitTestVisible="False" Focusable="False"
+                               AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="ask-announcer"/>
                     <Button x:Name="NotesButton" Style="{StaticResource Btn.Icon}" Click="OnToggleNotes" Margin="0,0,2,0"
-                            AutomationProperties.AutomationId="ask-notes-toggle" AutomationProperties.Name="Notes for this chat" ToolTip="Notes for this chat">
+                            AutomationProperties.AutomationId="ask-notes-toggle" AutomationProperties.Name="Show this chat's notes" ToolTip="Notes for this chat">
                         <Grid>
                             <c:Icon Kind="note" Width="15" Height="15"/>
                             <!-- The chat has notes and they're hidden -->
@@ -235,25 +294,8 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Margin="0,8">
-                            <!-- The messages above go to the model as a summary (the chat was compressed) -->
-                            <Border Margin="0,0,0,12" Padding="10,6" CornerRadius="8" Background="{DynamicResource B.Subtle}" ToolTip="{Binding Compression.Tooltip}"
-                                    Visibility="{Binding HasCompression, Converter={StaticResource Vis}}">
-                                <StackPanel>
-                                    <DockPanel LastChildFill="True">
-                                        <c:Icon Kind="compress" Width="13" Height="13" Foreground="{DynamicResource B.Text3}" Margin="0,0,8,0" DockPanel.Dock="Left" VerticalAlignment="Center"/>
-                                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="8,0,0,0">
-                                            <Button Style="{StaticResource Btn.Link}" FontSize="12" Padding="6,0" Content="{Binding Compression.ToggleLabel}"
-                                                    Command="{Binding Compression.ToggleCommand}" AutomationProperties.AutomationId="ask-compression-summary"/>
-                                            <Button Style="{StaticResource Btn.Link}" FontSize="12" Padding="6,0" Content="Undo" Command="{Binding Compression.UndoCommand}"
-                                                    AutomationProperties.AutomationId="ask-compression-undo" ToolTip="Send these messages to the model in full again"/>
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding Compression.Label}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                                    </DockPanel>
-                                    <TextBox Style="{StaticResource ReadOnlyText}" Text="{Binding Compression.Summary, Mode=OneWay}" FontSize="12.5" Margin="21,8,0,2" MaxHeight="320"
-                                             VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Summary of the earlier messages"
-                                             Visibility="{Binding Compression.SummaryOpen, Converter={StaticResource Vis}}"/>
-                                </StackPanel>
-                            </Border>
+                            <!-- The messages above go to the model as a summary (the chat was compressed): made only above that one message -->
+                            <ContentControl Content="{Binding Compression}" Focusable="False" IsTabStop="False"/>
                             <Grid x:Name="Body">
                                 <!-- You -->
                                 <StackPanel x:Name="UserPart" HorizontalAlignment="Right" MaxWidth="660" Visibility="{Binding IsUser, Converter={StaticResource Vis}}">
@@ -261,25 +303,16 @@
                                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border x:Name="ChipBorder" CornerRadius="10" Background="{DynamicResource B.Subtle}" Padding="8,5" Margin="6,0,0,4" ToolTip="{Binding Tooltip}">
-                                                    <!-- A picture you attached opens with a click -->
-                                                    <Border.InputBindings>
-                                                        <MouseBinding Gesture="LeftClick" Command="{Binding OpenCommand}"/>
-                                                    </Border.InputBindings>
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <Border Width="28" Height="28" CornerRadius="5" Visibility="{Binding HasThumbnail, Converter={StaticResource Vis}}" Margin="0,0,6,0">
-                                                            <Border.Background><ImageBrush ImageSource="{Binding Thumbnail}" Stretch="UniformToFill"/></Border.Background>
-                                                        </Border>
-                                                        <c:Icon Kind="{Binding Icon}" Width="13" Height="13" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center"
-                                                                Visibility="{Binding HasThumbnail, Converter={StaticResource VisNot}}" Margin="0,0,6,0"/>
-                                                        <TextBlock Text="{Binding Name}" FontSize="12" VerticalAlignment="Center" MaxWidth="220" TextTrimming="CharacterEllipsis"/>
-                                                    </StackPanel>
-                                                </Border>
-                                                <DataTemplate.Triggers>
-                                                    <DataTrigger Binding="{Binding HasPicture}" Value="True">
-                                                        <Setter TargetName="ChipBorder" Property="Cursor" Value="Hand"/>
-                                                    </DataTrigger>
-                                                </DataTemplate.Triggers>
+                                                <Grid Margin="6,0,0,4">
+                                                    <Button Style="{StaticResource SentChipButton}" Command="{Binding OpenCommand}" ToolTip="{Binding Tooltip}"
+                                                            Content="{Binding}" ContentTemplate="{StaticResource SentChipContent}"
+                                                            AutomationProperties.Name="{Binding Name, StringFormat=Open {0}}"
+                                                            Visibility="{Binding HasPicture, Converter={StaticResource Vis}}"/>
+                                                    <Border CornerRadius="10" BorderThickness="1" BorderBrush="Transparent" Background="{DynamicResource B.Subtle}" Padding="7,4"
+                                                            ToolTip="{Binding Tooltip}" Visibility="{Binding HasPicture, Converter={StaticResource VisNot}}">
+                                                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SentChipContent}"/>
+                                                    </Border>
+                                                </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
@@ -429,7 +462,8 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <Button Style="{StaticResource PictureButton}" Width="96" Height="72" Margin="0,0,8,8" Command="{Binding OpenCommand}"
-                                                                ToolTip="{Binding Tooltip}" AutomationProperties.Name="{Binding Name}" AutomationProperties.AutomationId="ask-picture">
+                                                                ToolTip="{Binding Tooltip}" AutomationProperties.Name="{Binding Name}" AutomationProperties.HelpText="{Binding Tooltip}"
+                                                                AutomationProperties.AutomationId="ask-picture">
                                                             <Grid>
                                                                 <Border CornerRadius="7">
                                                                     <Border.Background><ImageBrush ImageSource="{Binding Thumbnail}" Stretch="UniformToFill"/></Border.Background>
@@ -537,6 +571,26 @@
             <!-- Composer -->
             <Border Grid.Row="2" Style="{StaticResource Card}" Padding="6" Margin="0,10,0,0" CornerRadius="14">
                 <StackPanel>
+                    <!-- Folders this chat may search and read (attached earlier in it); x takes one back -->
+                    <ItemsControl x:Name="FolderGrants" Margin="6,4,6,0" Visibility="Collapsed" AutomationProperties.Name="Folders this chat can read"
+                                  AutomationProperties.AutomationId="ask-folder-grants">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="10" Background="{DynamicResource B.AccentSoft}" Padding="8,3,4,3" Margin="0,0,6,6" ToolTip="{Binding Tooltip}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <c:Icon Kind="folder" Width="13" Height="13" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding Name}" FontSize="12" MaxWidth="200" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                        <TextBlock Text=" · this chat can read it" FontSize="11" Foreground="{DynamicResource B.Text3}" VerticalAlignment="Center"/>
+                                        <Button Style="{StaticResource Btn.Icon}" Width="22" Height="22" Margin="4,0,0,0" Command="{Binding RemoveCommand}"
+                                                AutomationProperties.Name="{Binding Name, StringFormat=Stop sharing {0} with this chat}" ToolTip="Stop sharing this folder with the chat">
+                                            <c:Icon Kind="close" Width="10" Height="10"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <!-- Attachments waiting to be sent -->
                     <ItemsControl x:Name="PendingList" Margin="6,4,6,2" Visibility="Collapsed" AutomationProperties.Name="Attachments">
                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -687,7 +741,7 @@
                                                AutomationProperties.AutomationId="ask-compress-detail"/>
                                     <WrapPanel>
                                         <Button x:Name="CompressButton" Style="{StaticResource Btn.Standard}" Padding="12,5" Margin="0,0,8,4" Click="OnCompress"
-                                                AutomationProperties.AutomationId="ask-compress" ToolTip="The model gets a summary of the earlier messages instead; they stay in the chat">
+                                                AutomationProperties.AutomationId="ask-compress" AutomationProperties.Name="Compress the chat" ToolTip="The model gets a summary of the earlier messages instead; they stay in the chat">
                                             <StackPanel Orientation="Horizontal"><c:Icon Kind="compress" Width="13" Height="13"/><TextBlock Text="Compress the chat" Margin="6,0,0,0"/></StackPanel>
                                         </Button>
                                         <Button x:Name="UncompressButton" Style="{StaticResource Btn.Link}" Padding="0,5" Margin="0,0,0,4" Content="Undo compression" Click="OnUncompress"

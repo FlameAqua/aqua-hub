@@ -20,15 +20,16 @@ All AI runs on your PC.
   feeds, YouTube channels (paste youtube.com/@name — name and logo are filled in), any RSS bridge and — if you connect them — your own Bluesky *Following* and
   Mastodon *home* timelines, distilled into 3–6 topics with sentiment. Global Bluesky trends are shown
   separately and labelled as global, so they never masquerade as local chatter.
-- **Markets** – batched live quotes, interactive charts, a chart row you arrange yourself (*Edit charts*: move,
-  remove, add from search), transparent technical signals (trend, momentum, RSI, MACD, 52-week position), an AI
-  stance per watchlist symbol with rationale and risks, balanced ideas (diversification, position sizing),
-  price-target alerts, and each symbol's page on Yahoo Finance, Google Finance or its exchange one click away. A
-  **portfolio card** values your holdings (fractional shares welcome) in your own currency: today's move, the gain
-  since you bought (in the currency you paid with) and a 1M/6M/1Y chart of today's holdings at past prices, with
-  exchange rates from the same quote service. Session-aware:
-  on a weekend it says "Markets closed · figures from Fri close" instead of pretending they moved today.
-  *Educational analysis, not financial advice. Aqua Hub never trades.*
+- **Markets** – batched live quotes, interactive charts, a chart row of up to nine you arrange yourself (*Edit
+  charts*: move, remove, add from search), transparent technical signals (trend, momentum, RSI, MACD, 52-week
+  position), an AI stance per watchlist symbol with rationale and risks, balanced ideas (diversification, position
+  sizing), price-target alerts, and each symbol's page on Yahoo Finance, Google Finance (or Nasdaq's or NYSE's, for US
+  shares and ETFs) one click away. A **portfolio card** values your holdings (fractional shares welcome) in your own
+  currency: today's move, the gain since you bought (in the currency you paid with: a cost paid in your own currency
+  counts the exchange rate's move too) and a 1M/6M/1Y chart of today's holdings at past prices, ending at today's
+  value, with exchange rates from the same quote service. Session-aware: on a weekend it says "Markets closed ·
+  figures from Fri close" instead of pretending they moved today. *Educational analysis, not financial advice. Aqua
+  Hub never trades.*
 - **What's coming** – calendars (ICS), public holidays, high-impact economic releases, earnings, and
   what prediction markets (Polymarket, Kalshi) expect, with 24-hour swings.
 - **Your PC** – CPU, memory, GPU/VRAM (any vendor), disks, network, top apps and a local-AI runtime panel
@@ -52,24 +53,26 @@ All AI runs on your PC.
   flame"), see your screen, and — with your OK each time — open files, links, apps and Windows settings,
   work in app windows (read, click, type, shortcuts — never terminals or anything that runs commands) or run
   your scenes. Ask can put Aqua's own agents to work too: *"refresh the news and tell me what's new"*, *"get the
-  latest prices"* or *"write me a fresh brief"* runs them first and answers from what they bring in, and a question
-  about your portfolio sees your holdings. Attach documents, spreadsheets, PDFs,
-  images or a screenshot of any screen or window, a **folder** (Ask searches and reads it in that chat, even with
-  Use my PC off), or **speak** your question — with Windows' recognizer (offline,
-  from the microphone you pick; the local model fixes words it plainly misheard) or, far more accurately, with
-  **Whisper** on this PC, installed in one click from Settings (whisper.cpp and a 57–547 MB model, each file checked
-  against its published SHA-256); Settings has a live test. Answers and your questions are
-  selectable; copy or **edit and re-ask** a question, have an answer **read aloud**, and watch the **context
-  meter**. Answers lay out **tables** and **maths** (LaTeX drawn as formulae; copying keeps the Markdown) and show
-  the screenshots and pictures Ask looked at as thumbnails that open with a click. Each chat keeps **notes** —
-  facts, decisions and open questions that Ask reads every turn and updates itself, and you can edit beside the
-  chat — and a long chat can be **compressed**: its older messages go to the model as a summary that keeps names,
-  numbers, decisions and sources (with a click, or on its own once older messages would be left out; *Undo* sends
-  them in full again).
-  Every chat is kept in a searchable **history** — star the ones to keep; the rest expire after 30 days
-  (your choice). Or press **Ctrl+Alt+Space** anywhere: fuzzy commands, apps, scenes, tickers, earlier chats,
-  natural language ("focus mode", "play lofi", "research heat pumps", "what's on my screen", "find my tax
-  documents", "remember that…").
+  latest prices"* or *"write me a fresh brief"* runs them first and answers from what they bring in (and says so
+  when one brought nothing new), and a question about your own portfolio sees your holdings — after which searches
+  and links wait for your OK, as after reading your files. Attach up to eight documents, spreadsheets, PDFs,
+  images or screenshots of any screen or window, a **folder** (in that chat Ask searches and reads it when you ask
+  about files, even with Use my PC off, until you take it back with the × on its chip; it's never saved with the
+  chat), or **speak** your question —
+  with Windows' recognizer (offline, from the microphone you pick; the local model fixes words it plainly misheard)
+  or, far more accurately, with **Whisper** on this PC, installed in one click from Settings (whisper.cpp and a 57–547
+  MB model, each file checked against its published SHA-256); Settings has a live test. Answers and your questions are
+  selectable; copy or **edit and re-ask** a question, have an answer **read aloud** (formulae as words), and watch
+  the **context meter**.
+  Answers lay out **tables** and **maths** (LaTeX drawn as formulae; copying keeps the Markdown) and show the
+  screenshots and pictures Ask looked at as thumbnails that open with a click. Each chat keeps **notes** — facts,
+  decisions and open questions that Ask reads every turn and updates itself, and you can edit beside the chat — and a
+  long chat can be **compressed**: its older messages go to the model as a summary that keeps names, numbers,
+  decisions and sources (with a click, or on its own once older messages would be left out; *Undo* sends them in full
+  again). Every chat is kept in a searchable **history** — star the ones to keep; the rest expire after 30 days (your
+  choice). Or press **Ctrl+Alt+Space** anywhere: fuzzy commands, apps, scenes, tickers, earlier chats, natural
+  language ("focus mode", "play lofi", "research heat pumps", "what's on my screen", "find my tax documents",
+  "remember that…").
 - **Workbench** – teach Aqua new **skills** in your own words ("focus time: pause the music, turn on do not
   disturb and open Notepad"): the local model drafts them from Aqua's own tools, you check, try and save them,
   and they're used whenever a request fits. No code runs; actions still ask first. Plus **Memory** — things Aqua
@@ -117,6 +120,10 @@ while you game. Measured on this machine (Windows 11, RTX 4070 SUPER, Debug buil
 
 The local model runs in Ollama's own process (qwen3.5:9b ≈ 6–7 GB of VRAM while loaded; Ollama unloads it
 after 10 idle minutes, and *Free VRAM* or the Game mode scene unloads it at once).
+
+Aqua can also run models itself (provider `llamacpp`, Phase 4): a pinned llama.cpp build matched to your card, using
+the models Ollama has already downloaded (read in place) or GGUF files from Hugging Face, with one model on the
+graphics card at a time and background ones on the processor.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Requirements
@@ -168,7 +175,7 @@ and Aqua Hub keeps running in the tray.
 | Ctrl+Alt+Space | Command palette / Ask Aqua from anywhere |
 | Ctrl+K | Command palette inside the app |
 | Ctrl+1 … Ctrl+9, Ctrl+, | Jump between pages, Settings |
-| F5 | Refresh everything |
+| F5 | Refresh everything (every source, now) |
 | Ctrl+F | Search Settings (on the Settings page) |
 
 If another app already owns a global shortcut, Aqua picks a free alternative (e.g. Ctrl+Alt+Q for the
@@ -219,8 +226,8 @@ it may operate app windows and asks before acting or taking screenshots, voice i
 remove it there — Windows' offline recognizer or Windows online speech), how long unstarred chats are kept, the
 context window and how many earlier messages each question sends, whether long chats are compressed on their own,
 and whether your skills and memories are used. Settings › Privacy › *Keep pictures with chats* (on by default) keeps
-the screenshots and pictures Ask looked at with each chat, and deletes them all when you switch it off — see
-[docs/SECURITY.md](docs/SECURITY.md).
+the screenshots and pictures Ask looked at with each chat, says how much space they take, and deletes them all — the
+files and the chats' record of them — when you switch it off; see [docs/SECURITY.md](docs/SECURITY.md).
 
 Not supported by design: X/Twitter, Facebook, Instagram (no public feeds). Any RSS bridge you run
 (e.g. RSSHub) can be added as an extra feed.
@@ -228,7 +235,7 @@ Not supported by design: X/Twitter, Facebook, Instagram (no public feeds). Any R
 ## Tests
 
 ```powershell
-dotnet test tests/AquaHub.Tests                      # 840+ unit & behaviour tests (parsers, security, analysis, AI plumbing,
+dotnet test tests/AquaHub.Tests                      # 1,100+ unit & behaviour tests (parsers, security, analysis, AI plumbing,
                                                      # settings merge, notification policy, scheduling, fact checks,
                                                      # clustering and fact-check regressions on real data, locale
                                                      # packs, brief sections, offline answers, Ollama policy, Ask:
@@ -243,12 +250,16 @@ dotnet test tests/AquaHub.Tests                      # 840+ unit & behaviour tes
                                                      # flow against a fake updater, your place (none until chosen,
                                                      # choosing one, the town lookup), Ask's model picker, Ask's
                                                      # answers (tables, lists, LaTeX checked against XAML-Math's
-                                                     # own parser), chat notes, compression and pictures, a XAML
-                                                     # accessibility contract, the agent against a scripted
+                                                     # own parser, and spoken), chat notes, compression and
+                                                     # pictures, chat privacy (a deleted chat stays deleted,
+                                                     # folders aren't saved, pictures go when the setting does),
+                                                     # a XAML accessibility contract, the agent against a scripted
                                                      # fake Ollama, the collectors and AI agents against a
                                                      # stand-in network and model server, Ask running the agents,
                                                      # exchange rates and the portfolio, Settings search and
-                                                     # shortcut clashes, and the update banner's wording)
+                                                     # shortcut clashes, and the update banner's wording; CI runs
+                                                     # them again under Thai and Arabic settings, and
+                                                     # $env:AQUAHUB_TEST_CULTURE='th-TH' (or 'ar-SA') does it here)
 $env:AQUAHUB_LIVE=1; dotnet test tests/AquaHub.Tests # + 23 live runs against real sources and Ollama (set
                                                      # AQUAHUB_ASK_PROFILE to a profile for the Ask scenarios, and
                                                      # AQUAHUB_WHISPER to a profile's whisper folder for Whisper)

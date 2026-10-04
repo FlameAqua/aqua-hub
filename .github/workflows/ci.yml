@@ -28,16 +28,37 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+      # One command per step: a step's PowerShell script only fails on its last command's exit code, so a failing
+      # first command in a two-line step went unnoticed (a lock-file mismatch then surfaced as "no test results").
       - name: Restore (locked, signed packages only)
-        run: |
-          dotnet restore AquaHub.sln --locked-mode
-          dotnet restore tests/AquaHub.E2E/AquaHub.E2E.csproj --locked-mode
+        run: dotnet restore AquaHub.sln --locked-mode
+      # The UI tests aren't locked: they ship nothing, their versions are pinned in Directory.Packages.props, and a lock
+      # file of their own made every shared package's Dependabot update fail the locked restore.
+      - name: Restore the UI tests
+        run: dotnet restore tests/AquaHub.E2E/AquaHub.E2E.csproj
       - name: Build
-        run: |
-          dotnet build AquaHub.sln -c Release --no-restore
-          dotnet build tests/AquaHub.E2E/AquaHub.E2E.csproj -c Release --no-restore
+        run: dotnet build AquaHub.sln -c Release --no-restore
+      - name: Build the UI tests
+        run: dotnet build tests/AquaHub.E2E/AquaHub.E2E.csproj -c Release --no-restore
+      # TreatNoTestsAsError: a run that finds no tests (a test adapter that stopped matching, say) fails instead of passing.
       - name: Unit & behaviour tests
-        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
+        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx" --blame-hang-timeout 5m -- RunConfiguration.TreatNoTestsAsError=true
+      - name: Enough tests ran
+        shell: pwsh
+        run: |
+          [xml]$trx = Get-Content tests/AquaHub.Tests/TestResults/unit.trx
+          $c = $trx.TestRun.ResultSummary.Counters
+          "Tests: $($c.total) found, $($c.executed) run, $($c.passed) passed"
+          if ([int]$c.executed -lt 1000) { throw "Only $($c.executed) tests ran (there are over 1,000): has test discovery broken?" }
+      # Other calendars and number formats are where culture bugs hide (a Thai date once reached an English prompt).
+      - name: Unit tests as on a Thai PC
+        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build --blame-hang-timeout 5m -- RunConfiguration.TreatNoTestsAsError=true
+        env:
+          AQUAHUB_TEST_CULTURE: th-TH
+      - name: Unit tests as on an Arabic (Saudi) PC
+        run: dotnet test tests/AquaHub.Tests/AquaHub.Tests.csproj -c Release --no-build --blame-hang-timeout 5m -- RunConfiguration.TreatNoTestsAsError=true
+        env:
+          AQUAHUB_TEST_CULTURE: ar-SA
       - name: Vulnerability audit (fails on any known-vulnerable package)
         shell: pwsh
         run: |

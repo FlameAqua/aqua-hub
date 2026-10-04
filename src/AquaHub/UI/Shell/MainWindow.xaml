@@ -156,7 +156,7 @@
                                 </Grid.ColumnDefinitions>
                                 <c:Icon Kind="download" Width="16" Height="16" Foreground="{DynamicResource B.AccentText}" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center">
-                                    <TextBlock x:Name="UpdateBarText" TextWrapping="Wrap" FontSize="13" AutomationProperties.AutomationId="update-bar-text"/>
+                                    <TextBlock x:Name="UpdateBarText" TextWrapping="Wrap" FontSize="13" AutomationProperties.AutomationId="update-bar-text" AutomationProperties.LiveSetting="Polite"/>
                                     <ProgressBar x:Name="UpdateBarProgress" Height="4" Maximum="100" Margin="0,6,0,1" Visibility="Collapsed"
                                                  AutomationProperties.Name="Update download" AutomationProperties.AutomationId="update-bar-progress"/>
                                 </StackPanel>

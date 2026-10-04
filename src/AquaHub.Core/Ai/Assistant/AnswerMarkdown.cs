@@ -35,7 +35,7 @@ public enum MdAlign { None, Left, Center, Right }
 /// <summary>A GitHub-style table: every row has as many cells as the header.</summary>
 public sealed record MdTable(IReadOnlyList<string> Header, IReadOnlyList<MdAlign> Align, IReadOnlyList<IReadOnlyList<string>> Rows) : MdBlock;
 
-public enum MdSpan { Text, Bold, Italic, BoldItalic, Strike, Code, Math, Link, Citation, Url, Path }
+public enum MdSpan { Text, Bold, Italic, BoldItalic, Strike, Code, Math, Link, Citation, Url, Path, Break }
 
 /// <summary>
 /// A piece of a line. Bold, italic and struck-through text have <see cref="Children"/>; a link's or path's
@@ -69,11 +69,13 @@ public static partial class AnswerMarkdown
         {
             if (IsBlank(lines[i])) { i++; continue; }
             var start = i;
-            var block = Fence(lines, ref i) ?? DisplayMath(lines, ref i) ?? Table(lines, ref i) ?? Heading(lines, ref i) ?? Rule(lines, ref i)
+            MdBlock? after = null;
+            var block = Fence(lines, ref i) ?? DisplayMath(lines, ref i, ref after) ?? Table(lines, ref i) ?? Heading(lines, ref i) ?? Rule(lines, ref i)
                         ?? (depth < MaxDepth ? Quote(lines, ref i, depth) ?? List(lines, ref i, depth) : null)
                         ?? Paragraph(lines, ref i, depth);
             if (i == start) i++; // never stall on a line nothing claimed
-            blocks.Add(block with { Source = string.Join("\n", lines.Skip(start).Take(i - start)).TrimEnd() });
+            blocks.Add(block.Source.Length > 0 ? block : block with { Source = string.Join("\n", lines.Skip(start).Take(i - start)).TrimEnd() });
+            if (after is not null) blocks.Add(after);
         }
         return blocks;
     }
@@ -146,26 +148,16 @@ public static partial class AnswerMarkdown
     [GeneratedRegex(@"^\\begin\{(?<env>[A-Za-z]+\*?)\}")]
     private static partial Regex BeginRx();
 
-    private static MdBlock? DisplayMath(IReadOnlyList<string> lines, ref int i)
+    [GeneratedRegex(@"\\(?<kind>begin|end)\{[A-Za-z]+\*?\}")]
+    private static partial Regex EnvironmentRx();
+
+    private static MdBlock? DisplayMath(IReadOnlyList<string> lines, ref int i, ref MdBlock? after)
     {
         var t = lines[i].Trim();
         string open, close;
         if (t.StartsWith("$$", StringComparison.Ordinal)) (open, close) = ("$$", "$$");
         else if (t.StartsWith(@"\[", StringComparison.Ordinal)) (open, close) = (@"\[", @"\]");
-        else if (BeginRx().Match(t) is { Success: true } env && MathEnvironments.Contains(env.Groups["env"].Value))
-        {
-            // A bare environment: everything up to its \end, which stays part of the formula.
-            var end = @"\end{" + env.Groups["env"].Value + "}";
-            var body = new List<string>();
-            var k = i;
-            for (; k < lines.Count; k++)
-            {
-                body.Add(lines[k].Trim());
-                if (lines[k].Contains(end, StringComparison.Ordinal)) { k++; i = k; return new MdMath(string.Join("\n", body), true); }
-            }
-            i = k;
-            return new MdMath(string.Join("\n", body), false);
-        }
+        else if (BeginRx().Match(t) is { Success: true } env && MathEnvironments.Contains(env.Groups["env"].Value)) return BareEnvironment(lines, ref i, ref after);
         else return null;
 
         var rest = t[open.Length..];
@@ -199,7 +191,45 @@ public static partial class AnswerMarkdown
         return new MdMath(string.Join("\n", parts), false);
     }
 
-    [GeneratedRegex(@"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$")]
+    /// <summary>
+    /// A bare environment: everything up to the \end that closes it, which stays part of the formula. Any name closes
+    /// it once the environments inside are closed (models write "\begin{align*} … \end{align}"); as with $$, a blank
+    /// line ends one that never closes, and words after the \end are a paragraph of their own.
+    /// </summary>
+    private static MdMath BareEnvironment(IReadOnlyList<string> lines, ref int i, ref MdBlock? after)
+    {
+        var body = new List<string>();
+        var depth = 0;
+        var k = i;
+        for (; k < lines.Count; k++)
+        {
+            var l = lines[k].Trim();
+            if (l.Length == 0) break;
+            foreach (Match m in EnvironmentRx().Matches(l))
+            {
+                depth += m.Groups["kind"].Value == "begin" ? 1 : -1;
+                if (depth > 0) continue;
+                var end = m.Index + m.Length;
+                var rest = l[end..].Trim();
+                i = k + 1;
+                if (!rest.Any(char.IsLetterOrDigit))
+                {
+                    body.Add(l);
+                    return new MdMath(string.Join("\n", body), true);
+                }
+                body.Add(l[..end]);
+                after = new MdParagraph(new[] { rest }) { Source = rest };
+                var latex = string.Join("\n", body);
+                return new MdMath(latex, true) { Source = latex };
+            }
+            body.Add(l);
+        }
+        i = k;
+        return new MdMath(string.Join("\n", body), false);
+    }
+
+    // Each run of spaces has one place to go (a pipe stands between two), so a long line that isn't a divider fails at once.
+    [GeneratedRegex(@"^\s*(?:\|\s*)?:?-+:?\s*(?:\|\s*:?-+:?\s*)*(?:\|\s*)?$")]
     private static partial Regex DelimiterRx();
 
     internal static bool IsTableStart(IReadOnlyList<string> lines, int i)
@@ -240,7 +270,8 @@ public static partial class AnswerMarkdown
 
     /// <summary>
     /// A table row's cells: split at "|", but not at an escaped "\|" or one inside `code` or $maths$ (so "$|x|$" stays
-    /// whole while "$5 | $6" — prices — splits). "&lt;br&gt;" in a cell is a line break.
+    /// whole while "$5 | $6" — prices — splits). An escaped pipe is a pipe, in code too (GitHub reads `a\|b` in a cell as
+    /// a|b); in maths "\|" is the double bar and stays. "&lt;br&gt;" in a cell is a line break.
     /// </summary>
     internal static List<string> Cells(string line)
     {
@@ -248,14 +279,15 @@ public static partial class AnswerMarkdown
         if (t.StartsWith('|')) t = t[1..];
         if (t.EndsWith('|') && !t.EndsWith(@"\|", StringComparison.Ordinal)) t = t[..^1];
         var shielded = new bool[t.Length];
+        var maths = new bool[t.Length];
         foreach (Match m in ShieldRx().Matches(t))
-            for (var k = m.Index; k < m.Index + m.Length; k++) shielded[k] = true;
+            for (var k = m.Index; k < m.Index + m.Length; k++) (shielded[k], maths[k]) = (true, t[m.Index] == '$');
         var cells = new List<string>();
         var sb = new StringBuilder();
         for (var k = 0; k < t.Length; k++)
         {
             var c = t[k];
-            if (c == '\\' && k + 1 < t.Length && t[k + 1] == '|' && !shielded[k]) { sb.Append('|'); k++; continue; }
+            if (c == '\\' && k + 1 < t.Length && t[k + 1] == '|' && !maths[k]) { sb.Append('|'); k++; continue; }
             if (c == '|' && !shielded[k]) { cells.Add(sb.ToString()); sb.Clear(); continue; }
             sb.Append(c);
         }
@@ -399,27 +431,35 @@ public static partial class AnswerMarkdown
 
     /// <summary>
     /// One line's pieces. Leftmost match wins; at the same place the order below decides: code, maths, emphasis, links,
-    /// citations, addresses, Windows paths and backslash escapes. A "$" pair counts as maths only the way Pandoc reads it
-    /// — "$" with no space after it, a closing "$" with no space before it and no digit after it — so prices don't.
+    /// citations, addresses, Windows paths, network paths and backslash escapes. A "$" pair counts as maths only the way
+    /// Pandoc reads it — "$" with no space after it, a closing "$" with no space before it and no digit after it — so
+    /// prices don't. No alternative reads past the next place another match of its kind could start (a \( formula can't
+    /// hold another \(, a link's address can't hold an unpaired bracket), so a line of thousands of unclosed openers is
+    /// read once, not once from each; the timeout is a backstop, and a line it stops is shown as plain text.
     /// </summary>
     [GeneratedRegex(
-        @"``(?<code2>.+?)``" +
+        @"```(?<code3>[^`\n]+?)```" +
+        @"|``(?<code2>.+?)``" +
         @"|`(?<code>[^`\n]+)`" +
         @"|\$\$(?<mathd>[^$\n]+?)\$\$" +
         @"|(?<![\\$\w])\$(?![\s$])(?<math>(?:[^$\\\n]|\\.)+?)(?<![\s\\])\$(?![\d$])" +
-        @"|\\\((?<mathp>.+?)\\\)" +
-        @"|\\\[(?<mathb>.+?)\\\]" +
+        @"|\\\((?<mathp>(?:[^\\\n]|\\[^()\n])+?)\\\)" +
+        @"|\\\[(?<mathb>(?:[^\\\n]|\\[^\[\]\n])+?)\\\]" +
         @"|\*\*\*(?<bi>[^*\n]+?)\*\*\*" +
         @"|\*\*(?<bold>(?:[^*\n]|\*(?!\*))+?)\*\*" +
         @"|~~(?<strike>[^~\n]+?)~~" +
         @"|(?<![*\w\\])\*(?![\s*])(?<it>[^*\n]+?)(?<![\s*\\])\*(?![*\w])" +
         @"|(?<![_\w\\])_(?![\s_])(?<it2>[^_\n]+?)(?<![\s_\\])_(?![_\w])" +
-        @"|\[(?<ltext>[^\]\n]{1,400})\]\((?<lurl>https?://[^\s)]+|file:/{2,3}[^)\n]+|[A-Za-z]:\\[^)\n]+)\)" +
+        // An address may hold one level of brackets (Wikipedia's "Foo_(bar)"); "[[1]](…)" is a citation that links.
+        @"|\[(?<ltext>\[\d{1,2}\]|[^\]\n]{1,400})\]\((?<lurl>https?://(?:[^\s()]|\([^\s()]*\))+|file:/{2,3}(?:[^()\n]|\([^()\n]*\))+|[A-Za-z]:\\(?:[^()\n]|\([^()\n]*\))+)\)" +
         @"|\[(?<cite>\d{1,2})\]" +
         @"|<(?<aurl>https?://[^\s<>]+)>" +
+        @"|(?<br><[bB][rR]\s*/?>)" +
         @"|(?<url>https?://[^\s<>()\[\]""']+[^\s<>()\[\]""'.,;:!?])" +
         @"|(?<![\w/\\])(?<path>[A-Za-z]:\\[^\s<>""|?*()\[\]]*[^\s<>""|?*()\[\].,;:!])" +
-        @"|\\(?<esc>[\\`*_{}\[\]()#+\-.!|$~<>])")]
+        // A network path is text as written: its backslashes aren't escapes.
+        @"|(?<![\w\\])(?<unc>\\\\[\w.$-]+\\[^\s<>""|?*]*)" +
+        @"|\\(?<esc>[\\`*_{}\[\]()#+\-.!|$~<>])", RegexOptions.None, matchTimeoutMilliseconds: 250)]
     private static partial Regex InlineRx();
 
     /// <summary>Emphasis inside emphasis goes this deep; anything deeper is plain text.</summary>
@@ -436,8 +476,19 @@ public static partial class AnswerMarkdown
             list.Add(new MdInline(MdSpan.Text, line));
             return list;
         }
+        MatchCollection matches;
+        try
+        {
+            matches = InlineRx().Matches(line);
+            _ = matches.Count; // reads the whole line now, where a line that takes too long can be caught
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            list.Add(new MdInline(MdSpan.Text, line));
+            return list;
+        }
         var at = 0;
-        foreach (Match m in InlineRx().Matches(line))
+        foreach (Match m in matches)
         {
             if (m.Index > at) AddText(list, line[at..m.Index]);
             list.Add(Token(m, depth));
@@ -463,6 +514,7 @@ public static partial class AnswerMarkdown
     {
         string G(string name) => m.Groups[name].Value;
         bool Has(string name) => m.Groups[name].Success;
+        if (Has("code3")) return new MdInline(MdSpan.Code, G("code3").Trim());
         if (Has("code2")) return new MdInline(MdSpan.Code, G("code2").Trim());
         if (Has("code")) return new MdInline(MdSpan.Code, G("code"));
         if (Has("mathd")) return new MdInline(MdSpan.Math, G("mathd").Trim(), m.Value);
@@ -479,11 +531,14 @@ public static partial class AnswerMarkdown
         if (Has("aurl")) return new MdInline(MdSpan.Url, G("aurl"), G("aurl"));
         if (Has("url")) return new MdInline(MdSpan.Url, G("url"), G("url"));
         if (Has("path")) return new MdInline(MdSpan.Path, G("path"), G("path"));
+        if (Has("br")) return new MdInline(MdSpan.Break, "\n");
+        if (Has("unc")) return new MdInline(MdSpan.Text, G("unc"));
         return new MdInline(MdSpan.Text, G("esc"));
     }
 
     /// <summary>A line's text without its Markdown (what a table column's width is judged by).</summary>
     public static string Plain(string line) => Plain(Inlines(line));
 
-    private static string Plain(IReadOnlyList<MdInline> pieces) => string.Concat(pieces.Select(p => p.Children is { } children ? Plain(children) : p.Text));
+    private static string Plain(IReadOnlyList<MdInline> pieces) =>
+        string.Concat(pieces.Select(p => p.Children is { } children ? Plain(children) : p.Kind == MdSpan.Break ? " " : p.Text));
 }

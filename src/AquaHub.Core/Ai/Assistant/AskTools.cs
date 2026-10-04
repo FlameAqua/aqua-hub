@@ -100,10 +100,18 @@ public sealed class AskRun
     public string Question { get; init; } = "";
     /// <summary>Set once the answer has looked at files, the screen, the clipboard or attachments.</summary>
     public bool SawPrivate { get; set; }
+    /// <summary>
+    /// An earlier answer in this chat did (<see cref="AskChatContext.ReadPrivate"/>): what it read can be in the messages,
+    /// notes and summary this answer is sent, so reaching the web asks just as after <see cref="SawPrivate"/>.
+    /// </summary>
+    public bool EarlierPrivate => Chat?.ReadPrivate == true;
     /// <summary>Tools (and "web-after-private") the user allowed for the rest of this chat.</summary>
     public required HashSet<string> AllowedForChat { get; init; }
     public int PagesRead;
-    /// <summary>Distinctive words from the user's calendar: a web query or link carrying them needs an OK.</summary>
+    /// <summary>
+    /// Distinctive words from the user's calendar, Memory and this chat's notes (numbers as "#" and their digits): a web
+    /// query or link carrying them needs an OK.
+    /// </summary>
     public HashSet<string> PrivateTerms { get; init; } = new(StringComparer.Ordinal);
     /// <summary>How well the user's feeds match the question (best hub-search score; ≥ 1.4 means they cover it).</summary>
     public double HubCoverage { get; set; }

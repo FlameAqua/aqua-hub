@@ -24,6 +24,12 @@ public static class Hub
     public static WindowManager Windows { get; set; } = null!;
     public static AskSession Ask { get; set; } = null!;
     public static OllamaManager Ollama { get; set; } = null!;
+    /// <summary>Aqua's own model runtime (llama.cpp servers per model); used when Settings' provider is "llamacpp".</summary>
+    public static AquaHub.Core.Ai.Local.LlamaRuntime Llama { get; set; } = null!;
+    /// <summary>Starts the runtime's servers inside a job that ends them with Aqua.</summary>
+    public static LlamaProcessHost LlamaHost { get; set; } = null!;
+    /// <summary>The AI settings' and Models tab's API for the runtime, its models and downloads.</summary>
+    public static LocalAi LocalAi { get; set; } = null!;
     public static UpdateService Updates { get; set; } = null!;
     public static HealthService Health { get; } = new();
     public static Dispatcher Ui { get; set; } = null!;

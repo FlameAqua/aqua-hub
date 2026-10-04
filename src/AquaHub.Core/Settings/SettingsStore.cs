@@ -310,6 +310,24 @@ public sealed partial class SettingsStore
         s.Ai.Endpoint = string.IsNullOrWhiteSpace(s.Ai.Endpoint) ? "http://127.0.0.1:11434" : s.Ai.Endpoint.Trim().TrimEnd('/');
         s.Ai.BriefTimes = Clean(s.Ai.BriefTimes).Where(t => TimePattern().IsMatch(t)).Distinct().ToList();
         if (string.IsNullOrWhiteSpace(s.Ai.Model)) s.Ai.Model = "auto";
+        s.Ai.Provider = (s.Ai.Provider ?? "").Trim().ToLowerInvariant() is var provider && provider is "ollama" or "openai" or "llamacpp" ? provider : "ollama";
+        var llama = s.Ai.Llama ??= new();
+        llama.Backend = llama.Backend is "auto" or "cuda12" or "cuda13" or "vulkan" or "cpu" ? llama.Backend : "auto";
+        // Only a llama-server.exe on a local drive: a settings file can't make Aqua start some other program.
+        llama.ServerPath = (llama.ServerPath ?? "").Trim().Trim('"');
+        if (llama.ServerPath.Length > 0 && !(IsLocalDrivePath(llama.ServerPath)
+            && Path.GetFileName(llama.ServerPath).Equals("llama-server.exe", StringComparison.OrdinalIgnoreCase))) llama.ServerPath = "";
+        llama.ModelsFolder = (llama.ModelsFolder ?? "").Trim().Trim('"');
+        if (llama.ModelsFolder.Length > 0 && !IsLocalDrivePath(llama.ModelsFolder)) llama.ModelsFolder = "";
+        llama.CreativeModel = ModelId(llama.CreativeModel);
+        llama.BackgroundModel = ModelId(llama.BackgroundModel);
+        llama.SearchModel = ModelId(llama.SearchModel);
+        llama.ContextTokens = llama.ContextTokens <= 0 ? 0 : Math.Clamp(llama.ContextTokens, 2048, 262144);
+        llama.CacheType = llama.CacheType is "f16" or "q8_0" or "q4_0" ? llama.CacheType : "q8_0";
+        llama.Mtp = llama.Mtp is "auto" or "on" or "off" ? llama.Mtp : "auto";
+        llama.IdleUnloadMinutes = Math.Clamp(llama.IdleUnloadMinutes, 0, 1440);
+        llama.CpuThreads = Math.Clamp(llama.CpuThreads, 0, 256);
+        llama.ReasoningEffort = llama.ReasoningEffort is "low" or "medium" or "high" ? llama.ReasoningEffort : "medium";
 
         s.Ask.ResearchPages = Math.Clamp(s.Ask.ResearchPages, 3, 12);
         s.Ask.MaxPdfPages = Math.Clamp(s.Ask.MaxPdfPages, 1, 60);
@@ -342,6 +360,18 @@ public sealed partial class SettingsStore
 
     private static List<string> Clean(List<string>? values) =>
         (values ?? new()).Select(v => v?.Trim() ?? "").Where(v => v.Length > 0).ToList();
+
+    /// <summary>A fully qualified path on a drive ("D:\Models"), not a network share or a relative path.</summary>
+    internal static bool IsLocalDrivePath(string path) =>
+        path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/'
+        && path.IndexOfAny(Path.GetInvalidPathChars()) < 0 && Path.IsPathFullyQualified(path);
+
+    /// <summary>A model library id ("hf:owner/repo/file.gguf", "ollama:qwen3.5:9b"): one printable line, or empty.</summary>
+    private static string ModelId(string? id)
+    {
+        var t = (id ?? "").Trim();
+        return t.Length is > 0 and <= 300 && !t.Any(char.IsControl) ? t : "";
+    }
 
     private static List<WatchSymbol> CleanSymbols(List<WatchSymbol>? list) =>
         (list ?? new()).Where(w => w is not null && SymbolPattern().IsMatch(w.Symbol ?? ""))

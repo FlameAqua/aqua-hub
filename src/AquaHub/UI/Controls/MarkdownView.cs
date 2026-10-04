@@ -111,6 +111,22 @@ public sealed class MarkdownView : RichTextBox
 
     private static string? LocalPath(string target) => AnswerText.LocalPath(target);
 
+    private static readonly Dictionary<string, (bool Exists, long At)> Seen = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a path in an answer is a file or folder, remembered for a minute: an answer is drawn again for every
+    /// streamed chunk, and a disconnected network drive can take seconds to answer each time.
+    /// </summary>
+    private static bool Exists(string path)
+    {
+        var now = Environment.TickCount64;
+        if (Seen.TryGetValue(path, out var seen) && now - seen.At < 60_000) return seen.Exists;
+        var exists = File.Exists(path) || Directory.Exists(path);
+        if (Seen.Count > 500) Seen.Clear();
+        Seen[path] = (exists, now);
+        return exists;
+    }
+
     /// <summary>
     /// A file on the PC named in an answer: click opens documents, pictures and media (anything else is shown in its
     /// folder, never run); right-click also offers Show in folder.
@@ -134,20 +150,12 @@ public sealed class MarkdownView : RichTextBox
         return link;
     }
 
-    /// <summary>What a click on a file opens with its app; everything else is only shown in File Explorer.</summary>
-    private static readonly HashSet<string> Viewable = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".ico", ".pdf", ".txt", ".md", ".rtf", ".csv", ".log",
-        ".doc", ".docx", ".odt", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".odp", ".mp3", ".wav", ".flac", ".m4a", ".ogg", ".mp4", ".mkv",
-        ".mov", ".avi", ".webm",
-    };
-
     /// <summary>Opens a file from an answer: documents, pictures and media with their app; programs, scripts and folders are shown in File Explorer.</summary>
     public static void OpenFile(string path, bool reveal = false)
     {
         var isFile = File.Exists(path);
         if (!isFile && !Directory.Exists(path)) return;
-        var open = !reveal && isFile && Viewable.Contains(Path.GetExtension(path));
+        var open = !reveal && isFile && AnswerText.OpensWithItsApp(path);
         if (Sandbox.Intercept(open ? "open-file" : "reveal-file", path)) return;
         try
         {
@@ -237,7 +245,7 @@ public sealed class MarkdownView : RichTextBox
             if (i > 0) code.Inlines.Add(new LineBreak());
             var line = lines[i].TrimEnd();
             var path = LocalPath(line.Trim());
-            code.Inlines.Add(path is not null && (File.Exists(path) || Directory.Exists(path)) ? FileLink(new Run(line), path) : new Run(line));
+            code.Inlines.Add(path is not null && Exists(path) ? FileLink(new Run(line), path) : new Run(line));
         }
         return code;
     }
@@ -408,8 +416,10 @@ public sealed class MarkdownView : RichTextBox
             case MdSpan.Url when piece.Target is { } url:
                 return WebLink(piece.Text, url);
             // A bare path ends at the first space, so it's a link only when that is a real file or folder.
-            case MdSpan.Path when LocalPath(piece.Text) is { } bare && (File.Exists(bare) || Directory.Exists(bare)):
+            case MdSpan.Path when LocalPath(piece.Text) is { } bare && Exists(bare):
                 return FileLink(new Run(piece.Text), bare);
+            case MdSpan.Break:
+                return new LineBreak();
             default:
                 return new Run(piece.Text);
         }

@@ -260,7 +260,16 @@ public partial class MainWindow : Window
         UpdateBarNotes.Content = u.Notes.Length > 0 ? "What's new" : "Details";
         UpdateBarNotes.Visibility = banner.Notes ? Visibility.Visible : Visibility.Collapsed;
         UpdateBar.Visibility = Visibility.Visible;
+        // Screen readers hear about a new version, and each step after, once (not every percent of a download).
+        var step = key + ":" + u.Stage + ":" + (u.Error is { Length: > 0 });
+        if (step != _updateAnnounced && System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(UpdateBarText) is { } peer)
+        {
+            _updateAnnounced = step;
+            peer.RaiseAutomationEvent(System.Windows.Automation.Peers.AutomationEvents.LiveRegionChanged);
+        }
     }
+
+    private string? _updateAnnounced;
 
     private async void OnUpdateBarAction(object sender, RoutedEventArgs e)
     {

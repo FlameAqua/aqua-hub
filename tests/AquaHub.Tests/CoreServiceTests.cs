@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using AquaHub.Core;
 using AquaHub.Core.Agents;
@@ -7,6 +8,7 @@ using AquaHub.Core.Models;
 using AquaHub.Core.Net;
 using AquaHub.Core.Settings;
 using AquaHub.Core.Sources;
+using AquaHub.Core.Util;
 
 namespace AquaHub.Tests;
 
@@ -23,8 +25,13 @@ public sealed class TempDir : IDisposable
     }
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(Path, true); } catch { }
+        // Only this folder's databases: clearing every pool (ClearAllPools) broke tests running alongside (about 1 run in 75).
+        try
+        {
+            foreach (var db in Directory.EnumerateFiles(Path, "*.db", SearchOption.AllDirectories)) AquaHub.Core.Data.HubDatabase.ReleaseFile(db);
+        }
+        catch (IOException) { }
+        Junction.DeleteTree(Path);
     }
 }
 
@@ -295,6 +302,73 @@ public class PredictionParsingTests
     }
 }
 
+/// <summary>
+/// A test that makes folders for Ask to read next to the test binaries: reported as skipped, with the reason, when those
+/// sit under AppData, ProgramData, Windows or Program Files (a checkout in %TEMP%, say), where Ask refuses every folder by design.
+/// </summary>
+public sealed class ReadableFolderFactAttribute : FactAttribute
+{
+    public ReadableFolderFactAttribute()
+    {
+        if (AquaHub.Core.Ai.Assistant.LocalFiles.IsSensitiveFolder(AppContext.BaseDirectory))
+            Skip = $"The test binaries are in a folder Ask never reads ({AppContext.BaseDirectory}); run the tests from a checkout outside AppData";
+    }
+}
+
+/// <summary>A test that needs symbolic links: skipped, with the reason, where they can't be made (Developer Mode or admin).</summary>
+public sealed class LinkFactAttribute : FactAttribute
+{
+    private static readonly Lazy<bool> CanLink = new(() =>
+    {
+        var probe = Path.Combine(Path.GetTempPath(), "aquahub-link-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            Directory.CreateSymbolicLink(probe, Path.GetTempPath());
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+        finally { try { if (Directory.Exists(probe)) Directory.Delete(probe); } catch (IOException) { } }
+    });
+
+    public LinkFactAttribute()
+    {
+        if (!CanLink.Value) Skip = "Making a symbolic link needs Developer Mode or admin rights here (the junction tests cover the same rules)";
+    }
+}
+
+/// <summary>Directory junctions for tests: any user can make one (a symbolic link needs Developer Mode or admin).</summary>
+public static class Junction
+{
+    public static void Create(string link, string target)
+    {
+        using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+        })!;
+        var error = mklink.StandardError.ReadToEnd();
+        mklink.WaitForExit(10_000);
+        Assert.True(new DirectoryInfo(link).LinkTarget is not null, "Couldn't make a junction: " + error);
+    }
+
+    /// <summary>Deletes a folder that may hold junctions or links: those first, one by one (a recursive delete can't remove them).</summary>
+    public static void DeleteTree(string folder)
+    {
+        try
+        {
+            RemoveLinks(folder);
+            Directory.Delete(folder, true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+
+        static void RemoveLinks(string dir)
+        {
+            foreach (var d in new DirectoryInfo(dir).EnumerateDirectories())
+                if (d.LinkTarget is not null) d.Delete();
+                else RemoveLinks(d.FullName);
+        }
+    }
+}
+
 /// <summary>A test that only runs with AQUAHUB_LIVE=1 and is reported as skipped (not passed) otherwise.</summary>
 public sealed class LiveFactAttribute : FactAttribute
 {
@@ -342,5 +416,48 @@ public class LiveSmokeTests
         Assert.NotEmpty(core.State.Stories);
         Assert.NotEmpty(core.State.Quotes);
         Assert.NotNull(core.State.Weather);
+    }
+}
+
+/// <summary>
+/// Aqua's words keep English dates on the Gregorian calendar whatever Windows uses (the audit ran the suite under Thai
+/// and Arabic (Saudi) cultures: a Thai date reached an English prompt, and the Um Al-Qura calendar threw on an old date).
+/// </summary>
+public class CalendarCultureTests
+{
+    [Theory]
+    [InlineData("th-TH")]
+    [InlineData("ar-SA")]
+    public void DatesInAquasWordsDontFollowTheSystemsCalendar(string culture)
+    {
+        var saved = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
+            var now = new DateTimeOffset(2026, 10, 3, 12, 0, 0, TimeSpan.Zero);
+            Assert.Equal("on 15 Sep", TimeText.AgoPhrase(new DateTimeOffset(2026, 9, 15, 12, 0, 0, TimeSpan.Zero), now));
+            Assert.Equal("15 Jan", TimeText.Ago(new DateTimeOffset(1850, 1, 15, 12, 0, 0, TimeSpan.Zero), now));
+            var brief = Prompts.Brief("WEATHER: none", "morning", new HubSettings()).Messages[0].Content;
+            Assert.Matches(@"Digest for (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d{1,2} [A-Z][a-z]+", brief);
+        }
+        finally { CultureInfo.CurrentCulture = saved; }
+    }
+}
+
+/// <summary>The suite's own scratch folders go when their test ends (the audit's TL2: a cleanup that did nothing passed every test).</summary>
+public class TempDirTests
+{
+    [Fact]
+    public void ATempDirIsGoneAfterItsTestWithItsDatabaseAndAJunctionInIt()
+    {
+        string path;
+        using (var dir = new TempDir())
+        {
+            path = dir.Path;
+            new HubDatabase(Path.Combine(dir.Path, "hub.db")).PutJson("ask:chats", Array.Empty<int>());
+            var target = Directory.CreateDirectory(Path.Combine(dir.Path, "target")).FullName;
+            Junction.Create(Path.Combine(dir.Path, "link"), target);
+        }
+        Assert.False(Directory.Exists(path));
     }
 }

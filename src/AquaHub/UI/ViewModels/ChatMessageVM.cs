@@ -134,8 +134,16 @@ public sealed class ChatMessageVM : ObservableObject
     /// <summary>Sent to the model as part of the chat's summary rather than in full (shown faded).</summary>
     public bool IsCompressed { get => _compressed; set => Set(ref _compressed, value); }
     /// <summary>On the first message after the compressed ones: the line that says so, with the summary and Undo.</summary>
-    public CompressionVM? Compression { get => _compression; set { if (Set(ref _compression, value)) Raise(nameof(HasCompression)); } }
-    public bool HasCompression => _compression is not null;
+    public CompressionVM? Compression { get => _compression; set => Set(ref _compression, value); }
+}
+
+/// <summary>A folder the chat on screen may search and read (attached earlier in it), with a way to take it back.</summary>
+public sealed class FolderGrantVM(string path, Action remove)
+{
+    public string Path { get; } = path;
+    public string Name { get; } = System.IO.Path.GetFileName(path.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : path;
+    public string Tooltip => $"This chat can search and read {Path}. Remove it to stop.";
+    public ICommand RemoveCommand { get; } = new RelayCommand(remove);
 }
 
 /// <summary>"12 earlier messages are sent as a summary · saved about 7.9K tokens", with Show summary and Undo.</summary>
@@ -227,6 +235,8 @@ public sealed class AttachmentChipVM : ObservableObject
     public bool IsLoading { get => _loading; set => Set(ref _loading, value); }
     public ICommand? RemoveCommand { get; set; }
     public AskAttachment? Attachment { get; set; }
+    /// <summary>On the "not attached" chip: how many were left out because the message was full.</summary>
+    public int LeftOut { get; init; }
     public string Tooltip => Note.Length > 0 ? $"{Name} · {Note}" : Name;
     /// <summary>On a sent question: the attached picture (kept with the chat like the ones Ask looks at), and opening it.</summary>
     public PictureVM? Picture { get; set; }

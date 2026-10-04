@@ -102,12 +102,42 @@ public class FeedParserTests
         $"""<!DOCTYPE {root} [ <!ENTITY web SYSTEM "http://127.0.0.1:{port}/entity"> <!ENTITY file SYSTEM "{new Uri(secretFile).AbsoluteUri}"> """ +
         $"""<!ENTITY % remote SYSTEM "http://127.0.0.1:{port}/dtd"> %remote; <!ENTITY lol "lol"> <!ENTITY lots "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;"> ]>""";
 
+    /// <summary>
+    /// A loopback listener that notes every connection and hangs up at once: a parser that dials out is caught, and fails
+    /// fast instead of waiting a minute or two for an answer.
+    /// </summary>
+    private sealed class Tripwire : IDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener _listener = new(System.Net.IPAddress.Loopback, 0);
+        private int _hits;
+
+        public Tripwire()
+        {
+            _listener.Start();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    while (true)
+                    {
+                        using var client = await _listener.AcceptTcpClientAsync();
+                        Interlocked.Increment(ref _hits);
+                    }
+                }
+                catch (Exception e) when (e is System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException) { } // stopped
+            });
+        }
+
+        public int Port => ((System.Net.IPEndPoint)_listener.LocalEndpoint).Port;
+        public int Hits => Volatile.Read(ref _hits);
+        public void Dispose() => _listener.Stop();
+    }
+
     [Fact]
     public void AFeedsDtdIsNeverFetchedOrExpanded()
     {
-        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var wire = new Tripwire();
+        var port = wire.Port;
         var secret = Path.Combine(AppContext.BaseDirectory, $"xxe-{Guid.NewGuid():N}.txt");
         File.WriteAllText(secret, "TOP-SECRET-MARKER");
         try
@@ -123,21 +153,19 @@ public class FeedParserTests
                 Assert.Throws<System.Xml.XmlException>(() => FeedParser.Parse(xml));
                 Assert.Throws<System.Xml.XmlException>(() => FeedParser.Parse(System.Text.Encoding.UTF8.GetBytes(xml)));
             }
-            Assert.False(listener.Pending(), "the feed parser connected to the address in the DTD");
+            Assert.True(wire.Hits == 0, "the feed parser connected to the address in the DTD");
         }
         finally
         {
             File.Delete(secret);
-            listener.Stop();
         }
     }
 
     [Fact]
     public void AWordFilesDtdIsRefusedUnread()
     {
-        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var wire = new Tripwire();
+        var port = wire.Port;
         using var dir = new TempDir();
         var secret = Path.Combine(dir.Path, "secret.txt");
         File.WriteAllText(secret, "TOP-SECRET-MARKER");
@@ -148,8 +176,7 @@ public class FeedParserTests
 
         // Office never writes a DTD, so a document with one isn't read at all.
         Assert.Throws<System.Xml.XmlException>(() => AquaHub.Core.Ai.Assistant.Documents.ReadText(docx));
-        Assert.False(listener.Pending(), "the document reader connected to the address in the DTD");
-        listener.Stop();
+        Assert.True(wire.Hits == 0, "the document reader connected to the address in the DTD");
     }
 
     [Fact]

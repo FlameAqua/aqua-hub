@@ -185,6 +185,19 @@ public static class Fmt
     });
 }
 
+/// <summary>
+/// What's wrong with a feed, for its row in Settings ("Not found at this address (HTTP 404), first 3h ago …"), from its
+/// collector's <see cref="Core.Sources.SourceHealth"/>; "" while it works. The parameter is the source id's prefix
+/// ("feed:" for your extra feeds, "youtube:" for channels).
+/// </summary>
+public sealed class SourceProblemText : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is string id && Services.Hub.State?.Sources[(parameter as string ?? "") + id] is { } problem ? problem.Describe(DateTimeOffset.Now) : "";
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
+}
+
 public sealed class BoolToVisibility : IValueConverter
 {
     public bool Invert { get; set; }

@@ -27,8 +27,8 @@ public static class Portfolio
 
     /// <summary>
     /// Today's value, day change and gain of every holding in <see cref="MarketSettings.BaseCurrency"/>. A cost paid in
-    /// the base currency is taken as it is; any other is converted at today's rate, so its gain includes the currency's
-    /// move since.
+    /// the base currency is taken as it is, so its gain includes the currency's move since; any other (the currency
+    /// it's priced in, by default) is converted at today's rate, so its gain is the price's move alone.
     /// </summary>
     public static PortfolioSummary Value(MarketSettings m, IReadOnlyDictionary<string, Quote> quotes, FxRates fx)
     {
@@ -69,25 +69,27 @@ public static class Portfolio
     /// left out and returned in <paramref name="missing"/>.
     /// </summary>
     /// <param name="closes">Stored daily closes by symbol (oldest first, unix seconds), e.g. HubDatabase.GetCloses.</param>
+    /// <param name="today">When given, the chart ends today at the latest prices (the card's value), after the stored closes.</param>
     public static List<PortfolioPoint> History(MarketSettings m, IReadOnlyDictionary<string, Quote> quotes, FxRates fx,
-        Func<string, IReadOnlyList<(long Day, double Close)>> closes, DateOnly from, out List<string> missing)
+        Func<string, IReadOnlyList<(long Day, double Close)>> closes, DateOnly from, out List<string> missing, DateOnly? today = null)
     {
         missing = new List<string>();
-        var series = new List<(Daily Values, double Shares, Daily? Rates, double Rate, double Factor)>();
+        var series = new List<(Daily Values, double Shares, Daily? Rates, double Rate, double Factor, double? Price)>();
         foreach (var w in Holdings(m))
         {
-            var currency = quotes.GetValueOrDefault(w.Symbol)?.Currency ?? "";
+            var quote = quotes.GetValueOrDefault(w.Symbol);
+            var currency = quote?.Currency ?? "";
             var (major, factor) = FxRates.Major(currency);
             var (to, toFactor) = FxRates.Major(m.BaseCurrency);
             var history = closes(w.Symbol);
-            if (history.Count == 0 || major.Length == 0 || to.Length == 0 || !fx.TryRate(major, to, out var today))
+            if (history.Count == 0 || major.Length == 0 || to.Length == 0 || !fx.TryRate(major, to, out var rate))
             {
                 missing.Add(w.Symbol);
                 continue;
             }
             Daily? rates = null;
             if (FxRates.PairSymbol(major, to) is { } pair && closes(pair) is { Count: > 0 } pairHistory) rates = new Daily(pairHistory);
-            series.Add((new Daily(history), w.Shares!.Value, rates, today, factor / toFactor));
+            series.Add((new Daily(history), w.Shares!.Value, rates, rate, factor / toFactor, quote?.Price is > 0 and var price && double.IsFinite(price) ? price : (double?)null));
         }
         if (series.Count == 0) return new List<PortfolioPoint>();
 
@@ -110,6 +112,9 @@ public static class Portfolio
             // Before a holding's first stored close the total would jump when it starts; begin once all have one.
             if (complete) points.Add(new PortfolioPoint(day, total));
         }
+        // Today at the latest prices and rates, so the chart ends where the card's value is.
+        if (today is { } now && points.Count > 0 && points[^1].Day < now && series.All(s => s.Price is not null))
+            points.Add(new PortfolioPoint(now, series.Sum(s => s.Price!.Value * s.Shares * s.Rate * s.Factor)));
         return points;
     }
 

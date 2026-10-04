@@ -211,7 +211,7 @@ public sealed class AskService
         {
             Purpose = "ask",
             Priority = LlmPriority.Interactive,
-            System = Prompts.AskSystem(s) + "\n\n" + Prompts.UntrustedNotice + "\n\nCONTEXT:\n<<<DATA\n" + context.Text + "\nDATA>>>",
+            System = Prompts.AskSystem(s) + "\n\n" + Prompts.UntrustedNotice + "\n\nCONTEXT:\n" + Prompts.Fenced(context.Text),
             Messages = history.TakeLast(6).Append(new LlmMessage("user", question)).ToList(),
             Temperature = 0.35,
             MaxTokens = 900,

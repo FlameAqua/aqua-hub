@@ -112,6 +112,43 @@ public sealed partial class LocalFiles
     public static bool IsSensitiveFolder(string path) => SensitiveFolder().IsMatch(path);
 
     /// <summary>
+    /// A folder offered as a root (attached to a chat, or added in Settings) that holds app data or credentials, judged by
+    /// where it really is as well as by its name: a junction called "Notes" that leads to .ssh is .ssh. Unreadable paths
+    /// count as sensitive.
+    /// </summary>
+    public static bool IsSensitiveRoot(string folder)
+    {
+        try
+        {
+            var full = Path.GetFullPath(folder);
+            return IsSensitiveFolder(full) || IsSensitiveFolder(RealPath(full));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return true; }
+    }
+
+    /// <summary>Where a folder really is: the junctions and links in its path followed (its own path when there are none).</summary>
+    internal static string RealPath(string fullPath)
+    {
+        var path = fullPath;
+        for (var hops = 0; hops < 8; hops++)
+        {
+            string? real = null;
+            for (var dir = path; dir is not null; dir = Path.GetDirectoryName(dir))
+            {
+                var info = new DirectoryInfo(dir);
+                if (info.Exists && info.LinkTarget is not null && info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                {
+                    real = Path.GetFullPath(Path.Join(target.FullName, Path.GetRelativePath(dir, path)));
+                    break;
+                }
+            }
+            if (real is null) return path;
+            path = real;
+        }
+        return path;
+    }
+
+    /// <summary>
     /// A sensitive file, or one inside a sensitive folder <em>below</em> <paramref name="root"/> (a root you chose
     /// yourself is judged when you add it, so your Documents can live anywhere).
     /// </summary>
@@ -122,6 +159,7 @@ public sealed partial class LocalFiles
     {
         reason = "";
         fullPath = "";
+        // GetFullPath also spells out 8.3 short names of folders that exist ("SSH~1" → ".ssh"), so the rules see real names.
         try { fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'))); }
         catch { reason = "That isn't a valid path"; return false; }
         const string never = "Aqua never reads passwords, keys or app data";
@@ -136,7 +174,23 @@ public sealed partial class LocalFiles
             return false;
         }
         if (IsSensitive(fullPath, root)) { reason = never; return false; }
+        // A junction or link inside your folders could lead anywhere (app data, another drive): searches never follow one, nor does this.
+        if (ThroughLink(fullPath, root)) { reason = "Aqua doesn't follow links out of the folders it may read"; return false; }
         return true;
+    }
+
+    /// <summary>Whether the path itself (a file or folder) or a folder between it and <paramref name="root"/> is a junction or link.</summary>
+    private static bool ThroughLink(string fullPath, string root)
+    {
+        var top = root.TrimEnd(Path.DirectorySeparatorChar).Length;
+        try
+        {
+            if (File.Exists(fullPath) && new FileInfo(fullPath).LinkTarget is not null) return true;
+            for (var dir = fullPath; dir is not null && dir.Length > top; dir = Path.GetDirectoryName(dir))
+                if (Directory.Exists(dir) && new DirectoryInfo(dir).LinkTarget is not null) return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
+        return false;
     }
 
     public static bool IsUnder(string path, string root) =>
@@ -500,11 +554,11 @@ public sealed partial class LocalFiles
                     if (IsSensitive(f, folder)) continue;
                     if (++count >= cap) break;
                 }
-                foreach (var d in Directory.EnumerateDirectories(dir))
+                foreach (var d in new DirectoryInfo(dir).EnumerateDirectories())
                 {
-                    var name = Path.GetFileName(d);
-                    if (SkipDirs.Contains(name) || name.StartsWith('.') || IsSensitive(d + Path.DirectorySeparatorChar + "x", folder)) continue;
-                    queue.Enqueue(d);
+                    // Like a search: no junctions or links (a loop, or a folder somewhere else entirely).
+                    if (SkipDirs.Contains(d.Name) || d.Name.StartsWith('.') || d.LinkTarget is not null || IsSensitive(d.FullName + Path.DirectorySeparatorChar + "x", folder)) continue;
+                    queue.Enqueue(d.FullName);
                 }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException) { }

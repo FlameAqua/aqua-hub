@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using AquaHub.Core.Settings;
 using AquaHub.Core.Updates;
 
 namespace AquaHub.Tests;
@@ -54,8 +55,12 @@ public class UiContractTests
     }
 
     [Theory]
-    [InlineData(UpdatePolicy.Target)]   // the update alerts
-    [InlineData("settings:location")]   // Today's "Choose a place"
+    [InlineData(UpdatePolicy.Target)]            // the update alerts
+    [InlineData("settings:location")]            // Today's "Choose a place"
+    [InlineData("settings:markets:watchlist")]   // Markets' watchlist "Edit"
+    [InlineData("settings:news:sources")]        // a news feed that isn't at its address any more
+    [InlineData("settings:social:extrafeeds")]   // …one of your own feeds
+    [InlineData("settings:social:youtube")]      // …a YouTube channel's
     public void LinkedSettingsRowsExist(string target)
     {
         // "settings:<section>[:<row>]" opens the section's panel (P_<section>) and scrolls to the row (Row_<row>).
@@ -65,5 +70,24 @@ public class UiContractTests
             .SelectMany(x => x.Doc.Descendants()).Select(e => (string?)e.Attribute(X + "Name")).OfType<string>().ToHashSet();
         Assert.Contains("P_" + parts[1], names);
         if (parts.Length > 2) Assert.Contains("Row_" + parts[2], names);
+    }
+
+    [Fact]
+    public void TheShortcutsListedForTheWholeWindowAreTheOnesItHandles()
+    {
+        // The Shortcuts page lists Aqua's own keys by hand; MainWindow.OnKey is where "anywhere in Aqua" ones are handled.
+        var window = File.ReadAllText(Path.Combine(Repo(), "src", "AquaHub", "UI", "Shell", "MainWindow.xaml.cs"));
+        var start = window.IndexOf("void OnKey(", StringComparison.Ordinal);
+        Assert.True(start >= 0, "MainWindow.OnKey not found");
+        var handled = System.Text.RegularExpressions.Regex.Matches(window[start..Math.Min(window.Length, start + 4000)], @"Key\.(\w+)")
+            .Select(m => m.Groups[1].Value).ToHashSet();
+        static string KeyOf(string caps) => caps.Split('+')[^1] switch
+        {
+            "Esc" => "Escape", "," => "OemComma", var k when k.StartsWith("1…", StringComparison.Ordinal) => "D1", var k => k,
+        };
+        var listed = Shortcuts.InApp.Where(e => e.Where == "Anywhere in Aqua").Select(e => KeyOf(e.Keys)).ToList();
+        Assert.All(listed, k => Assert.Contains(k, handled));
+        // …and nothing handled there goes unlisted (Ctrl+9 is the end of the Ctrl+1…9 range).
+        Assert.All(handled.Where(k => k != "D9"), k => Assert.Contains(k, listed));
     }
 }

@@ -169,7 +169,9 @@ public static class PcHealth
         if (f.Battery is { DesignWh: > 0, FullWh: > 0 } battery)
         {
             var health = battery.FullWh / battery.DesignWh;
-            var detail = $"It holds {health:P0} of the charge it did new ({battery.FullWh:0.#} of {battery.DesignWh:0.#} Wh)" + (battery.Cycles is > 0 ? $", after {battery.Cycles} charge cycles." : ".");
+            // "55%" in the English sentence, whatever the PC's region writes ("55 %", "%55").
+            var detail = $"It holds {(health * 100).ToString("0", CultureInfo.InvariantCulture)}% of the charge it did new ({battery.FullWh:0.#} of {battery.DesignWh:0.#} Wh)" +
+                         (battery.Cycles is > 0 ? $", after {battery.Cycles} charge cycles." : ".");
             list.Add(health < 0.6
                 ? new("Battery", HealthLevel.Warning, "The battery has worn down", detail, "Expect shorter battery life; a replacement battery restores it.")
                 : new("Battery", HealthLevel.Good, "The battery is in good shape", detail));

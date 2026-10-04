@@ -240,7 +240,7 @@
                         <c:SettingRow Icon="sparkle" Title="Stories to summarise with AI" Description="Top stories that get an on-device summary each run.">
                             <TextBox Text="{Binding News.SummarizeTop, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="layers" Title="Sources" Description="Tier 1 = wire services &amp; public broadcasters, 2 = reputable outlets, 3 = aggregators.">
+                        <c:SettingRow x:Name="Row_sources" Icon="layers" Title="Sources" Description="Tier 1 = wire services &amp; public broadcasters, 2 = reputable outlets, 3 = aggregators.">
                             <c:SettingRow.Below>
                                 <StackPanel>
                                     <ItemsControl x:Name="SourcesList">
@@ -257,6 +257,8 @@
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Name}" FontSize="13.5"/>
                                                         <TextBlock Style="{StaticResource T.Caption}"><Run Text="{Binding Category, Mode=OneWay}"/><Run Text=" · tier "/><Run Text="{Binding Tier, Mode=OneWay}"/><Run Text="{Binding Query, Mode=OneWay, StringFormat=' · Google News: {0}'}"/></TextBlock>
+                                                        <TextBlock Text="{Binding Id, Converter={StaticResource SourceProblem}}" Style="{StaticResource T.Caption}" Foreground="{DynamicResource B.Warn}" TextWrapping="Wrap"
+                                                                   Visibility="{Binding Text, RelativeSource={RelativeSource Self}, Converter={StaticResource Vis}}"/>
                                                     </StackPanel>
                                                     <Button Grid.Column="3" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveSource" Tag="{Binding Id}" ToolTip="Remove source">
                                                         <c:Icon Kind="trash" Width="13" Height="13"/>
@@ -291,7 +293,7 @@
                         <TextBlock Text="Social" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
                         <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
                                    Text="Public posts from your communities, and your Bluesky and Mastodon timelines if you connect them. For X, Facebook or Instagram, add an RSS bridge such as RSSHub as an extra feed."/>
-                        <c:SettingRow x:Name="Row_bluesky" Icon="user" Title="Your Bluesky timeline" Description="Posts from people you follow. Use an app password (Bluesky › Settings › Privacy and security › App passwords).">
+                        <c:SettingRow x:Name="Row_bluesky" Icon="user" Title="Your Bluesky timeline" Description="Posts from people you follow. Use an app password (Bluesky › Settings › Privacy and security › App passwords); it's kept in Windows Credential Manager.">
                             <c:SettingRow.Below>
                                 <StackPanel>
                                     <Grid>
@@ -310,7 +312,7 @@
                                 </StackPanel>
                             </c:SettingRow.Below>
                         </c:SettingRow>
-                        <c:SettingRow x:Name="Row_mastodon" Icon="hash" Title="Your Mastodon home timeline" Description="A token with the read:statuses scope (Mastodon › Preferences › Development), for the server below.">
+                        <c:SettingRow x:Name="Row_mastodon" Icon="hash" Title="Your Mastodon home timeline" Description="A token with the read:statuses scope (Mastodon › Preferences › Development), for the server below. Kept in Windows Credential Manager.">
                             <c:SettingRow.Below>
                                 <StackPanel>
                                     <Grid>
@@ -369,6 +371,8 @@
                                                         <TextBlock Style="{StaticResource T.Caption}">
                                                             <Run Text="{Binding Handle, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding ChannelId, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/>
                                                         </TextBlock>
+                                                        <TextBlock Text="{Binding ChannelId, Converter={StaticResource SourceProblem}, ConverterParameter=youtube:}" Style="{StaticResource T.Caption}" Foreground="{DynamicResource B.Warn}" TextWrapping="Wrap"
+                                                                   Visibility="{Binding Text, RelativeSource={RelativeSource Self}, Converter={StaticResource Vis}}"/>
                                                     </StackPanel>
                                                     <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveChannel" Tag="{Binding ChannelId}" ToolTip="Remove channel"
                                                             AutomationProperties.Name="{Binding Name, StringFormat=Remove channel {0}}">
@@ -391,7 +395,7 @@
                                 </StackPanel>
                             </c:SettingRow.Below>
                         </c:SettingRow>
-                        <c:SettingRow Icon="link" Title="Extra feeds" Description="Any RSS or Atom feed, shown as posts (for example an RSSHub bridge).">
+                        <c:SettingRow x:Name="Row_extrafeeds" Icon="link" Title="Extra feeds" Description="Any RSS or Atom feed, shown as posts (for example an RSSHub bridge).">
                             <c:SettingRow.Below>
                                 <StackPanel>
                                     <ItemsControl x:Name="ExtraFeedList">
@@ -407,6 +411,8 @@
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Name}" FontSize="13.5"/>
                                                         <TextBlock Text="{Binding Url}" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Id, Converter={StaticResource SourceProblem}, ConverterParameter=feed:}" Style="{StaticResource T.Caption}" Foreground="{DynamicResource B.Warn}" TextWrapping="Wrap"
+                                                                   Visibility="{Binding Text, RelativeSource={RelativeSource Self}, Converter={StaticResource Vis}}"/>
                                                     </StackPanel>
                                                     <Button Grid.Column="2" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveExtraFeed" Tag="{Binding Id}" ToolTip="Remove feed"
                                                             AutomationProperties.Name="{Binding Name, StringFormat=Remove feed {0}}">
@@ -478,12 +484,12 @@
                                                         <ColumnDefinition Width="36"/>
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"><Run Text="{Binding Symbol, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding Name, Mode=OneWay}" Foreground="{DynamicResource B.Text3}"/></TextBlock>
-                                                    <TextBox Grid.Column="1" Text="{Binding Shares, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Shares"/>
-                                                    <TextBox Grid.Column="2" Text="{Binding Cost, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Cost per share"/>
+                                                    <TextBox Grid.Column="1" Text="{Binding Shares, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Shares"/>
+                                                    <TextBox Grid.Column="2" Text="{Binding Cost, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Cost per share"/>
                                                     <ComboBox Grid.Column="3" ItemsSource="{Binding Currencies}" SelectedValuePath="Code" SelectedValue="{Binding CostCurrency}" Margin="0,0,6,0"
                                                               AutomationProperties.Name="Cost currency" ToolTip="The currency you paid in"/>
-                                                    <TextBox Grid.Column="4" Text="{Binding AlertAbove, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Alert above"/>
-                                                    <TextBox Grid.Column="5" Text="{Binding AlertBelow, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Alert below"/>
+                                                    <TextBox Grid.Column="4" Text="{Binding AlertAbove, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Alert above"/>
+                                                    <TextBox Grid.Column="5" Text="{Binding AlertBelow, UpdateSourceTrigger=PropertyChanged, ValidatesOnDataErrors=True}" Margin="0,0,6,0" MinHeight="30" Padding="8,4" AutomationProperties.Name="Alert below"/>
                                                     <Button Grid.Column="6" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnRemoveWatch" Tag="{Binding Symbol}" ToolTip="Remove">
                                                         <c:Icon Kind="trash" Width="13" Height="13"/>
                                                     </Button>
@@ -578,7 +584,7 @@
                         <c:SettingRow Icon="globe" Title="Economic calendar currencies">
                             <c:SettingRow.Below><c:ChipEditor x:Name="Currencies"/></c:SettingRow.Below>
                         </c:SettingRow>
-                        <c:SettingRow Icon="bolt" Title="Earnings dates (Finnhub)" Description="A free key from finnhub.io, for earnings dates.">
+                        <c:SettingRow Icon="bolt" Title="Earnings dates (Finnhub)" Description="A free key from finnhub.io, for earnings dates. Kept in Windows Credential Manager.">
                             <StackPanel Orientation="Horizontal">
                                 <PasswordBox x:Name="FinnhubKey" Width="220"/>
                                 <Button Style="{StaticResource Btn.Standard}" Content="Save key" Margin="6,0,0,0" Click="OnSaveFinnhub"/>
@@ -632,7 +638,7 @@
                                 <TextBox Text="{Binding Ai.Endpoint, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
                             </StackPanel>
                         </c:SettingRow>
-                        <c:SettingRow Icon="shield" Title="API key (OpenAI-compatible servers only)" Description="For servers that need a key (LM Studio, llama.cpp, vLLM).">
+                        <c:SettingRow Icon="shield" Title="API key (OpenAI-compatible servers only)" Description="For servers that need a key (LM Studio, llama.cpp, vLLM). Kept in Windows Credential Manager.">
                             <StackPanel Orientation="Horizontal">
                                 <PasswordBox x:Name="AiKey" Width="220" AutomationProperties.Name="AI server API key"/>
                                 <Button Style="{StaticResource Btn.Standard}" Content="Save key" Margin="6,0,0,0" Click="OnSaveAiKey"/>
@@ -758,7 +764,7 @@
                                 <ComboBoxItem Content="Off" Tag="off"/>
                             </ComboBox>
                         </c:SettingRow>
-                        <c:SettingRow x:Name="Row_whisper" Icon="download" Title="Whisper" Description="Accurate speech recognition on this PC. Installs whisper.cpp (8 MB) and the model you pick, each checked against its published SHA-256.">
+                        <c:SettingRow x:Name="Row_whisper" Icon="download" Title="Whisper" Description="Accurate speech recognition on this PC: your voice stays here. Downloads whisper.cpp (8 MB, from its GitHub release) and the model you pick (from Hugging Face), each checked against its published SHA-256.">
                             <StackPanel Orientation="Horizontal">
                                 <ComboBox x:Name="WhisperModelCombo" Width="260" SelectedValuePath="Id" SelectedValue="{Binding Ask.WhisperModel}" SelectionChanged="OnWhisperModelChanged"
                                           AutomationProperties.Name="Whisper model" AutomationProperties.AutomationId="whisper-model">
@@ -1075,7 +1081,7 @@
                         </Border>
                         <TextBlock Text="UPDATES" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
                         <c:SettingRow x:Name="Row_updates" Icon="download" Title="Updates"
-                                      Description="From Aqua Hub's GitHub releases. Nothing downloads until you choose to.">
+                                      Description="From Aqua Hub's GitHub releases. Nothing downloads until you choose to; a download is checked against its SHA-256 and installs when Aqua restarts.">
                             <StackPanel Orientation="Horizontal">
                                 <Button x:Name="UpdateCheckButton" Style="{StaticResource Btn.Standard}" Content="Check now" Click="OnUpdateCheck" MinWidth="90"
                                         AutomationProperties.AutomationId="update-check"/>
@@ -1099,7 +1105,7 @@
                             </c:SettingRow.Below>
                         </c:SettingRow>
                         <c:SettingRow Icon="refresh" Title="Check for updates automatically"
-                                      Description="About once a day.">
+                                      Description="About once a day. The request carries nothing about you.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.CheckForUpdates}" Click="OnAutoUpdateToggled"
                                       AutomationProperties.Name="Check for updates automatically"/>
                         </c:SettingRow>

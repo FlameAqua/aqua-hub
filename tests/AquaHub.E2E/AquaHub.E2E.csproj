@@ -4,7 +4,7 @@
     (System.Windows.Automation - the accessibility API behind WinAppDriver/Appium).
     The app under test is launched as a separate process in dry-run mode (the e2e switch) against a
     throw-away profile; nothing here references the src projects. Not part of AquaHub.sln on purpose.
-    See REPORT.md in this folder for how to run it and for the latest results.
+    How to run it: scripts/e2e.ps1 (its header) and the README's Testing section.
     Env overrides: AQUAHUB_E2E_EXE, AQUAHUB_E2E_PRISTINE, AQUAHUB_E2E_RUNS, AQUAHUB_E2E_AI_TIMEOUT (seconds).
   -->
   <PropertyGroup>
@@ -17,6 +17,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- xUnit analyzers: long-running UI flows are intentionally synchronous. -->
     <NoWarn>$(NoWarn);xUnit1031;xUnit1013;CS1591</NoWarn>
+    <!-- No lock file: this project ships nothing and its versions are pinned centrally (Directory.Packages.props); its
+         own lock file made every Dependabot update of a package it shares with the unit tests fail CI's locked restore. -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

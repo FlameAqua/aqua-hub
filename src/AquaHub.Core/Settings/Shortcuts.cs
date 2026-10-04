@@ -12,7 +12,7 @@ public static class Shortcuts
         new("Ctrl+K", "Command palette", "Anywhere in Aqua"),
         new("Ctrl+1…9", "Today, News, Social, Markets, Upcoming, This PC, Launchpad, Ask, Agents", "Anywhere in Aqua"),
         new("Ctrl+,", "Settings", "Anywhere in Aqua"),
-        new("F5", "Refresh the page", "Anywhere in Aqua"),
+        new("F5", "Refresh everything", "Anywhere in Aqua"),
         new("Esc", "Close a popup or panel", "Anywhere in Aqua"),
         new("Ctrl+F", "Search settings", "Settings"),
         new("Enter", "Send", "Ask"),

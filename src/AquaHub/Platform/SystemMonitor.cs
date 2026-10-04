@@ -25,6 +25,8 @@ public sealed class SystemMonitor : IDisposable
     private List<DiskInfo> _disks = new();
 
     public event Action<SystemSnapshot>? Sampled;
+    /// <summary>The graphics adapter with the most dedicated memory (name, PCI vendor id, bytes), or null.</summary>
+    public (string Name, uint Vendor, long DedicatedBytes)? GpuAdapter => _gpu.Primary;
     public SystemSnapshot? Latest { get; private set; }
     public readonly Queue<(double Cpu, double Ram, double Gpu, double NetDown, double NetUp)> History = new();
 
@@ -189,7 +191,7 @@ public sealed unsafe class GpuMonitor : IDisposable
     private IntPtr _query;
     private IntPtr _engineCounter;
     private IntPtr _memoryCounter;
-    private readonly List<(string Name, long Luid, double VramGb)> _adapters = new();
+    private readonly List<(string Name, long Luid, double VramGb, uint Vendor, long Dedicated)> _adapters = new();
     private bool _primed;
 
     public GpuMonitor()
@@ -208,6 +210,9 @@ public sealed unsafe class GpuMonitor : IDisposable
     }
 
     public string? PrimaryName => _adapters.Count > 0 ? _adapters[0].Name : null;
+
+    /// <summary>The adapter with the most dedicated memory: its name, PCI vendor id (0x10DE NVIDIA, 0x1002 AMD, 0x8086 Intel) and memory.</summary>
+    public (string Name, uint Vendor, long DedicatedBytes)? Primary => _adapters.Count > 0 ? (_adapters[0].Name, _adapters[0].Vendor, _adapters[0].Dedicated) : null;
 
     public GpuInfo? Sample()
     {
@@ -292,12 +297,13 @@ public sealed unsafe class GpuMonitor : IDisposable
                     var getDesc1 = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int>)avtbl[10];
                     if (getDesc1(adapter, desc) != 0) continue;
                     var name = new string((char*)desc).Trim();
+                    var vendor = *(uint*)(desc + 256);
                     var dedicated = (ulong)*(nuint*)(desc + 272);
                     var luidLow = *(uint*)(desc + 296);
                     var luidHigh = *(int*)(desc + 300);
                     var flags = *(uint*)(desc + 304);
                     if ((flags & 2) != 0) continue; // software adapter
-                    _adapters.Add((name, ((long)luidHigh << 32) | luidLow, dedicated / 1073741824.0));
+                    _adapters.Add((name, ((long)luidHigh << 32) | luidLow, dedicated / 1073741824.0, vendor, (long)dedicated));
                 }
                 finally
                 {

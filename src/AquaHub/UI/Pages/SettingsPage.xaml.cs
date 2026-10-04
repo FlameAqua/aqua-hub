@@ -32,6 +32,8 @@ public partial class SettingsPage : UserControl, IPage
     private HubSettings _original;
     private readonly UiThrottle _save;
     private bool _loading, _saving;
+    // The Keep pictures row's own description (how much the pictures take now is added to it).
+    private string? _picturesText;
     private FileSystemWatcher? _watcher;
     private CancellationTokenSource? _cityCts;
 
@@ -128,7 +130,8 @@ public partial class SettingsPage : UserControl, IPage
         Scroller.ScrollToVerticalOffset(Math.Max(0, top - 12));
         var flash = new System.Windows.Media.Animation.DoubleAnimation(0.35, 1, TimeSpan.FromMilliseconds(900)) { EasingFunction = new System.Windows.Media.Animation.QuadraticEase() };
         row.BeginAnimation(OpacityProperty, flash);
-        FindFirst<Control>(row, c => c.Focusable && c.IsEnabled && c.IsVisible)?.Focus();
+        // Not a shortcut box: focusing one starts recording (and pauses Aqua's hotkeys), which nobody asked for by searching.
+        FindFirst<Control>(row, c => c.Focusable && c.IsEnabled && c.IsVisible && c is not HotkeyBox)?.Focus();
     }
 
     private static T? FindFirst<T>(DependencyObject root, Func<T, bool> fits) where T : DependencyObject
@@ -311,6 +314,9 @@ public partial class SettingsPage : UserControl, IPage
         UpdateWhisper();
         var (items, saved, cache, bytes) = Hub.Core.Db.Stats();
         DbRow.Description = $"{items:N0} items ({saved} saved), {cache} cached AI results · {Fmt.Bytes(bytes)} on disk";
+        _picturesText ??= Row_pictures.Description;
+        var (pictureBytes, pictureChats) = Hub.Core.Chats.PictureUse();
+        Row_pictures.Description = _picturesText + (pictureChats > 0 ? $" Now {Fmt.Bytes(pictureBytes)} in {Plural.Of(pictureChats, "chat")}." : "");
         VersionText.Text = $"Version {Hub.Updates.CurrentVersion} · .NET {Environment.Version} · {Environment.OSVersion.VersionString}";
         UpdateUpdates();
         PathsText.Text = $"Profile: {Hub.Core.Paths.Root}";
@@ -366,7 +372,7 @@ public partial class SettingsPage : UserControl, IPage
 
     private static List<WatchSymbol> MergeSymbols(List<WatchSymbol> existing, List<string> symbols, string kind) =>
         symbols.Select(sym => existing.FirstOrDefault(e => e.Symbol.Equals(sym, StringComparison.OrdinalIgnoreCase))
-                              ?? new WatchSymbol { Symbol = sym, Name = sym.TrimStart('^'), Kind = sym.EndsWith("=X") ? "fx" : sym.Contains('-') ? "crypto" : sym.EndsWith("=F") ? "commodity" : kind }).ToList();
+                              ?? new WatchSymbol { Symbol = sym, Name = sym.TrimStart('^'), Kind = sym.EndsWith("=X", StringComparison.Ordinal) ? "fx" : sym.Contains('-') ? "crypto" : sym.EndsWith("=F", StringComparison.Ordinal) ? "commodity" : kind }).ToList();
 
     private void OnAnyChange(object sender, RoutedEventArgs e)
     {
@@ -803,7 +809,7 @@ public partial class SettingsPage : UserControl, IPage
         var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Choose a folder Ask may search and read" };
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
         var folder = dialog.FolderName;
-        if (LocalFiles.IsSensitiveFolder(folder)) { SavedText.Text = "That folder holds app data or credentials, which Ask never reads."; return; }
+        if (LocalFiles.IsSensitiveRoot(folder)) { SavedText.Text = "That folder holds app data or credentials, which Ask never reads."; return; }
         if (_s.Ask.Folders.Any(f => string.Equals(LocalFiles.ExpandFolders(new[] { f }, Hub.Ask.Platform.KnownFolder).FirstOrDefault(), folder, StringComparison.OrdinalIgnoreCase))) return;
         _s.Ask.Folders.Add(folder);
         RefreshLists();

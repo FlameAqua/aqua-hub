@@ -467,5 +467,9 @@ public sealed class BriefingAgent : Agent
         private static int _flag;
         public static void Request() => Interlocked.Exchange(ref _flag, 1);
         public static bool Consume() => Interlocked.Exchange(ref _flag, 0) == 1;
+        /// <summary>Asked for, and no run has taken it up yet.</summary>
+        public static bool Pending => Volatile.Read(ref _flag) == 1;
+        /// <summary>Takes back a request no run took up, so a later scheduled run doesn't rewrite the brief unasked.</summary>
+        public static void Withdraw() => Interlocked.Exchange(ref _flag, 0);
     }
 }

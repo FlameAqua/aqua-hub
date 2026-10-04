@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using AquaHub.Core.Analysis;
 using AquaHub.Core.Data;
@@ -25,6 +26,11 @@ public sealed class ChatSummary
     public int ContextWindow { get; set; }
     /// <summary>You undid a compression: this chat isn't compressed on its own again (the Compress button still works).</summary>
     public bool NoAutoCompress { get; set; }
+    /// <summary>
+    /// An answer in this chat used your files, screen, attachments or holdings: what it read can be in the chat's messages,
+    /// notes and summary, so later answers ask before reaching the web. Once set, it stays.
+    /// </summary>
+    public bool ReadPrivate { get; set; }
 }
 
 /// <summary>A message as stored (the same shape older versions used for their single conversation).</summary>
@@ -73,6 +79,9 @@ public sealed partial class ChatStore
     private readonly Dictionary<string, List<SavedChatMessage>> _memory = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<ChatNote>> _memoryNotes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ChatCompression> _memoryCompression = new(StringComparer.Ordinal);
+    // Chats deleted while Aqua runs: a late save (an answer that was still streaming when you deleted its chat) can't bring
+    // one back, with its notes or pictures.
+    private readonly HashSet<string> _deleted = new(StringComparer.Ordinal);
 
     /// <param name="mediaRoot">Where chats keep their pictures (a folder per chat); null keeps none.</param>
     public ChatStore(HubDatabase? db, string? mediaRoot = null)
@@ -107,6 +116,7 @@ public sealed partial class ChatStore
     {
         Id = c.Id, Title = c.Title, Created = c.Created, Updated = c.Updated, Starred = c.Starred, Count = c.Count, Preview = c.Preview,
         Named = c.Named, ContextUsed = c.ContextUsed, ContextWindow = c.ContextWindow, NoAutoCompress = c.NoAutoCompress,
+        ReadPrivate = c.ReadPrivate,
     };
 
     public List<SavedChatMessage> Load(string id)
@@ -118,11 +128,12 @@ public sealed partial class ChatStore
         }
     }
 
-    /// <summary>Saves a chat's messages and its entry in the list (created if new).</summary>
+    /// <summary>Saves a chat's messages and its entry in the list (created if new; not for a chat deleted since Aqua started).</summary>
     public void Save(ChatSummary summary, IReadOnlyList<SavedChatMessage> messages)
     {
         lock (_gate)
         {
+            if (_deleted.Contains(summary.Id)) return;
             var list = Index();
             var keep = messages.TakeLast(MaxMessagesPerChat).ToList();
             var existing = list.FirstOrDefault(c => c.Id == summary.Id);
@@ -141,6 +152,12 @@ public sealed partial class ChatStore
             {
                 existing.Title = summary.Title; existing.Updated = summary.Updated; existing.Starred = summary.Starred; existing.Named = summary.Named;
                 existing.ContextUsed = summary.ContextUsed; existing.ContextWindow = summary.ContextWindow; existing.NoAutoCompress = summary.NoAutoCompress;
+                existing.ReadPrivate |= summary.ReadPrivate;
+            }
+            if (keep.Count < messages.Count)
+            {
+                Rebase(summary.Id, messages, messages.Count - keep.Count);
+                TidyPictures(summary.Id, keep);
             }
             existing.Count = keep.Count;
             existing.Preview = HtmlText.Truncate(keep.LastOrDefault(m => !m.User)?.Text.ReplaceLineEndings(" ") ?? "", 140);
@@ -150,6 +167,14 @@ public sealed partial class ChatStore
         }
         Changed?.Invoke();
     }
+
+    /// <summary>
+    /// Whether a chat's messages show an answer used private data, for chats saved before <see cref="ChatSummary.ReadPrivate"/>
+    /// was kept: attachments, files or folders among the sources, or pictures (screenshots and pictures on the PC).
+    /// </summary>
+    public static bool ShowsPrivate(IEnumerable<SavedChatMessage> messages) =>
+        messages.Any(m => m.Attachments is { Count: > 0 } || m.Pictures is { Count: > 0 }
+                          || (m.Citations ?? new()).Any(c => c.Kind is "file" or "folder") || (m.Sources ?? new()).Any(s => s.Kind is "file" or "folder"));
 
     /// <summary>Changes a chat's entry (title, star) without touching its messages.</summary>
     public void Update(string id, Action<ChatSummary> change)
@@ -167,6 +192,7 @@ public sealed partial class ChatStore
     {
         lock (_gate)
         {
+            _deleted.Add(id);
             if (Index().RemoveAll(c => c.Id == id) == 0) return;
             DeleteMessages(id);
             SaveIndex();
@@ -180,6 +206,7 @@ public sealed partial class ChatStore
         lock (_gate)
         {
             foreach (var c in Index()) DeleteMessages(c.Id);
+            _deleted.UnionWith(Index().Select(c => c.Id));
             Index().Clear();
             SaveIndex();
             _db?.DeleteJson(LegacyKey);
@@ -188,9 +215,10 @@ public sealed partial class ChatStore
         Changed?.Invoke();
     }
 
-    /// <summary>Everything a chat keeps: its messages, notes, compression and pictures.</summary>
+    /// <summary>Everything a chat keeps: its messages, notes, compression and pictures (and it can't be saved again).</summary>
     private void DeleteMessages(string id)
     {
+        _deleted.Add(id);
         if (_db is null)
         {
             _memory.Remove(id);
@@ -203,7 +231,42 @@ public sealed partial class ChatStore
             _db.DeleteJson(NotesPrefix + id);
             _db.DeleteJson(CompressionPrefix + id);
         }
-        DeleteFolder(MediaFolder(id));
+        DeleteFolder(FolderOf(id));
+    }
+
+    /// <summary>
+    /// A chat over the message limit loses its oldest messages: its summary goes on standing in for the ones it covered
+    /// that remain (a long chat keeps its compression just when it needs it). When more go than it covered, it goes too.
+    /// </summary>
+    private void Rebase(string id, IReadOnlyList<SavedChatMessage> all, int dropped)
+    {
+        var compression = _db is null ? _memoryCompression.GetValueOrDefault(id) : _db.GetJson<ChatCompression>(CompressionPrefix + id);
+        if (compression is null) return;
+        var turns = all.Select(ChatCompressor.TurnOf).OfType<ChatTurn>().ToList();
+        var gone = all.Take(dropped).Count(m => ChatCompressor.TurnOf(m) is not null);
+        ChatCompression? rebased = null;
+        if (ChatCompressor.Valid(compression, turns) is { } valid && valid.Covers > gone)
+            rebased = valid with { Covers = valid.Covers - gone, Fingerprint = ChatCompressor.Fingerprint(turns.Skip(gone).ToList(), valid.Covers - gone) };
+        if (_db is null)
+        {
+            if (rebased is null) _memoryCompression.Remove(id);
+            else _memoryCompression[id] = rebased;
+        }
+        else if (rebased is null) _db.DeleteJson(CompressionPrefix + id);
+        else _db.PutJson(CompressionPrefix + id, rebased);
+    }
+
+    /// <summary>Deletes the pictures in a chat's folder that none of <paramref name="kept"/> messages use any more.</summary>
+    private void TidyPictures(string id, IReadOnlyList<SavedChatMessage> kept)
+    {
+        if (FolderOf(id) is not { } folder || !Directory.Exists(folder)) return;
+        var used = kept.SelectMany(m => m.Pictures ?? new()).Select(p => p.File).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(folder))
+                if (!file.EndsWith(".part", StringComparison.OrdinalIgnoreCase) && !used.Contains(Path.GetFileName(file))) File.Delete(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log.Debug("ask", "Couldn't tidy a chat's pictures: " + ex.Message); }
     }
 
     // ───────────────────────────── Notes and compression ─────────────────────────────
@@ -263,11 +326,96 @@ public sealed partial class ChatStore
     [GeneratedRegex(@"^[A-Za-z0-9_-]{1,40}\z")]
     private static partial Regex SafeId();
 
-    /// <summary>The folder a chat keeps its pictures in (it may not exist yet); null without one or for an id that isn't a plain name.</summary>
-    public string? MediaFolder(string id) => _mediaRoot is null || !SafeId().IsMatch(id) ? null : Path.Combine(_mediaRoot, id);
+    /// <summary>
+    /// The folder a chat keeps its pictures in (it may not exist yet); null without one, for an id that isn't a plain name,
+    /// or for a chat deleted since Aqua started (nothing is written for it again).
+    /// </summary>
+    public string? MediaFolder(string id)
+    {
+        lock (_gate) if (_deleted.Contains(id)) return null;
+        return FolderOf(id);
+    }
+
+    private string? FolderOf(string id) => _mediaRoot is null || !SafeId().IsMatch(id) ? null : Path.Combine(_mediaRoot, id);
 
     /// <summary>Deletes every chat's pictures ("Keep pictures with chats" switched off).</summary>
     public void DeleteAllMedia() => DeleteFolder(_mediaRoot);
+
+    /// <summary>How much room the kept pictures take, and in how many chats (shown beside the setting).</summary>
+    public (long Bytes, int Chats) PictureUse()
+    {
+        if (_mediaRoot is null || !Directory.Exists(_mediaRoot)) return (0, 0);
+        try
+        {
+            var folders = Directory.EnumerateDirectories(_mediaRoot).Select(f => new DirectoryInfo(f).EnumerateFiles().Sum(x => x.Length)).Where(n => n > 0).ToList();
+            return (folders.Sum(), folders.Count);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (0, 0); }
+    }
+
+    /// <summary>
+    /// "Keep pictures with chats" switched off: every chat's pictures go, and with them what its messages kept about each
+    /// one — the picture's path on the PC and what it showed. Returns how many chats changed.
+    /// </summary>
+    public int ForgetPictures()
+    {
+        var changed = 0;
+        List<string> ids;
+        lock (_gate) ids = Index().Select(c => c.Id).ToList();
+        foreach (var id in ids)
+            lock (_gate)
+            {
+                var messages = Load(id);
+                if (!messages.Any(m => m.Pictures is { Count: > 0 })) continue;
+                PutMessages(id, messages.Select(m => m.Pictures is null ? m : m with { Pictures = null }).ToList());
+                changed++;
+            }
+        DeleteAllMedia();
+        return changed;
+    }
+
+    private void PutMessages(string id, List<SavedChatMessage> messages)
+    {
+        if (_db is null) _memory[id] = messages;
+        else _db.PutJson(ChatPrefix + id, messages);
+    }
+
+    private const string TidiedKey = "ask:chats-tidied";
+
+    /// <summary>
+    /// Once: rewrites the chats saved by versions before 1.3, which kept the paths of the folders you attached in each
+    /// message's options (they're never saved now). Returns how many chats changed.
+    /// </summary>
+    public int ForgetFolders()
+    {
+        if (_db is null || _db.GetJson<int>(TidiedKey) >= 1) return 0;
+        var changed = 0;
+        List<string> ids;
+        lock (_gate) ids = Index().Select(c => c.Id).ToList();
+        foreach (var id in ids)
+            lock (_gate)
+            {
+                var raw = _db.GetJson<JsonElement>(ChatPrefix + id);
+                if (raw.ValueKind != JsonValueKind.Array || !raw.EnumerateArray().Any(HasFolders)) continue;
+                // Folders aren't serialised any more: read and written again, the paths are gone.
+                PutMessages(id, Load(id));
+                changed++;
+            }
+        _db.PutJson(TidiedKey, 1);
+        return changed;
+
+        static bool HasFolders(JsonElement m) =>
+            Property(m, "options") is { ValueKind: JsonValueKind.Object } o && Property(o, "folders") is { ValueKind: JsonValueKind.Array } f && f.GetArrayLength() > 0;
+
+        // Names as the database writes them (camelCase), or as anything else did.
+        static JsonElement Property(JsonElement e, string name)
+        {
+            if (e.ValueKind != JsonValueKind.Object) return default;
+            foreach (var p in e.EnumerateObject())
+                if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) return p.Value;
+            return default;
+        }
+    }
 
     /// <summary>Deletes picture folders whose chat is gone (one deleted while Aqua was closing, say). Returns how many.</summary>
     public int PruneMedia()

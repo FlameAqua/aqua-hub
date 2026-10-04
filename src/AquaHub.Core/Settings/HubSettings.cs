@@ -277,7 +277,10 @@ public sealed class PredictionSettings
 public sealed class AiSettings
 {
     public bool Enabled { get; set; } = true;
-    /// <summary>ollama | openai (any OpenAI-compatible local server: LM Studio, llama.cpp, vLLM)</summary>
+    /// <summary>
+    /// ollama | llamacpp (Aqua's own runtime: llama.cpp, installed and run by Aqua — see <see cref="Llama"/>) | openai (any
+    /// OpenAI-compatible local server: LM Studio, a llama.cpp you run, vLLM).
+    /// </summary>
     public string Provider { get; set; } = "ollama";
     public string Endpoint { get; set; } = "http://127.0.0.1:11434";
     /// <summary>"auto" picks the best installed model from <see cref="PreferredModels"/>.</summary>
@@ -308,6 +311,47 @@ public sealed class AiSettings
     public int StopOllamaIdleMinutes { get; set; } = 15;
     /// <summary>Full path to ollama.exe; empty = the standard install location or PATH.</summary>
     public string OllamaPath { get; set; } = "";
+    /// <summary>Aqua's own model runtime, used when <see cref="Provider"/> is "llamacpp".</summary>
+    public LlamaSettings Llama { get; set; } = new();
+}
+
+/// <summary>
+/// Aqua's own model runtime: llama.cpp's server, installed (pinned, checked against its SHA-256) and run by Aqua, one
+/// process per loaded model, only on this PC and with a fresh key each start. Models come from Aqua's library (downloads
+/// from Hugging Face, checked the same way) or from Ollama's store, read where they are. The main model is
+/// <see cref="AiSettings.Model"/> ("auto" or a library id such as "ollama:qwen3.5:9b").
+/// </summary>
+public sealed class LlamaSettings
+{
+    /// <summary>auto | cuda12 | cuda13 | vulkan | cpu — which llama.cpp build to install (auto picks the one for this PC).</summary>
+    public string Backend { get; set; } = "auto";
+    /// <summary>A llama-server.exe to run instead of Aqua's own install (advanced; empty = Aqua's).</summary>
+    public string ServerPath { get; set; } = "";
+    /// <summary>Where downloaded models go; empty = the profile's "models" folder.</summary>
+    public string ModelsFolder { get; set; } = "";
+    /// <summary>Offer the models already in Ollama's store too (read where they are, never changed or moved).</summary>
+    public bool UseOllamaModels { get; set; } = true;
+    /// <summary>A library id for writing that needs a different voice (Roleplay, later phases); empty = the main model.</summary>
+    public string CreativeModel { get; set; } = "";
+    /// <summary>
+    /// A library id for background work, run on the processor so the agents never wait for (or swap out) the graphics
+    /// card's model; empty = background work uses the model that's loaded, or the main one.
+    /// </summary>
+    public string BackgroundModel { get; set; } = "";
+    /// <summary>An embedding model's library id, for search by meaning (Phase 8); empty = none.</summary>
+    public string SearchModel { get; set; } = "";
+    /// <summary>Context window of the graphics-card model in tokens; 0 = as much as fits (up to 64K, 128K on a 24 GB card).</summary>
+    public int ContextTokens { get; set; }
+    /// <summary>f16 | q8_0 | q4_0 — how the context cache is stored (q8_0: half f16's memory, with near-identical answers).</summary>
+    public string CacheType { get; set; } = "q8_0";
+    /// <summary>auto | on | off — speculative decoding with a model's own MTP heads; auto keeps it only where it's measured faster.</summary>
+    public string Mtp { get; set; } = "auto";
+    /// <summary>Minutes without a request before a model's memory is given back (it reloads on the next one; 0 = never).</summary>
+    public int IdleUnloadMinutes { get; set; } = 10;
+    /// <summary>Threads for a model on the processor; 0 = half the cores.</summary>
+    public int CpuThreads { get; set; }
+    /// <summary>low | medium | high — how hard a model thinks when Think is on (mapped to the levels its template knows).</summary>
+    public string ReasoningEffort { get; set; } = "medium";
 }
 
 /// <summary>What Ask Aqua may use beyond what your agents collected: the web, your files, your screen and your PC.</summary>

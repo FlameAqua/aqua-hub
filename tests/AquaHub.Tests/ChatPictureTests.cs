@@ -39,6 +39,44 @@ public class ChatPictureTests : IDisposable
     public void TheFileIsNamedForItsKind(byte[] bytes, string extension) => Assert.Equal(extension, ChatMedia.Extension(bytes));
 
     [Fact]
+    public void AKeptThumbnailOpensLikeAScreenshot()
+    {
+        Assert.Equal(Path.Combine("media", "t-0123456789abcdef.jpg"), ChatMedia.PathOf("media", "t-0123456789abcdef.jpg"));
+        Assert.Equal(Path.Combine("media", "s-0123456789abcdef.png"), ChatMedia.PathOf("media", "s-0123456789abcdef.png"));
+        Assert.Null(ChatMedia.PathOf("media", "x-0123456789abcdef.png"));
+        Assert.Null(ChatMedia.PathOf(null, "t-0123456789abcdef.jpg"));
+    }
+
+    /// <summary>Decision 8: pictures are kept with chats unless you switch it off; chats are compressed on their own.</summary>
+    [Fact]
+    public void PicturesAreKeptAndChatsCompressedByDefault()
+    {
+        var s = new HubSettings();
+        Assert.True(s.Ask.KeepPictures);
+        Assert.True(s.Ask.AutoCompress);
+    }
+
+    [Fact]
+    public void AFixedContextWindowSetsWhenAChatIsCompressed()
+    {
+        var s = new HubSettings();
+        s.Ask.ContextWindow = 8192;
+        Assert.Equal(8192, AskAgent.ContextLimit(s, vramGb: 12));
+        s.Ask.ContextWindow = 0;
+        Assert.InRange(AskAgent.ContextLimit(s, vramGb: 12), 4096, 262144);
+    }
+
+    [Fact]
+    public void AnExportHasTheChatsNotes()
+    {
+        var notes = new[] { new ChatNote(ChatNotes.Fact, "Budget: €9,000"), new ChatNote(ChatNotes.Decision, "Go with the Daikin") };
+        var markdown = ChatExport.ToMarkdown("Heat pumps", new[] { new SavedChatMessage(true, "Which heat pump?", null, null, true) }, DateTimeOffset.Now, notes);
+        Assert.Contains("## Notes for this chat", markdown);
+        Assert.Contains("- Budget: €9,000", markdown);
+        Assert.Contains("- Go with the Daikin", markdown);
+    }
+
+    [Fact]
     public void OnlyANameAquaMadeLeadsToAFile()
     {
         var folder = Path.Combine(_dir.Path, "c1");
@@ -80,7 +118,7 @@ public class ChatPictureTests : IDisposable
         Assert.Equal(new[] { "logo.png", "Screenshot of the screen", "Screenshot of the screen" }, host.Pictures.Select(p => p.Name));
 
         for (var i = 0; i < 20; i++) run.Saw(new AskPicture { Name = $"photo {i}.jpg", Path = $@"C:\Photos\photo {i}.jpg" });
-        Assert.Equal(AskRun.MaxPictures, host.Pictures.Count);
+        Assert.Equal(8, host.Pictures.Count); // AskRun.MaxPictures, written out so changing it shows here
     }
 
     [Fact]

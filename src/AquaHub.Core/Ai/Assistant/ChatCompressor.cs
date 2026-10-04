@@ -48,6 +48,24 @@ public static partial class ChatCompressor
     /// <summary>Tokens a text uses, roughly (the same estimate Ask sizes its context window with).</summary>
     public static int Tokens(string text) => (int)Math.Ceiling(text.Length / 3.2);
 
+    /// <summary>
+    /// A message as the model is sent it, or null for one it isn't: a question (with its attachments' names) or a finished
+    /// answer that wasn't stopped. The chat and the store both read messages this way, so a summary's fingerprint holds.
+    /// </summary>
+    public static ChatTurn? TurnOf(bool user, string text, bool chat, bool done, string? footer, IEnumerable<string>? attachments, IReadOnlyList<Citation>? citations)
+    {
+        if (!chat || text.Length == 0) return null;
+        if (user)
+        {
+            var names = attachments?.ToList() ?? new List<string>();
+            return new ChatTurn(true, text + (names.Count > 0 ? $" [attached: {string.Join(", ", names)}]" : ""));
+        }
+        return done && footer != "Stopped." ? new ChatTurn(false, text, citations) : null;
+    }
+
+    /// <summary>A stored message as the model is sent it (<see cref="TurnOf(bool, string, bool, bool, string?, IEnumerable{string}?, IReadOnlyList{Citation}?)"/>).</summary>
+    public static ChatTurn? TurnOf(SavedChatMessage m) => TurnOf(m.User, m.Text, m.Chat, true, m.Footer, m.Attachments, m.Citations);
+
     public static string Fingerprint(IReadOnlyList<ChatTurn> turns, int count) =>
         Hash.Short(turns.Take(count).Select(t => (t.User ? "U:" : "A:") + t.Text).ToArray());
 
@@ -108,7 +126,7 @@ public static partial class ChatCompressor
             "Keep every name, number, date, price, decision, preference, open question and source (its title and link) that a later answer could need; " +
             "drop greetings, repetition and anything later messages replaced. Write short bullet points under these headings, leaving out any that would be empty: " +
             "What was asked, What Aqua found, Decisions, Open questions. No introduction, and don't address anyone. " + Prompts.UntrustedNotice;
-        var messages = new List<LlmMessage> { new("user", "<<<DATA\n" + material + "DATA>>>\n\nWrite the summary now, in at most " + words + " words.") };
+        var messages = new List<LlmMessage> { new("user", Prompts.Fenced(material.ToString()) + "\n\nWrite the summary now, in at most " + words + " words.") };
         var need = AskAgent.ContextFor(system, messages, settings, words * 2 + 300);
         return new LlmRequest
         {
@@ -125,7 +143,8 @@ public static partial class ChatCompressor
         };
     }
 
-    [GeneratedRegex(@"^\s*(?:#+\s*)?(?:\*\*)?(?:here(?:'s| is) (?:the|a) )?summary(?: of the (?:chat|conversation))?(?:\*\*)?\s*:?\s*(?:\*\*)?\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
+    // "Summary:", "**Here's a concise summary of our conversation so far:**", "Sure! Here's a summary of the chat:".
+    [GeneratedRegex(@"^\s*(?:#+\s*)?(?:\*\*)?(?:(?:sure|certainly|of course|okay|ok|alright)[!,.]?\s+)?(?:here(?:'s| is) (?:the|a|your)\s+(?:(?:short|brief|concise|compressed|quick|condensed)\s+)?)?summary(?:\s+of\s+(?:the|our|this)\s+(?:chat|conversation|discussion)(?:\s+so\s+far)?)?(?:\*\*)?\s*:?\s*(?:\*\*)?\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex SummaryHeading();
 
     /// <summary>The summary in a reply: narration and a "Summary:" heading or code fence removed; null when it isn't one (too short, or no shorter than what it summarises).</summary>

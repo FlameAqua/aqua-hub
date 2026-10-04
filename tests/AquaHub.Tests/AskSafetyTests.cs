@@ -125,12 +125,68 @@ public class ApprovalRuleTests
     private static JsonElement Args(string query) => JsonDocument.Parse(JsonSerializer.Serialize(new { query })).RootElement;
 
     private static AskRun Run(HubSettings? s = null, bool untrusted = false, bool sawPrivate = false, HashSet<string>? allowed = null,
-        HashSet<string>? privateTerms = null, string question = "") => new()
+        HashSet<string>? privateTerms = null, string question = "", AskChatContext? chat = null) => new()
     {
         State = new HubState(null), Settings = s ?? new HubSettings(), Book = new SourceBook(), Options = new AskOptions(), Host = new NullHost(),
         AllowedForChat = allowed ?? new HashSet<string>(), SawUntrusted = untrusted, SawPrivate = sawPrivate,
-        PrivateTerms = privateTerms ?? new HashSet<string>(StringComparer.Ordinal), Question = question,
+        PrivateTerms = privateTerms ?? new HashSet<string>(StringComparer.Ordinal), Question = question, Chat = chat,
     };
+
+    /// <summary>Something Aqua looks at that asks first (a screenshot, the clipboard).</summary>
+    private sealed class LookTool(string name) : AskTool
+    {
+        public override string Name => name;
+        public override string Description => name;
+        public override JsonObject Parameters => new();
+        public override ToolAccess Access => ToolAccess.Private;
+        public override bool NeedsApproval(AskSettings s) => true;
+        public override string Describe(JsonElement args) => name;
+        public override Task<ToolResult> RunAsync(JsonElement args, AskRun run, CancellationToken ct) => Task.FromResult(new ToolResult("ok", "ok"));
+    }
+
+    [Fact]
+    public void AfterAnEarlierAnswerReadPrivateDataTheWebAsksInThatChat()
+    {
+        var search = Args("heat pump prices");
+        var approval = AskAgent.ApprovalFor(new WebSearchTool(), search, "Search", Run(chat: new AskChatContext { ReadPrivate = true }));
+        Assert.Equal("web-after-private", approval!.Tool);
+        Assert.StartsWith("This chat has used your files", approval.Detail);
+        Assert.StartsWith("This answer has used", AskAgent.ApprovalFor(new WebSearchTool(), search, "Search", Run(sawPrivate: true))!.Detail);
+        Assert.Null(AskAgent.ApprovalFor(new WebSearchTool(), search, "Search", Run(chat: new AskChatContext())));
+        Assert.Null(AskAgent.ApprovalFor(new WebSearchTool(), search, "Search", Run(chat: new AskChatContext { ReadPrivate = true }, allowed: new() { "web-after-private" })));
+    }
+
+    [Fact]
+    public void TheChatsNotesAreKeptFromTheWebLikeWhatAquaRemembers()
+    {
+        var terms = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var note in new[] { "Salary from payslip-march.pdf: 4,200 euro a month, employer Kellogg Ireland", "Passport number 123456789 (from passport-scan.jpg)" })
+            terms.UnionWith(AskAgent.NotedTerms(note));
+        var run = Run(privateTerms: terms, question: "Is that a good salary?");
+        Assert.Equal("web-with-calendar", AskAgent.ApprovalFor(new WebSearchTool(), Args("average salary Ireland 4,200 euro Kellogg"), "Search", run)!.Tool);
+        // A long number (a passport, an account, a phone) is enough on its own.
+        Assert.Equal("web-with-calendar", AskAgent.ApprovalFor(new WebSearchTool(), Args("passport number 123456789 lookup"), "Search", run)!.Tool);
+        Assert.Null(AskAgent.ApprovalFor(new WebSearchTool(), Args("average salary software engineer 2026"), "Search", run));
+        // What the question itself says doesn't count: you typed it.
+        var asked = Run(privateTerms: terms, question: "Is 4,200 a good salary at Kellogg Ireland?");
+        Assert.Null(AskAgent.ApprovalFor(new WebSearchTool(), Args("Kellogg Ireland salary 4,200"), "Search", asked));
+    }
+
+    [Fact]
+    public void NumbersThatCouldIdentifySomethingButNotYearsOrSmallOnes() =>
+        Assert.Equal(new[] { "#4200", "#123456789", "#350" }, AskAgent.NumbersIn("In 2026 I earn 4,200 a month; passport 123456789; 12 days, €350.").ToArray());
+
+    [Fact]
+    public void TheScreenshotCardSaysTheScreenshotIsKeptWithTheChat()
+    {
+        var chat = new AskChatContext();
+        Assert.Contains("kept with this chat", AskAgent.ApprovalFor(new LookTool("take_screenshot"), NoArgs, "Look at your screen", Run(chat: chat))!.Detail);
+        var off = new HubSettings();
+        off.Ask.KeepPictures = false;
+        Assert.Equal("Aqua will look at this and use it only for this answer.", AskAgent.ApprovalFor(new LookTool("take_screenshot"), NoArgs, "Look", Run(off, chat: chat))!.Detail);
+        Assert.Equal("Aqua will look at this and use it only for this answer.", AskAgent.ApprovalFor(new LookTool("read_clipboard"), NoArgs, "Read", Run(chat: chat))!.Detail);
+        Assert.Equal("Aqua will look at this and use it only for this answer.", AskAgent.ApprovalFor(new LookTool("take_screenshot"), NoArgs, "Look", Run())!.Detail);
+    }
 
     private sealed class ActTool(string name, bool afterUntrusted = false, bool oneAtATime = false, bool link = false) : AskTool
     {
@@ -389,6 +445,31 @@ public class CitationCheckTests
         Assert.Null(AnswerText.LocalPath(@"C:\x\..\Windows\notepad.exe"));
         Assert.Null(AnswerText.LocalPath("https://example.com/x.png"));
     }
+
+    // The allow-list behind every click on a file in a chat: anything not a document, picture or media file is only shown
+    // in File Explorer, so a page or a model can't get a program, a script or a shortcut run by naming it.
+    [Theory]
+    [InlineData(@"C:\Users\me\Pictures\holiday.JPG", true)]
+    [InlineData(@"C:\Users\me\Documents\report.pdf", true)]
+    [InlineData(@"C:\Users\me\Documents\budget.xlsx", true)]
+    [InlineData(@"C:\Users\me\Music\song.flac", true)]
+    [InlineData(@"C:\Users\me\Downloads\setup.exe", false)]
+    [InlineData(@"C:\Users\me\Downloads\report.pdf.exe", false)]
+    [InlineData(@"C:\Users\me\Downloads\installer.msi", false)]
+    [InlineData(@"C:\Users\me\Desktop\Notepad.lnk", false)]
+    [InlineData(@"C:\Users\me\Desktop\site.url", false)]
+    [InlineData(@"C:\Users\me\tools\run.bat", false)]
+    [InlineData(@"C:\Users\me\tools\run.cmd", false)]
+    [InlineData(@"C:\Users\me\tools\fix.ps1", false)]
+    [InlineData(@"C:\Users\me\tools\a.js", false)]
+    [InlineData(@"C:\Users\me\tools\a.vbs", false)]
+    [InlineData(@"C:\Users\me\tools\a.hta", false)]
+    [InlineData(@"C:\Users\me\Downloads\page.html", false)]
+    [InlineData(@"C:\Users\me\Downloads\drawing.svg", false)]
+    [InlineData(@"C:\Users\me\Documents\macros.docm", false)]
+    [InlineData(@"C:\Users\me\Documents\Taxes", false)]
+    public void OnlyDocumentsPicturesAndMediaOpenWithTheirApp(string path, bool opens) =>
+        Assert.Equal(opens, AnswerText.OpensWithItsApp(path));
 
     [Fact]
     public void SourcesCarryTheirDate()

@@ -144,7 +144,7 @@ public partial class MarketsPage : UserControl, IPage
         var brief = Hub.State.MarketBrief;
         WatchInsight? Insight(string sym) => brief?.Insights.FirstOrDefault(i => i.Symbol.Equals(sym, StringComparison.OrdinalIgnoreCase));
 
-        _vm.Tiles = s.Indices.Concat(s.Macro).Where(w => quotes.ContainsKey(w.Symbol)).Take(9)
+        _vm.Tiles = s.Indices.Concat(s.Macro).Where(w => quotes.ContainsKey(w.Symbol)).Take(MarketBar.MaxCharts)
             .Select(w => new QuoteVM(quotes[w.Symbol], ind.GetValueOrDefault(w.Symbol))).ToList();
         var bar = MarketBar.Items(s);
         _vm.Editing = _editing;
@@ -258,9 +258,11 @@ public partial class MarketsPage : UserControl, IPage
         _portfolioKey = key;
         var from = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-days));
         List<PortfolioPoint> points;
+        var missing = new List<string>();
         try
         {
-            points = await Task.Run(() => Portfolio.History(s, quotes, fx, symbol => Hub.Core.Db.GetCloses(symbol, 400), from, out _));
+            points = await Task.Run(() => Portfolio.History(s, quotes, fx, symbol => Hub.Core.Db.GetCloses(symbol, 400), from, out missing,
+                today: DateOnly.FromDateTime(DateTime.UtcNow)));
         }
         catch (Exception ex)
         {
@@ -269,6 +271,9 @@ public partial class MarketsPage : UserControl, IPage
             return;
         }
         if (key != _portfolioKey) return;
+        // A holding with no stored prices yet isn't in the chart (the card counts it): say so rather than leave it out quietly.
+        PortfolioChartMissing.Text = missing.Count == 0 ? "" : "Not in the chart yet (no price history stored): " + string.Join(", ", missing);
+        PortfolioChartMissing.Visibility = missing.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (points.Count < 2)
         {
             PortfolioChart.Values = null;
@@ -301,9 +306,19 @@ public partial class MarketsPage : UserControl, IPage
         EditBarText.Text = _editing ? "Done" : "Edit charts";
         System.Windows.Automation.AutomationProperties.SetName(EditBarButton, EditBarText.Text);
         EditBarIcon.Kind = _editing ? "check" : "edit";
-        UiProps.SetPlaceholder(AddBox, _editing ? "Add an index, currency or coin…" : "Add a company or ticker…");
-        AddBox.ToolTip = _editing ? "Search for a chart to add to the row" : "Search for a company or ticker to add it to your watchlist";
+        UpdateAddBox();
         Refresh();
+    }
+
+    /// <summary>The add box: a company for the watchlist, or in edit mode a chart for the row (which holds nine).</summary>
+    private void UpdateAddBox()
+    {
+        var full = _editing && MarketBar.IsFull(Hub.S.Markets);
+        AddBox.IsEnabled = !full;
+        UiProps.SetPlaceholder(AddBox, !_editing ? "Add a company or ticker…"
+            : full ? $"The row is full ({MarketBar.MaxCharts} charts): remove one to add another" : "Add an index, currency or coin…");
+        AddBox.ToolTip = !_editing ? "Search for a company or ticker to add it to your watchlist"
+            : full ? "Remove a chart to make room" : "Search for a chart to add to the row";
     }
 
     private void OnMoveChartLeft(object sender, RoutedEventArgs e) => MoveChart(sender, -1);
@@ -322,6 +337,7 @@ public partial class MarketsPage : UserControl, IPage
     {
         if (sender is not FrameworkElement { Tag: string symbol }) return;
         Hub.Core.Settings.Update(s => MarketBar.Remove(s.Markets, symbol));
+        UpdateAddBox();
         Refresh();
     }
 
@@ -443,6 +459,7 @@ public partial class MarketsPage : UserControl, IPage
         });
         SearchPopup.IsOpen = false;
         AddBox.Text = "";
+        UpdateAddBox();
         _symbol = m.Symbol;
         Hub.Core.Agents.RunNow("market-watch");
         _ = LoadChartAsync();

@@ -109,7 +109,7 @@ public class NoPlaceTests
         var none = new HubSettings();
         var brief = Prompts.Brief("WEATHER: none", "morning", none);
         Assert.Contains("'Local' (local news", brief.System);
-        Assert.DoesNotContain(", :", brief.Messages[0].Content);
+        Assert.DoesNotContain(", :", brief.Messages[0].Content, StringComparison.Ordinal); // ordinal: Thai collation ignores the space and comma
         Assert.Contains("hasn't set their location", Digest.Situation(new HubState(null), none));
         Assert.Contains("'Dublin' (local news", Prompts.Brief("x", "morning", TestPlaces.Settings()).System);
         Assert.Contains("location Dublin, Ireland.", Digest.Situation(new HubState(null), TestPlaces.Settings()));

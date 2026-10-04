@@ -13,7 +13,7 @@ public sealed record CurrencyOption(string Code, string Label)
 /// A watchlist row in Settings: how many you own, what one cost and in which currency, and price alerts. Numbers are
 /// kept as typed ("0.5", "0,5") and stored once they read as a number.
 /// </summary>
-public sealed class WatchRowVM
+public sealed class WatchRowVM : System.ComponentModel.IDataErrorInfo
 {
     public static IReadOnlyList<string> CommonCurrencies { get; } = new[] { "EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD", "SEK", "NOK", "DKK", "PLN", "HKD", "SGD", "INR", "CNY", "NZD", "ZAR" };
 
@@ -61,6 +61,21 @@ public sealed class WatchRowVM
             _changed();
         }
     }
+
+    // A box holding something that isn't a number shows as wrong (its setting keeps the last number until it is one).
+    public string Error => "";
+
+    public string this[string column] => column switch
+    {
+        nameof(Shares) => Problem(_shares),
+        nameof(Cost) => Problem(_cost),
+        nameof(AlertAbove) => Problem(_above),
+        nameof(AlertBelow) => Problem(_below),
+        _ => "",
+    };
+
+    private static string Problem(string text) =>
+        string.IsNullOrWhiteSpace(text) || Numbers.TryParse(text, CultureInfo.CurrentCulture, out _) ? "" : $"“{text}” isn't a number, so it isn't saved";
 
     /// <summary>Keeps the text; stores it when it's empty (none) or a number, and leaves the setting alone otherwise.</summary>
     private void Set(ref string field, string text, Action<double?> store)

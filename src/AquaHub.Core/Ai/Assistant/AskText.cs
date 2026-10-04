@@ -80,11 +80,50 @@ public static partial class AnswerText
         return DrivePath().IsMatch(t) && !t.Contains("..", StringComparison.Ordinal) ? t : null;
     }
 
-    [GeneratedRegex(@"\[(?<text>[^\]\n]{1,300})\]\((?<url>https?://[^\s)]+)\)|(?<bare>https?://[^\s<>()\[\]""']+[^\s<>()\[\]""'.,;:!?])")]
+    /// <summary>What a click on a file in an answer opens with its app; everything else is only shown in File Explorer.</summary>
+    private static readonly HashSet<string> Viewable = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".ico", ".pdf", ".txt", ".md", ".rtf", ".csv", ".log",
+        ".doc", ".docx", ".odt", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".odp", ".mp3", ".wav", ".flac", ".m4a", ".ogg", ".mp4", ".mkv",
+        ".mov", ".avi", ".webm",
+    };
+
+    /// <summary>
+    /// True when a click on this file — in an answer, a citation or a picture's chip — may open it with its app: documents,
+    /// pictures and media. Programs, scripts, shortcuts, installers, web pages, macro-enabled Office files and folders are
+    /// only shown in File Explorer, never run. Unit-tested.
+    /// </summary>
+    public static bool OpensWithItsApp(string path) => Viewable.Contains(Path.GetExtension(path));
+
+    // A link's address may hold one level of brackets (as in the chat's parser), and can't run past an unpaired one.
+    [GeneratedRegex(@"\[(?<text>[^\]\n]{1,300})\]\((?<url>https?://(?:[^\s()]|\([^\s()]*\))+)\)|(?<bare>https?://[^\s<>()\[\]""']+[^\s<>()\[\]""'.,;:!?])")]
     private static partial Regex AnswerUrl();
 
     [GeneratedRegex(@"[ \t]*\((?:[^()\n]{0,40}\b(?:inferred|assumed|guessed|approximate|not verified|unverified|likely|probably)\b[^()\n]{0,40})\)", RegexOptions.IgnoreCase)]
     private static partial Regex GuessNote();
+
+    // Formulae as the chat reads them: $$…$$, \[…\], \(…\), $…$ (the Pandoc way, so prices aren't) and bare environments.
+    [GeneratedRegex(@"\$\$(?<tex>[^$]+?)\$\$|\\\[(?<tex>(?:[^\\]|\\[^\[\]])+?)\\\]|\\\((?<tex>(?:[^\\\n]|\\[^()\n])+?)\\\)|(?<![\\$\w])\$(?![\s$])(?<tex>(?:[^$\\\n]|\\.)+?)(?<![\s\\])\$(?![\d$])|(?<tex>\\begin\{(?<env>[A-Za-z]+\*?)\}[\s\S]*?\\end\{\k<env>\})")]
+    private static partial Regex SpokenMathRx();
+
+    /// <summary>
+    /// An answer as words to read aloud: no Markdown or citation marks, tables row by row ("Basic, €5, monthly") without
+    /// their divider rows, and formulae in words ("a over b", "x squared") rather than LaTeX read out symbol by symbol.
+    /// </summary>
+    public static string Spoken(string markdown)
+    {
+        var t = SpokenMathRx().Replace(markdown, m => " " + MathText.Spoken(m.Groups["tex"].Value) + " ");
+        t = Regex.Replace(t, @"\[(\d+)\]", "");
+        t = Regex.Replace(t, @"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", "$1");
+        t = Regex.Replace(t, @"^#{1,6}\s*", "", RegexOptions.Multiline);
+        t = Regex.Replace(t, @"^[ \t]*(?:(?:\|[ \t]*)?:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?|[-*_](?:[ \t]*[-*_]){2,})$", "", RegexOptions.Multiline);
+        t = Regex.Replace(t, @"^[ \t]*\|[ \t]*|[ \t]*\|[ \t]*$", "", RegexOptions.Multiline);
+        t = Regex.Replace(t, @"[ \t]*\|[ \t]*", ", ");
+        t = Regex.Replace(t, @"^[ \t]*>+[ \t]?", "", RegexOptions.Multiline);
+        t = Regex.Replace(t, @"^[ \t]*[-*•][ \t]+", "", RegexOptions.Multiline);
+        t = t.Replace("**", "").Replace("__", "").Replace("`", "");
+        return Regex.Replace(t, @"[ \t]+", " ").Trim();
+    }
 
     /// <summary>Words in an address's path ("/2026/09/spacex-releases-otters/" → "spacex releases otters").</summary>
     private static string SlugWords(string url) =>
@@ -105,6 +144,8 @@ public static partial class AnswerText
         if (seen.Count == 0 || !text.Contains("http", StringComparison.OrdinalIgnoreCase)) return text;
         var known = seen.ToDictionary(k => Key(k.Key), k => (Url: k.Key, Title: k.Value));
         var hosts = new HashSet<string>(seen.Keys.Select(Host));
+        // Each seen link's words once (not again for every address in the answer).
+        var titled = known.Values.Select(k => (k.Url, Host: Host(k.Url), Words: Analysis.TextTools.Signature(k.Title + " " + SlugWords(k.Url)), Size: Analysis.TextTools.Signature(k.Title).Count)).ToList();
         var fixes = 0;
         var lines = text.Split('\n');
         for (var i = 0; i < lines.Length; i++)
@@ -114,16 +155,21 @@ public static partial class AnswerText
             var context = AnswerUrl().Replace(line, m => m.Groups["text"].Success ? m.Groups["text"].Value : " ");
             // A line that's only an address belongs to the item above it.
             if (context.Trim(' ', '*', '-', '•', '\t').Length < 3 && i > 0) context = AnswerUrl().Replace(lines[i - 1], " ");
+            // The line's words once: a line of thousands of addresses mustn't read itself again for each one.
+            var lineWords = Analysis.TextTools.Signature(context);
             var updated = AnswerUrl().Replace(line, m =>
             {
                 var url = m.Groups["url"].Success ? m.Groups["url"].Value : m.Groups["bare"].Value;
-                if (known.ContainsKey(Key(url)) || !hosts.Contains(Host(url))) return m.Value;
-                var words = Analysis.TextTools.Signature(context + " " + SlugWords(url));
-                var best = known.Values.Where(k => Host(k.Url) == Host(url))
-                    .Select(k => (k.Url, Shared: Analysis.TextTools.Signature(k.Title + " " + SlugWords(k.Url)).Count(words.Contains), Size: Analysis.TextTools.Signature(k.Title).Count))
+                var host = Host(url);
+                if (known.ContainsKey(Key(url)) || !hosts.Contains(host)) return m.Value;
+                var slug = Analysis.TextTools.Signature(SlugWords(url));
+                slug.ExceptWith(lineWords);
+                var words = lineWords.Count + slug.Count;
+                var best = titled.Where(k => k.Host == host)
+                    .Select(k => (k.Url, Shared: k.Words.Count(w => lineWords.Contains(w) || slug.Contains(w)), k.Size))
                     .OrderByDescending(x => x.Shared).FirstOrDefault();
                 fixes++;
-                var replacement = best.Url is not null && best.Shared >= 3 && best.Shared * 2 >= Math.Min(words.Count, Math.Max(1, best.Size)) ? best.Url : null;
+                var replacement = best.Url is not null && best.Shared >= 3 && best.Shared * 2 >= Math.Min(words, Math.Max(1, best.Size)) ? best.Url : null;
                 if (m.Groups["url"].Success) return replacement is null ? m.Groups["text"].Value : $"[{m.Groups["text"].Value}]({replacement})";
                 return replacement ?? "";
             });

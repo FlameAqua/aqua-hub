@@ -20,18 +20,30 @@ public sealed class HubDatabase
     {
         Path = path;
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-        _cs = new SqliteConnectionStringBuilder
-        {
-            DataSource = path,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Private,
-            Pooling = true,
-            DefaultTimeout = 10,
-        }.ToString();
+        _cs = ConnectionString(path);
 
         using var c = Open();
         Exec(c, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA auto_vacuum=INCREMENTAL;");
         Migrate(c);
+    }
+
+    private static string ConnectionString(string path) => new SqliteConnectionStringBuilder
+    {
+        DataSource = path,
+        Mode = SqliteOpenMode.ReadWriteCreate,
+        Cache = SqliteCacheMode.Private,
+        Pooling = true,
+        DefaultTimeout = 10,
+    }.ToString();
+
+    /// <summary>
+    /// Closes the pooled connections to the database file at <paramref name="path"/> (so the file can be deleted) — only
+    /// its own pool: clearing every pool would pull connections from under other databases in use at that moment.
+    /// </summary>
+    public static void ReleaseFile(string path)
+    {
+        using var c = new SqliteConnection(ConnectionString(path));
+        SqliteConnection.ClearPool(c);
     }
 
     private SqliteConnection Open()

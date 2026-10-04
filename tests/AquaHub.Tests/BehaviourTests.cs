@@ -21,6 +21,8 @@ internal sealed class TestContext : IDisposable
     public TestContext(HttpMessageHandler? network = null)
     {
         var settings = new SettingsStore(Path.Combine(_dir.Path, "settings.json"));
+        // Never the default model server (a developer's own Ollama): a test that wants a model points at a FakeOllama.
+        settings.Update(s => s.Ai.Endpoint = "http://127.0.0.1:1");
         var db = new HubDatabase(Path.Combine(_dir.Path, "hub.db"));
         var secrets = new InMemorySecretStore();
         Ctx = new HubContext
@@ -31,7 +33,12 @@ internal sealed class TestContext : IDisposable
         };
     }
 
-    public void Dispose() => _dir.Dispose();
+    public void Dispose()
+    {
+        Ctx.Http.Dispose();
+        Ctx.Llm.Dispose();
+        _dir.Dispose();
+    }
 }
 
 public class SettingsMergeTests
@@ -262,12 +269,38 @@ public class AgentSchedulingTests
         Assert.Equal(AgentRunEnd.Disabled, off!.End);
     }
 
+    // What Ask's "refreshed" rests on (AgentJobs reads NothingNew and the state): only a run that changed something is new.
+    [Theory]
+    [InlineData("changed", false, AgentState.Idle)]
+    [InlineData("unchanged", true, AgentState.Idle)]
+    [InlineData("failed", false, AgentState.Error)]
+    [InlineData("waiting", true, AgentState.Paused)]
+    public async Task ARunThatChangedNothingIsMarkedNothingNew(string outcome, bool nothingNew, AgentState state)
+    {
+        using var t = new TestContext();
+        using var runtime = Quick(t);
+        runtime.Register(new TestAgent("brief", () => outcome switch
+        {
+            "changed" => AgentResult.Success("Brief written"),
+            "unchanged" => AgentResult.Unchanged("Brief is current"),
+            "failed" => AgentResult.Fail("Model unavailable"),
+            _ => AgentResult.Wait("Waiting for the model", TimeSpan.FromHours(1)),
+        }, delay: TimeSpan.FromHours(1)));
+        runtime.Start();
+
+        var report = await runtime.RunAndWaitAsync("brief", TimeSpan.FromSeconds(10), CancellationToken.None);
+        Assert.Equal(AgentRunEnd.Finished, report!.End);
+        Assert.Equal(nothingNew, report.Status.NothingNew);
+        Assert.Equal(state, report.Status.State);
+    }
+
     [Fact]
     public async Task RunAndWaitWaitsOnARunUnderWayAndGivesUpAtItsTimeout()
     {
         using var t = new TestContext();
         using var runtime = Quick(t);
-        var slow = new TestAgent("slow", () => AgentResult.Success("done"), takes: TimeSpan.FromMilliseconds(400));
+        // Long enough that the 100 ms wait below can't see it finish even on a starved test machine.
+        var slow = new TestAgent("slow", () => AgentResult.Success("done"), takes: TimeSpan.FromSeconds(1));
         runtime.Register(slow);
         runtime.Start();
         for (var i = 0; i < 60 && runtime.Statuses[0].State != AgentState.Running; i++) await Task.Delay(50);

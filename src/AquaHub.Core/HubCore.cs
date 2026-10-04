@@ -17,6 +17,10 @@ public sealed class HubPaths
     public string ImageCache => Path.Combine(Root, "cache", "images");
     /// <summary>Pictures Ask's chats keep (a folder per chat, deleted with it).</summary>
     public string ChatMedia => Path.Combine(Root, "chat-media");
+    /// <summary>Aqua's own model runtime (llama.cpp), installed on request.</summary>
+    public string Llama => Path.Combine(Root, "llama");
+    /// <summary>Models downloaded for Aqua's runtime, and the library's record of them (Settings can put them elsewhere).</summary>
+    public string Models => Path.Combine(Root, "models");
 
     /// <summary>%LOCALAPPDATA%\AquaHub, or AQUAHUB_HOME / --data-dir when set.</summary>
     public static HubPaths Resolve(string? overrideDir = null)
@@ -53,6 +57,12 @@ public sealed class HubCore : IDisposable
     public ISecretStore Secrets { get; }
     /// <summary>Whisper speech recognition, installed on request (Settings › Ask Aqua › Voice).</summary>
     public Speech.WhisperSetup Whisper { get; }
+    /// <summary>Aqua's own model runtime (llama.cpp), installed on request (Settings › AI & models).</summary>
+    public Ai.Local.LlamaSetup LlamaSetup { get; }
+    /// <summary>The models Aqua's runtime can run: its downloads and, unless switched off, Ollama's store.</summary>
+    public Ai.Local.ModelLibrary Models { get; }
+    /// <summary>Hugging Face's model search and file lists, and model downloads into the library.</summary>
+    public Ai.Local.ModelDownloads ModelDownloads { get; }
 
     public HubCore(HubPaths paths, ISecretStore secrets, IPlatform platform)
     {
@@ -66,6 +76,9 @@ public sealed class HubCore : IDisposable
         Db = new HubDatabase(paths.Database);
         Http = new HttpFetcher(Db);
         Whisper = new Speech.WhisperSetup(Path.Combine(paths.Root, "whisper"), Http.Client);
+        LlamaSetup = new Ai.Local.LlamaSetup(paths.Llama, Http.Client);
+        Models = new Ai.Local.ModelLibrary(() => Settings.Current.Ai.Llama, paths.Models);
+        ModelDownloads = new Ai.Local.ModelDownloads(Models, Http.Client);
         Llm = new LlmClient(() => Settings.Current.Ai, secrets);
         State = new HubState(Db);
         State.Load();

@@ -1,6 +1,8 @@
 using System.Collections.Specialized;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -66,7 +68,12 @@ public partial class AskPage : UserControl, IPage
         PendingList.ItemsSource = Session.Pending;
         ChatList.ItemsSource = Session.Chats;
         CommandManager.AddPreviewExecutedHandler(Input, OnInputCommand);
-        SizeChanged += (_, _) => { if (_historyOpen is null) ApplyHistoryVisibility(); };
+        SizeChanged += (_, _) =>
+        {
+            if (_historyOpen is null) ApplyHistoryVisibility();
+            // A narrow window keeps room for the chat: the notes panel narrows too.
+            NotesPanel.Width = ActualWidth is > 0 and < 900 ? 220 : 280;
+        };
         Session.Voice.Partial += OnVoicePartial;
         Session.Voice.Phrase += OnVoicePhrase;
         Session.Voice.Ended += OnVoiceEnded;
@@ -101,6 +108,9 @@ public partial class AskPage : UserControl, IPage
         Session.NotesChanged += OnNotesChanged;
         Session.CompressionChanged -= OnCompressionChanged;
         Session.CompressionChanged += OnCompressionChanged;
+        Session.FoldersChanged -= UpdateFolderGrants;
+        Session.FoldersChanged += UpdateFolderGrants;
+        UpdateFolderGrants();
         OnPendingChanged(null, null);
         OnChatsChanged(null, null);
         ApplyNotesVisibility();
@@ -139,6 +149,7 @@ public partial class AskPage : UserControl, IPage
         Session.Chats.CollectionChanged -= OnChatsChanged;
         Session.NotesChanged -= OnNotesChanged;
         Session.CompressionChanged -= OnCompressionChanged;
+        Session.FoldersChanged -= UpdateFolderGrants;
         Hub.Core.Settings.Changed -= OnSettings;
         MarkdownView.AskAboutSelection -= OnAskAboutSelection;
         MarkdownView.SearchSelection -= OnSearchSelection;
@@ -162,9 +173,14 @@ public partial class AskPage : UserControl, IPage
         // What you were typing in the notes belongs to the chat you were in.
         CommitNotes();
         _compressSaid = null;
+        // Another chat: its notes, compression and folders are what's there, not changes to announce.
+        _notesAnnounced = Session.Current.Notes.Count;
+        _coversAnnounced = Session.CompressionOf(Session.Current)?.Covers ?? 0;
+        _foldersAnnounced = Session.Current.Folders.Count;
         Bind();
         OnBusyChanged();
         FillNotes(force: true);
+        UpdateFolderGrants();
         _follow = true;
         Dispatcher.BeginInvoke(() => Scroller.ScrollToEnd(), System.Windows.Threading.DispatcherPriority.Background);
     });
@@ -176,16 +192,33 @@ public partial class AskPage : UserControl, IPage
         CommitNotes();
         _notesOpen = !_notesOpen;
         ApplyNotesVisibility();
+        if (_historyOpen is null) ApplyHistoryVisibility();
         FillNotes(force: true);
         if (_notesOpen) Dispatcher.BeginInvoke(() => NotesBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void ApplyNotesVisibility()
     {
+        var count = Session.Current.Notes.Count;
         NotesPanel.Visibility = _notesOpen ? Visibility.Visible : Visibility.Collapsed;
-        NotesButton.ToolTip = _notesOpen ? "Hide this chat's notes" : Session.Current.Notes.Count > 0 ? $"Notes for this chat ({Session.Current.Notes.Count})" : "Notes for this chat";
-        NotesDot.Visibility = !_notesOpen && Session.Current.Notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NotesButton.ToolTip = _notesOpen ? "Hide this chat's notes" : count > 0 ? $"Notes for this chat ({count})" : "Notes for this chat";
+        NotesDot.Visibility = !_notesOpen && count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // What the button does now, and what the dot shows, for screen readers too.
+        AutomationProperties.SetName(NotesButton, _notesOpen ? "Hide this chat's notes" : "Show this chat's notes");
+        AutomationProperties.SetItemStatus(NotesButton, Plural.Of(count, "note"));
     }
+
+    /// <summary>Tells a screen reader what changed (a live region that isn't drawn).</summary>
+    private void Announce(string text)
+    {
+        Announcer.Text = text;
+        UIElementAutomationPeer.CreatePeerForElement(Announcer)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+    }
+
+    // What the last announcement was about, so the same state isn't announced again.
+    private int _notesAnnounced = -1;
+    private int _coversAnnounced = -1;
+    private int _foldersAnnounced = -1;
 
     /// <summary>Shows the chat's notes in the box — never over what you're typing (unless <paramref name="force"/>: another chat).</summary>
     private void FillNotes(bool force = false)
@@ -200,13 +233,20 @@ public partial class AskPage : UserControl, IPage
         _fillingNotes = false;
         var last = notes.Where(n => n.By == "aqua").MaxBy(n => n.At);
         NotesStatus.Text = notes.Count == 0 ? "No notes yet."
-            : Plural.Of(notes.Count, "note") + (last is null ? "" : " · Aqua last added one " + TimeText.Ago(last.At));
+            : Plural.Of(notes.Count, "note") + (last is null ? "" : " · Aqua last added one " + TimeText.AgoPhrase(last.At));
     }
 
     private void OnNotesChanged()
     {
         ApplyNotesVisibility();
         if (_notesOpen) FillNotes();
+        var count = Session.Current.Notes.Count;
+        // Aqua's changes are announced; yours (you're typing in the box) aren't.
+        if (count != _notesAnnounced && !NotesBox.IsKeyboardFocusWithin)
+        {
+            if (_notesAnnounced >= 0) Announce(count == 0 ? "This chat has no notes now." : $"This chat's notes changed: {Plural.Of(count, "note")}.");
+            _notesAnnounced = count;
+        }
     }
 
     private void OnNotesEntered(object sender, KeyboardFocusChangedEventArgs e)
@@ -242,9 +282,11 @@ public partial class AskPage : UserControl, IPage
         if (!_notesDirty) return;
         _notesDirty = false;
         var thread = _notesThread ?? Session.Current;
-        thread.Notes.ApplyEdit(NotesBox.Text, _notesEditStarted, DateTimeOffset.Now);
+        var leftOut = thread.Notes.ApplyEdit(NotesBox.Text, _notesEditStarted, DateTimeOffset.Now);
         _notesEditStarted = DateTimeOffset.Now;
-        NotesStatus.Text = Plural.Of(thread.Notes.Count, "note") + " · saved";
+        NotesStatus.Text = leftOut > 0
+            ? $"Kept the first {ChatNotes.MaxNotes} notes, the most a chat has · {Plural.Of(leftOut, "line")} left out"
+            : Plural.Of(thread.Notes.Count, "note") + " · saved";
     }
 
     /// <summary>
@@ -331,6 +373,21 @@ public partial class AskPage : UserControl, IPage
     private void OnPendingChanged(object? sender, NotifyCollectionChangedEventArgs? e) =>
         PendingList.Visibility = Session.Pending.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>The folders the chat on screen may read, each with a way to take it back (they last for the chat, not saved).</summary>
+    private void UpdateFolderGrants()
+    {
+        var folders = Session.Current.Folders.ToList();
+        FolderGrants.ItemsSource = folders.Select(f => new FolderGrantVM(f, () => Session.RemoveFolder(f))).ToList();
+        FolderGrants.Visibility = folders.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (folders.Count != _foldersAnnounced)
+        {
+            if (_foldersAnnounced >= 0)
+                Announce(folders.Count == 0 ? "No folders can be read in this chat now."
+                    : "Folders this chat can read: " + string.Join(", ", folders.Select(f => Path.GetFileName(f) is { Length: > 0 } n ? n : f)) + ".");
+            _foldersAnnounced = folders.Count;
+        }
+    }
+
     private void OnMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         UpdateEmpty();
@@ -348,7 +405,8 @@ public partial class AskPage : UserControl, IPage
 
     private void ApplyHistoryVisibility()
     {
-        var open = _historyOpen ?? ActualWidth is 0 or >= 1000;
+        // With the notes open beside the chat, the history makes way sooner (the chat keeps about 700 pixels).
+        var open = _historyOpen ?? ActualWidth is 0 || ActualWidth >= (_notesOpen ? 1300 : 1000);
         HistoryPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         HistoryToggle.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -778,6 +836,13 @@ public partial class AskPage : UserControl, IPage
     {
         _compressSaid = null;
         UpdateCompression();
+        var thread = Session.Current;
+        if (thread.Compressing) return;
+        var covers = Session.CompressionOf(thread)?.Covers ?? 0;
+        if (covers == _coversAnnounced) return;
+        if (_coversAnnounced >= 0)
+            Announce(covers > 0 ? $"The chat was compressed: {Plural.Of(covers, "earlier message")} go to the model as a summary." : "The chat's earlier messages go to the model in full again.");
+        _coversAnnounced = covers;
     }
 
     private void OnUncompress(object sender, RoutedEventArgs e)

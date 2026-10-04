@@ -7,14 +7,11 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: nuget
-    # The UI test project isn't in AquaHub.sln, so it's listed as well: a package it shares (xunit…) has to change
-    # in its lock file in the same pull request, or CI's locked restore fails.
-    directories: ['/', '/tests/AquaHub.E2E']
+    # Every version is in Directory.Packages.props; the UI test project (outside AquaHub.sln) has no lock file, so
+    # an update only has to change the solution's lock files, which Dependabot regenerates.
+    directory: /
     schedule:
       interval: weekly
     groups:
       test-packages:
         patterns: ['xunit*', 'Microsoft.NET.Test.Sdk']
-        # One pull request per package covering both folders (by default each folder gets its own, and neither
-        # passes the locked restore alone).
-        group-by: dependency-name

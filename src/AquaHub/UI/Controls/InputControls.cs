@@ -72,7 +72,12 @@ public sealed class HotkeyBox : TextBox
                 Commit("");
                 return;
         }
-        if (Gesture(key) is not { } gesture) return;
+        if (Gesture(key) is not { } gesture)
+        {
+            // A key on its own (not a modifier being pressed first) would swallow ordinary typing: say what's missing.
+            if (KeyName(key) is { } alone) Problem?.Invoke($"Hold Ctrl, Alt or Win with {alone}: on its own it would take over ordinary typing.");
+            return;
+        }
         Take(gesture);
     }
 

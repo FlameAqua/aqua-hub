@@ -52,7 +52,7 @@
         <StackPanel>
             <TextBlock Text="Workbench" Style="{StaticResource T.Title}"/>
             <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,4,0,0" MaxWidth="820" HorizontalAlignment="Left"
-                       Text="Teach Aqua skills and things to remember. Describe a skill and Aqua drafts it from its own tools."/>
+                       Text="Teach Aqua skills and things to remember. Describe a skill and Aqua drafts it from its own tools: no code runs, and anything that acts on your PC still asks first."/>
         </StackPanel>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,16,0,12">
@@ -220,7 +220,7 @@
                         <StackPanel>
                             <TextBlock Text="Something Aqua should remember" Style="{StaticResource T.CardTitle}"/>
                             <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,2,0,10"
-                                       Text="Facts and preferences Aqua uses in every answer. You can also say “remember that …” in Ask."/>
+                                       Text="Facts and preferences Aqua uses in every answer. You can also say “remember that …” in Ask. Kept only on this PC."/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>

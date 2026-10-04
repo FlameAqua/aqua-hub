@@ -202,8 +202,9 @@ public static class TimeText
         var clock = local.ToString(use24 ? "HH:mm" : "h:mm tt", CultureInfo.CurrentCulture);
         if (local.Date == today) return clock;
         if (local.Date == today.AddDays(-1)) return "yesterday " + clock;
-        if (local.Date > today.AddDays(-7) && local.Date < today) return local.ToString("ddd", CultureInfo.CurrentCulture) + " " + clock;
-        return local.ToString("d MMM", CultureInfo.CurrentCulture) + " " + clock;
+        // Day and month names in English, like "yesterday" and the rest of Aqua's words ("Thu", not "Do.").
+        if (local.Date > today.AddDays(-7) && local.Date < today) return local.ToString("ddd", CultureInfo.InvariantCulture) + " " + clock;
+        return local.ToString("d MMM", CultureInfo.InvariantCulture) + " " + clock;
     }
 
     public static string Ago(DateTimeOffset time, DateTimeOffset? now = null)
@@ -214,7 +215,9 @@ public static class TimeText
         if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m";
         if (span.TotalHours < 24) return $"{(int)span.TotalHours}h";
         if (span.TotalDays < 7) return $"{(int)span.TotalDays}d";
-        return time.ToLocalTime().ToString("d MMM", CultureInfo.CurrentCulture);
+        // In English like the rest ("12 Sep"), and the Gregorian calendar whatever Windows uses: Thai or Hijri dates don't
+        // belong in Aqua's words, and the Um Al-Qura calendar can't even show a date before 1900.
+        return time.ToLocalTime().ToString("d MMM", CultureInfo.InvariantCulture);
     }
 
     /// <summary>"just now", "5m ago", "3h ago", "on 2 Sep".</summary>

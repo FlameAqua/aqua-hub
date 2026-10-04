@@ -42,6 +42,10 @@ public sealed record AskPlan
     public bool ByModel { get; init; }
     /// <summary>The message is about the files the user attached ("summarise the attached notes"): nothing to search for on the PC.</summary>
     public bool AboutAttachments { get; init; }
+    /// <summary>Facts and decisions the message gives, for the chat's notes (when it keeps them and the model planned).</summary>
+    public List<ChatNote> Notes { get; init; } = new();
+    /// <summary>The notes the message changes or overturns, as the model quoted them.</summary>
+    public List<string> NotesOutdated { get; init; } = new();
 
     /// <summary>One line for the activity list and logs.</summary>
     public string Describe()
@@ -75,6 +79,8 @@ public sealed record PlanContext
     public IReadOnlyList<string> Refreshed { get; init; } = Array.Empty<string>();
     /// <summary>The summary standing in for the chat's compressed messages (they aren't in the history).</summary>
     public string ChatSummary { get; init; } = "";
+    /// <summary>The chat's notes, when it keeps them (null when it doesn't): the plan also picks out new ones.</summary>
+    public IReadOnlyList<string>? Notes { get; init; }
 }
 
 public static partial class AskPlanner
@@ -90,12 +96,12 @@ public static partial class AskPlanner
         "video" => "videos", "audio" => "audio files", "code" => "code files", "archive" => "archives", _ => "files",
     };
 
-    internal static JsonObject Schema()
+    internal static JsonObject Schema(bool notes = false)
     {
         JsonObject Str() => new() { ["type"] = "string" };
         JsonObject Arr() => new() { ["type"] = "array", ["items"] = Str() };
         JsonObject Enum(string[] values) => new() { ["type"] = "string", ["enum"] = new JsonArray(values.Select(v => (JsonNode)v).ToArray()) };
-        return new JsonObject
+        var schema = new JsonObject
         {
             ["type"] = "object",
             ["properties"] = new JsonObject
@@ -125,6 +131,135 @@ public static partial class AskPlanner
             },
             ["required"] = new JsonArray("intent", "web_queries", "file_terms", "format"),
         };
+        if (notes) AddNoteFields((JsonObject)schema["properties"]!);
+        return schema;
+    }
+
+    /// <summary>The notes a message gives (facts and decisions) and the ones it overturns.</summary>
+    private static void AddNoteFields(JsonObject properties)
+    {
+        properties["notes"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["items"] = new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject
+                {
+                    ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("fact", "decision") },
+                    ["text"] = new JsonObject { ["type"] = "string" },
+                },
+                ["required"] = new JsonArray("kind", "text"),
+            },
+        };
+        properties["notes_outdated"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } };
+    }
+
+    /// <summary>
+    /// The note-taking reply: "said" first — a few words on what the message tells about the user — then the notes. The
+    /// grammar makes the model write fields in order, and without that first field qwen3.5:9b's likeliest reply to "it's
+    /// 120 m², built in 1998, budget €9,000 — what first?" was an empty list (half of the runs, all of them at
+    /// temperature 0), as it was for "we've decided on air-to-water" (5 in 6). With it, 6 in 6 of each, and questions
+    /// still give nothing (4 Oct). Only <see cref="ReadNotes"/>'s fields are read; "said" isn't kept.
+    /// </summary>
+    internal static JsonObject NotesSchema()
+    {
+        var properties = new JsonObject { ["said"] = new JsonObject { ["type"] = "string" } };
+        AddNoteFields(properties);
+        return new JsonObject { ["type"] = "object", ["properties"] = properties, ["required"] = new JsonArray("said", "notes", "notes_outdated") };
+    }
+
+    private const string SaidRule =
+        "- said: first, what the user's latest message tells about their own situation, in a few words (\"nothing\" when it only asks something).\n";
+
+    // Measured on qwen3.5:9b (live, 3 Oct): with these rules it noted the size, place, budget and choice a message gave,
+    // replaced the budget when it changed, and noted nothing for general questions. The examples are deliberately about
+    // something else: a heat-pump example made it quote notes in the example's words. Live in the app (4 Oct), with the
+    // JSON shape LlmClient appends, "We've decided to go with an air-to-water unit" came back empty 2 times in 5, and a
+    // first message giving the house's details and asking a question sometimes did once a rule for choices was added. With
+    // the wording below, 5 runs each: the details, a changed budget, a decision, a decision with its date, and nothing for
+    // two questions — all right every time.
+    private const string NotesRules = """
+        - notes: facts and decisions the user's latest message gives about their own situation that the rest of the chat should keep: amounts, sizes, dates, places, people, names, models, choices made. One short line each, numbers and names kept, no label such as "Decided:" (kind says it). E.g. {"kind":"fact","text":"Moving date: 14 March, from Leeds to Bristol"}, {"kind":"decision","text":"Renting a van rather than hiring movers"}. Never what they're asking or want from Aqua in this message, nor general knowledge, nor anything the notes already say. A message that asks something can still give facts: note them. A choice they say they've made ("we've decided…", "we're going with…") is a decision, and a date, amount or name given with it is a fact of its own. Empty only when the message gives nothing about their own situation.
+        - notes_outdated: notes from the list that the latest message changes or overturns, copied exactly; the new version goes in notes. E.g. with the note "Moving date: 14 March, from Leeds to Bristol" and "we're moving on the 21st now": notes_outdated ["Moving date: 14 March, from Leeds to Bristol"], notes [{"kind":"fact","text":"Moving date: 21 March, from Leeds to Bristol"}].
+        """;
+
+    private static string NotesList(IReadOnlyList<string> notes) => notes.Count == 0
+        ? "Notes kept for this chat: none yet.\n"
+        : "Notes kept for this chat:\n" + string.Concat(notes.Take(40).Select(n => "- " + HtmlText.Truncate(n.ReplaceLineEndings(" "), 200) + "\n"));
+
+    /// <summary>
+    /// For an answer the model didn't plan (a plain chat: no web, PC, link or skills): one small JSON call, after the
+    /// answer and at background priority, for the notes alone.
+    /// </summary>
+    public static LlmRequest NotesRequest(string question, IReadOnlyList<LlmMessage> history, IReadOnlyList<string> notes, DateTimeOffset now)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Today is ").Append(now.ToString("dddd d MMMM yyyy", Inv)).Append(".\n");
+        sb.Append(ChatSoFar("", history, 4));
+        sb.Append(NotesList(notes));
+        sb.Append("\nThe user's latest message: \"").Append(HtmlText.Truncate(question, 1200)).Append("\"\n\n");
+        sb.Append("Keep this chat's notes up to date. Fill in:\n").Append(SaidRule).Append(NotesRules);
+        return new LlmRequest
+        {
+            Purpose = "ask-notes",
+            Priority = LlmPriority.Background,
+            System = "You keep the notes of a chat with Aqua, a private assistant on the user's PC. Reply with JSON only. " + Prompts.UntrustedNotice,
+            Messages = { new LlmMessage("user", sb.ToString()) },
+            Schema = NotesSchema(),
+            Temperature = 0.1,
+            MaxTokens = 300,
+            Think = false,
+        };
+    }
+
+    [GeneratedRegex(@"^(?:the\s+)?user\b|^(?:looking\s+for|wants?|asks?|asking|whether|aqua)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex NarrationRx();
+
+    [GeneratedRegex(@"^(?:decided|decision|fact|note|question(?:\s+left\s+open)?|open\s+question)\s*:\s*", RegexOptions.IgnoreCase)]
+    private static partial Regex NoteLabelRx();
+
+    /// <summary>
+    /// The notes in a plan or note-taking reply: at most four facts or decisions, each one short line — never the question
+    /// itself or a description of the request ("User wants a table…"), which models write when unsure — and at most four
+    /// quotes of notes it overturns.
+    /// </summary>
+    public static (List<ChatNote> Add, List<string> Outdated) ReadNotes(JsonElement model)
+    {
+        var add = new List<ChatNote>();
+        var outdated = new List<string>();
+        if (model.ValueKind != JsonValueKind.Object) return (add, outdated);
+        if (model.TryGetProperty("notes", out var notes) && notes.ValueKind == JsonValueKind.Array)
+            foreach (var n in notes.EnumerateArray())
+            {
+                if (n.ValueKind != JsonValueKind.Object || add.Count >= 4) continue;
+                var kind = n.TryGetProperty("kind", out var k) && k.ValueKind == JsonValueKind.String && k.GetString() == "decision" ? ChatNotes.Decision : ChatNotes.Fact;
+                var text = n.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String ? Regex.Replace(t.GetString() ?? "", @"\s+", " ").Trim() : "";
+                text = NoteLabelRx().Replace(text, "").Trim();
+                if (text.Length is < 3 or > 200 || text.IndexOfAny(new[] { '|', '?' }) >= 0 || NarrationRx().IsMatch(text)) continue;
+                if (!add.Any(a => a.Text.Equals(text, StringComparison.OrdinalIgnoreCase))) add.Add(new ChatNote(kind, text));
+            }
+        if (model.TryGetProperty("notes_outdated", out var old) && old.ValueKind == JsonValueKind.Array)
+            foreach (var o in old.EnumerateArray())
+                if (o.ValueKind == JsonValueKind.String && o.GetString()?.Trim() is { Length: > 0 and <= 300 } text && outdated.Count < 4) outdated.Add(text);
+        return (add, outdated);
+    }
+
+    /// <summary>
+    /// The chat so far for a planning or note-taking prompt — the summary of its compressed messages and the last few
+    /// turns — in an untrusted-data fence: answers quote pages Aqua read, and a summary stays with the chat ("" when empty).
+    /// </summary>
+    private static string ChatSoFar(string summary, IReadOnlyList<LlmMessage> history, int turns)
+    {
+        var sb = new StringBuilder();
+        if (summary.Length > 0) sb.Append("A summary of the start of this chat: ").Append(HtmlText.Truncate(summary.ReplaceLineEndings(" "), 700)).Append('\n');
+        var last = history.Where(m => m.Role is "user" or "assistant").TakeLast(turns).ToList();
+        if (last.Count > 0)
+        {
+            sb.Append("Earlier in this chat (oldest first):\n");
+            foreach (var m in last) sb.Append(m.Role == "user" ? "User: " : "Aqua: ").Append(HtmlText.Truncate(m.Content.ReplaceLineEndings(" "), 280)).Append('\n');
+        }
+        return sb.Length == 0 ? "" : "The chat so far:\n" + Prompts.Fenced(sb.ToString()) + "\n";
     }
 
     /// <summary>The planning request: fast (no reasoning), JSON only.</summary>
@@ -132,17 +267,10 @@ public static partial class AskPlanner
     {
         var sb = new StringBuilder();
         sb.Append("Today is ").Append(now.ToString("dddd d MMMM yyyy", Inv)).Append(".\n");
-        if (ctx.ChatSummary.Length > 0)
-            sb.Append("Before that, in this chat (a summary): ").Append(HtmlText.Truncate(ctx.ChatSummary.ReplaceLineEndings(" "), 700)).Append('\n');
-        var turns = history.Where(m => m.Role is "user" or "assistant").TakeLast(6).ToList();
-        if (turns.Count > 0)
-        {
-            sb.Append("Earlier in this chat (oldest first):\n");
-            foreach (var m in turns) sb.Append(m.Role == "user" ? "User: " : "Aqua: ").Append(HtmlText.Truncate(m.Content.ReplaceLineEndings(" "), 280)).Append('\n');
-        }
+        sb.Append(ChatSoFar(ctx.ChatSummary, history, 6));
         sb.Append("Web: ").Append(o.UsesWeb ? "on" : "off").Append(". Use my PC: ").Append(o.Computer ? "on" : "off");
         if ((o.Computer || o.Folders.Count > 0) && ctx.Folders.Count > 0) sb.Append(" (folders Aqua may search: ").Append(string.Join(", ", ctx.Folders.Take(8))).Append(')');
-        if (o.Folders.Count > 0) sb.Append(". The user attached a folder to this chat; questions are usually about its files");
+        if (o.Folders.Count > 0) sb.Append(". The user attached a folder to this chat: a question about files, or what's “in here”, is about its files (intent files); other questions aren't");
         sb.Append(".\n");
         if (ctx.Memories.Count > 0) sb.Append("The user asked Aqua to remember: ").Append(string.Join(" | ", ctx.Memories.Take(12).Select(m => HtmlText.Truncate(m, 140)))).Append('\n');
         if (ctx.Skills.Count > 0)
@@ -155,6 +283,7 @@ public static partial class AskPlanner
         if (ctx.Attachments.Count > 0)
             sb.Append("Attached to this message: ").Append(string.Join(", ", ctx.Attachments.Take(6).Select(a => HtmlText.Truncate(a, 80))))
               .Append(". Aqua already has their contents: a message about them (\"the attached…\", \"this file\", \"this screenshot\") needs no file search — intent chat, no file_terms — unless it asks to find other files on the PC.\n");
+        if (ctx.Notes is { } kept) sb.Append(NotesList(kept));
         sb.Append("\nThe user's latest message: \"").Append(HtmlText.Truncate(question, 1200)).Append("\"\n\n");
         sb.Append("""
             Plan how Aqua should handle the latest message. Fill in:
@@ -174,6 +303,9 @@ public static partial class AskPlanner
             - recent: true for news or anything that changes (prices, scores, releases).
             - format: direct (a fact, a link, a file or a short answer), list, steps or report.
             - skill and skill_args: the fitting skill's name and the values it needs, else empty.
+            """).Append('\n');
+        if (ctx.Notes is not null) sb.Append(NotesRules).Append('\n');
+        sb.Append("""
 
             Examples:
             "Find me my logo photo of a blue flame" -> {"intent":"files","web_queries":[],"file_terms":["logo","flame"],"file_kind":"image","looks":"a blue flame","format":"direct"}
@@ -188,9 +320,9 @@ public static partial class AskPlanner
             Priority = LlmPriority.Interactive,
             System = "You plan the steps for Aqua, a private assistant on the user's PC. Reply with JSON only. " + Prompts.UntrustedNotice,
             Messages = { new LlmMessage("user", sb.ToString()) },
-            Schema = Schema(),
+            Schema = Schema(notes: ctx.Notes is not null),
             Temperature = 0.1,
-            MaxTokens = 360,
+            MaxTokens = ctx.Notes is null ? 360 : 480,
             Think = false,
         };
     }
@@ -413,16 +545,19 @@ public static partial class AskPlanner
         attachments > 0 && (AttachRefRx().IsMatch(question) || !ElsewhereRx().IsMatch(question) && !FindVerbRx().IsMatch(question));
 
     /// <summary>The plan the rules make on their own (used when the model can't plan, and merged into its plan).</summary>
-    public static AskPlan Heuristic(string question, IReadOnlyList<LlmMessage> history, AskOptions o, int attachments = 0)
+    /// <param name="folderNow">The message is the one a folder was attached with.</param>
+    public static AskPlan Heuristic(string question, IReadOnlyList<LlmMessage> history, AskOptions o, int attachments = 0, bool folderNow = false)
     {
         var links = Links(question);
         var site = SiteOf(question, links);
         var screen = ScreenRx().IsMatch(question) && attachments == 0;
         var aboutAttachments = AboutTheAttachments(question, attachments);
-        // With a folder attached to the chat, questions are about its files unless they plainly look something up.
+        // With a folder attached to the chat, the message sent with it and any about files or "in here" are about its
+        // files (unless they plainly look something up); "tell me a joke" or "the capital of France" aren't.
+        var aboutFolder = o.Folders.Count > 0 && !OnlineRx().IsMatch(question) &&
+                          (folderNow || FolderRefRx().IsMatch(question) || FileWordsRx().IsMatch(question) || FindVerbRx().IsMatch(question));
         var fileish = !aboutAttachments && (FileWordsRx().IsMatch(question) || FindVerbRx().IsMatch(question) && PossessiveRx().IsMatch(question) ||
-                                            o.Computer && PersonalRecordRx().IsMatch(question)) ||
-                      o.Folders.Count > 0 && !OnlineRx().IsMatch(question);
+                                            o.Computer && PersonalRecordRx().IsMatch(question)) || aboutFolder;
         var feeds = FeedsRx().IsMatch(question);
         var siteSearch = links.Count > 0 && Regex.IsMatch(question, @"\b(search|look|find|anything|check|go) (through|on|in|for)\b|\bsearch\b", RegexOptions.IgnoreCase);
         var intent = screen ? "screen"
@@ -476,6 +611,10 @@ public static partial class AskPlanner
     [GeneratedRegex(@"\b(search|look up|google|online|on the web|internet|latest|news|is (?:it|this|that) true|fact.?check)\b", RegexOptions.IgnoreCase)]
     private static partial Regex LookUpRx();
 
+    /// <summary>Pointing at an attached folder: "what's in here?", "in this project", "the code", "these files".</summary>
+    [GeneratedRegex(@"\b(?:in here|from here|in there|in it|inside it|this (?:folder|project|directory|repo(?:sitory)?|codebase|code)|these (?:files|documents|docs|folders|notes)|the (?:folder|project|directory|repo(?:sitory)?|codebase|code|files))\b", RegexOptions.IgnoreCase)]
+    private static partial Regex FolderRefRx();
+
     /// <summary>A question that plainly wants the internet rather than the files in front of it.</summary>
     [GeneratedRegex(@"\b(look (?:it |this |that )?up|google|online|on the web|internet|news|fact.?check)\b", RegexOptions.IgnoreCase)]
     private static partial Regex OnlineRx();
@@ -526,6 +665,7 @@ public static partial class AskPlanner
         IReadOnlyList<LlmMessage>? history = null)
     {
         if (model.ValueKind != JsonValueKind.Object) return rules;
+        var (notes, outdated) = ReadNotes(model);
         string Str(string name) => model.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()?.Trim() ?? "" : "";
         List<string> List(string name) => model.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array
             ? v.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!.Trim()).Where(s => s.Length > 0).ToList()
@@ -574,6 +714,8 @@ public static partial class AskPlanner
                 if (t.Length >= 2 && !NotNameWords.Contains(t) && !fileTerms.Contains(t)) fileTerms.Add(t);
         foreach (var t in rules.FileTerms)
             if (fileTerms.Count < 5 && !fileTerms.Contains(t)) fileTerms.Add(t);
+        // In a chat with a folder, words for a file name count only in a question about files ("tell me a joke" isn't).
+        if (o.Folders.Count > 0 && intent != "files" && rules.FileTerms.Count == 0) fileTerms.Clear();
 
         var kind = Str("file_kind").ToLowerInvariant();
         if (!Kinds.Contains(kind) || kind == "any" && rules.FileKind != "any") kind = rules.FileKind;
@@ -619,6 +761,8 @@ public static partial class AskPlanner
             SkillArgs = args,
             ByModel = true,
             AboutAttachments = rules.AboutAttachments,
+            Notes = notes,
+            NotesOutdated = outdated,
         };
     }
 }

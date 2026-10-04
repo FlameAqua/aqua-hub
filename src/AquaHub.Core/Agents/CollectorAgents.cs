@@ -19,18 +19,42 @@ public sealed class NewsScoutAgent : Agent
     {
         var s = ctx.S;
         // A search for your place ("{city}") has nothing to look for until you choose one.
+        var now = DateTimeOffset.UtcNow;
         var specs = s.News.Sources.Where(x => x.Enabled && RssSource.CanFetch(x, s.Location)).Select(x => RssSource.ToSpec(x, s.Location)).ToList();
         if (specs.Count == 0) return AgentResult.Unchanged("No news sources enabled");
-        var outcomes = await Task.WhenAll(specs.Select(spec => RssSource.FetchAsync(ctx.Http, spec, ct))).ConfigureAwait(false);
+        // A feed that isn't at its address any more is tried only every few hours (SourceHealth).
+        var due = specs.Where(spec => ctx.State.Sources.Due(spec.Id, now)).ToList();
+        if (due.Count == 0) return AgentResult.Unchanged("Every news source is resting after failing");
+        var outcomes = await Task.WhenAll(due.Select(spec => RssSource.FetchAsync(ctx.Http, spec, ct))).ConfigureAwait(false);
         var items = outcomes.SelectMany(o => o.Items).ToList();
         var inserted = items.Count > 0 ? ctx.Db.UpsertItems(items) : 0;
         var ok = outcomes.Count(o => o.Ok);
-        var failed = outcomes.Where(o => !o.Ok).Select(o => o.SourceId).ToList();
-        foreach (var f in outcomes.Where(o => !o.Ok)) Log.Warn("news", $"{f.SourceId}: {f.Error}");
-        var msg = $"{inserted} new from {ok}/{specs.Count} sources" + (failed.Count > 0 ? $" · unavailable: {string.Join(", ", failed.Take(3))}" : "");
+        var names = due.GroupBy(spec => spec.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var failed = outcomes.Where(o => !o.Ok).Select(o => names[o.SourceId].Name).ToList();
+        foreach (var o in outcomes)
+            if (ctx.State.Sources.Record("news", o, now) is { } gone)
+                SourceGone(ctx, gone, names[o.SourceId], "Settings › News › Sources", "settings:news:sources", now);
+        var msg = $"{inserted} new from {ok}/{due.Count} sources" + (failed.Count > 0 ? $" · unavailable: {string.Join(", ", failed.Take(3))}" : "");
         if (ok == 0) return AgentResult.Fail(ctx.Http.LooksOffline ? "Offline — keeping the last headlines" : "All news sources failed");
         ctx.State.MarkFresh("news");
         return AgentResult.Success(msg, changed: inserted > 0 || ctx.State.Stories.Count == 0);
+    }
+
+    /// <summary>
+    /// One alert for a feed that isn't at its address any more (once a month at most, while it stays that way), pointing at
+    /// where to change or remove it.
+    /// </summary>
+    internal static void SourceGone(HubContext ctx, SourceHealth.Problem problem, FeedSpec spec, string where, string target, DateTimeOffset now)
+    {
+        var host = Uri.TryCreate(spec.Url, UriKind.Absolute, out var u) ? u.Host : spec.Url;
+        ctx.RaiseAlert(new HubAlert
+        {
+            Id = Hash.Short("source-gone", spec.Id, now.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture)),
+            Kind = "system", Severity = AlertSeverity.Notice,
+            Title = $"{spec.Name} isn't at its address any more",
+            Body = $"{host} answers “not found” ({problem.Error}). Check the address or remove the feed in {where}; until then Aqua tries it every {SourceHealth.GoneRetry.TotalHours:0} hours.",
+            Target = target, Created = now,
+        }, onceKey: $"source-gone:{spec.Id}:{now.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture)}");
     }
 }
 
@@ -84,7 +108,17 @@ public sealed class SocialScoutAgent : Agent
     public override async Task<AgentResult> RunAsync(HubContext ctx, CancellationToken ct)
     {
         var s = ctx.S.Social;
+        var now = DateTimeOffset.UtcNow;
         var tasks = new List<Task<FetchOutcome>>();
+        var feeds = new Dictionary<string, (FeedSpec Spec, string Where, string Target)>(StringComparer.Ordinal);
+        // A feed that isn't at its address any more is tried only every few hours (SourceHealth).
+        var resting = 0;
+        void Feed(FeedSpec spec, string where, string target)
+        {
+            if (!ctx.State.Sources.Due(spec.Id, now)) { resting++; return; }
+            feeds[spec.Id] = (spec, where, target);
+            tasks.Add(RssSource.FetchAsync(ctx.Http, spec, ct));
+        }
         if (s.Subreddits.Count > 0)
         {
             // One combined request for all communities (r/a+b+c) — Reddit rate-limits anonymous clients hard.
@@ -109,26 +143,27 @@ public sealed class SocialScoutAgent : Agent
         foreach (var feed in s.BlueskyFeeds) tasks.Add(BlueskySource.FetchFeedAsync(ctx.Http, feed, ct));
         if (s.HackerNews) tasks.Add(HackerNewsSource.FetchFrontPageAsync(ctx.Http, s.HackerNewsCount, ct));
         foreach (var ch in s.YouTubeChannels)
-            tasks.Add(RssSource.FetchAsync(ctx.Http, new FeedSpec
+            Feed(new FeedSpec
             {
                 Id = "youtube:" + ch.ChannelId, Name = string.IsNullOrWhiteSpace(ch.Name) ? "YouTube" : ch.Name,
                 Url = $"https://www.youtube.com/feeds/videos.xml?channel_id={Uri.EscapeDataString(ch.ChannelId)}",
                 Kind = ItemKind.Social, Platform = "youtube", Category = "video", Tier = 3, MaxItems = 10,
-            }, ct));
+            }, "Settings › Social › YouTube channels", "settings:social:youtube");
         foreach (var f in s.ExtraFeeds.Where(f => f.Enabled))
-            tasks.Add(RssSource.FetchAsync(ctx.Http, new FeedSpec
+            Feed(new FeedSpec
             {
                 Id = "feed:" + f.Id, Name = f.Name, Url = f.Url, Kind = ItemKind.Social, Platform = "rss", Category = f.Category, Tier = 3, Local = f.Local,
-            }, ct));
+            }, "Settings › Social › Extra feeds", "settings:social:extrafeeds");
 
-        if (tasks.Count == 0) return AgentResult.Unchanged("No social sources configured");
+        if (tasks.Count == 0) return AgentResult.Unchanged(resting > 0 ? "Every social source is resting after failing" : "No social sources configured");
         var outcomes = await Task.WhenAll(tasks).ConfigureAwait(false);
         var items = outcomes.SelectMany(o => o.Items).ToList();
         var inserted = items.Count > 0 ? ctx.Db.UpsertItems(items) : 0;
-        foreach (var f in outcomes.Where(o => !o.Ok)) Log.Warn("social", $"{f.SourceId}: {f.Error}");
+        foreach (var o in outcomes)
+            if (ctx.State.Sources.Record("social", o, now) is { } gone && feeds.TryGetValue(o.SourceId, out var feed))
+                NewsScoutAgent.SourceGone(ctx, gone, feed.Spec, feed.Where, feed.Target, now);
 
-        var recent = ctx.Db.GetItems(ItemKind.Social, DateTimeOffset.UtcNow.AddHours(-36), 800);
-        var now = DateTimeOffset.UtcNow;
+        var recent = ctx.Db.GetItems(ItemKind.Social, now.AddHours(-36), 800);
         var ranked = recent
             .OrderByDescending(i => Math.Log10(2 + Math.Max(0, i.Score)) + Math.Log10(2 + i.Comments) * 0.5 - (now - i.Published).TotalHours / 10.0)
             .Take(240).ToList();

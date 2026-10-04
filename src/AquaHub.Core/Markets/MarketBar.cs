@@ -8,7 +8,12 @@ namespace AquaHub.Core.Markets;
 /// </summary>
 public static class MarketBar
 {
+    /// <summary>The most charts the row shows (it's one row of tiles).</summary>
+    public const int MaxCharts = 9;
+
     public static List<WatchSymbol> Items(MarketSettings m) => m.Indices.Concat(m.Macro).ToList();
+
+    public static bool IsFull(MarketSettings m) => Items(m).Count >= MaxCharts;
 
     /// <summary>Moves a chart one place left (<paramref name="step"/> −1) or right (+1).</summary>
     public static bool Move(MarketSettings m, string symbol, int step)
@@ -27,10 +32,10 @@ public static class MarketBar
     public static bool Remove(MarketSettings m, string symbol) =>
         m.Indices.RemoveAll(w => Same(w, symbol)) + m.Macro.RemoveAll(w => Same(w, symbol)) > 0;
 
-    /// <summary>Adds a chart at the end of the row, unless it's already there.</summary>
+    /// <summary>Adds a chart at the end of the row, unless it's already there or the row is full.</summary>
     public static bool Add(MarketSettings m, WatchSymbol chart)
     {
-        if (Items(m).Any(w => Same(w, chart.Symbol))) return false;
+        if (IsFull(m) || Items(m).Any(w => Same(w, chart.Symbol))) return false;
         m.Macro.Add(chart);
         return true;
     }

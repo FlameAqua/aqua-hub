@@ -44,14 +44,15 @@ src/AquaHub          Windows shell (WPF)
                      taskbar integration (jump list, thumbnail media buttons, alerts badge)
   UI/                design system (Theme/*.xaml), controls (charts, gauges, icons, FlowGrid),
                      shell (MainWindow, FlyoutWindow, CommandPalette, Onboarding), pages
-tests/AquaHub.Tests  xUnit (840+): parsers, security cases, clustering, indicators, ICS, commands,
+tests/AquaHub.Tests  xUnit (1,100+): parsers, security cases, clustering, indicators, ICS, commands,
                      LLM plumbing, DB, settings merge, notification policy, scheduling/back-off,
                      Sentinel de-duplication, fact checks, the update flow (fake updater), your place,
                      Ask's model picker, Ask's Markdown and LaTeX (formulae run through XAML-Math's own
-                     parser), chat notes, compression and pictures, a XAML accessibility contract (no
+                     parser), chat notes, compression, pictures and privacy, a XAML accessibility contract (no
                      name or id on an element without an automation peer), the collectors and AI agents
                      against a stand-in network (FakeNetwork) and model server (FakeOllama); plus an
-                     opt-in live run (AQUAHUB_LIVE=1)
+                     opt-in live run (AQUAHUB_LIVE=1). CI runs them again under Thai and Arabic settings
+                     (AQUAHUB_TEST_CULTURE), where other calendars and number formats show culture bugs
 tests/AquaHub.E2E    UI Automation suite that drives the real app (every page, button, window)
                      in a sandboxed --e2e profile where side effects are journalled, not performed
 ```
@@ -91,6 +92,11 @@ tests/AquaHub.E2E    UI Automation suite that drives the real app (every page, b
   "News updated 4m ago" from that (not from UI or telemetry updates). When requests to several hosts fail
   at the network level the hub shows an offline banner with the time its data is from, and the collectors
   run again as soon as any server answers.
+* **Feeds that keep failing** (`SourceHealth`) – a failing feed is logged when it starts failing, when its error
+  changes and then once a day, not every run. One that answers "not found" (HTTP 404 or 410) three runs in a row
+  counts as gone: it's fetched only every six hours until it works again, one alert names it and points at its row
+  in Settings (News › Sources, Social › Extra feeds or YouTube channels), and that row says what's wrong and since
+  when. Kept in memory, so after a restart every feed gets a fresh try.
 * **Checking the model** – market digests state whether exchanges are open ("figures from Fri close"),
   weather digests carry units, a percentage Foresight quotes must belong to the market that sentence is
   about (not merely to some market) and a "favourite" it names must be the leading outcome (else the
@@ -140,14 +146,18 @@ through a `UiThrottle`, so a background refresh never costs more than one layout
   choice or a move abroad (only values that are still defaults or the previous country's), and within a country
   the new town's subreddit and hashtag in place of the old town's. Profiles from before keep Dublin, as they
   saved it.
-* **Markets** – the chart row is the `Indices` and `Macro` lists (`MarketBar` moves, removes and adds, and the page
-  keeps its tiles when nothing about them changed). The portfolio (`Portfolio`) values holdings in your base
-  currency with `FxRates`: Yahoo pairs such as `EURUSD=X`, inverse pairs and crosses through the dollar, and
+* **Markets** – the chart row is the `Indices` and `Macro` lists (`MarketBar` moves, removes and adds, up to nine
+  charts; the tiles are rebuilt on each refresh, the editor's list only when the row itself changed, so a new price
+  doesn't take the keyboard off the button in use). The portfolio (`Portfolio`) values holdings in your base currency
+  with `FxRates`: Yahoo pairs such as `EURUSD=X`, inverse pairs and crosses through the dollar, and
   quotes in minor units (GBp, ZAc, ILA) divided by 100. Market Watch fetches only the rates your holdings need (for
   their prices and for the currency you paid in) and keeps their daily history; the chart replays today's
-  holdings over each day's closes at that day's rate, starting once every holding has a price. A holding without a
+  holdings over each day's closes at that day's rate, starting once every holding has a price, and ends today at
+  the card's own value; holdings with no price history yet are named under the chart. A holding without a
   price or a rate is listed apart rather than added in the wrong currency. Typed numbers accept "0.5" and "0,5"
-  (`Numbers`, the culture deciding a thousands separator).
+  (`Numbers`): a separator counts as thousands only in real groups of three ("1,234,567", "1.234,5", Indian
+  "1,23,456"), and a single one ("1,234") only when it's the culture's own; "1.5.2" or "1,2.3" isn't a number, and the
+  box says so instead of saving it.
 * **Settings search and shortcuts** – `SettingsSearch` scores every row's title, extra keywords, section and
   description (every word has to match; plurals count) and takes you to the row with its control focused.
   `Shortcuts` checks a new global shortcut against the other one and Aqua's own keys, and asks Windows whether it's
@@ -234,6 +244,37 @@ it and it restarts two minutes after the GPU frees up; no model loaded and no re
 interactive requests, "Regenerate" and scheduled briefs may start it (`LlmClient.StartServer`), background
 agents never do — so an idle stop really frees the memory. Quitting Aqua stops a server Aqua itself started.
 
+### Aqua's own runtime (llama.cpp)
+
+With Settings' provider set to `llamacpp`, Ask Aqua and the agents run on llama.cpp's `llama-server` instead of Ollama
+(Core: `Ai/Local`; app: `Services/LocalAi` is the screens' API, `Services/LlamaProcessHost` starts the servers,
+`Platform/GpuReader` reads the card). Ollama's management (section above) steps aside while it is selected.
+
+- **Install** (`LlamaSetup`, `LlamaCatalog`): one pinned llama.cpp release (b11387) from its GitHub releases, picked for
+  the card: CUDA 13.4 or 12.4 by the CUDA version the NVIDIA driver runs (read with NVML), Vulkan for other cards, the CPU
+  build without one. Each archive is checked against its size and SHA-256; only `llama-server.exe` and DLLs are unpacked,
+  into `llama\llama.cpp-b11387-<backend>` in the profile. A custom server path (`Ai.Llama.ServerPath`, e.g. Ollama's
+  bundled `lib\ollama\llama-server.exe`) is used instead when set.
+- **Models** (`ModelLibrary`, `OllamaStore`, `Gguf`): Aqua's downloads in `models\` plus, unless switched off, Ollama's
+  store read in place (manifests to GGUF blobs; nothing is copied). Each file's GGUF header is parsed with bounded reads
+  for its layers, context cache shape (hybrid and sliding-window models included), MTP heads, chat template, thinking,
+  tools and vision projector; the results are cached by path, size and time. One file under several names is one model.
+- **Downloads** (`ModelDownloads`): public Hugging Face repositories at a fixed commit; each file is checked against the
+  size and SHA-256 Hugging Face lists for it, and resumes after a stop. The suggestions per card size are pinned in code.
+- **Fit** (`HardwareFit`): weights + context cache at the cache type + a working allowance, against the card's memory less
+  1 GB for the desktop. The context is chosen up to 64K (128K on a 24 GB card) and at least 8K; llama.cpp's `--fit`
+  still checks at load and moves layers to the processor if the card is short.
+- **Servers** (`LlamaRuntime`, `LlamaArgs`): one `llama-server` per model (Ollama's bundled build has no router mode), on
+  127.0.0.1 and a free port, with a random key per start passed in its environment, inside a Windows job that ends it
+  with Aqua. Two lanes: one model on the graphics card at a time (a request for another stops it first) and background
+  or search models on the processor. Background work uses the background model if one is set, else the model already on
+  the card (never a swap), else the main one. MTP "auto" measures answers with and without speculative heads (`SpeedBook`,
+  `llama\speed.json`) and keeps them only when at least 5% faster. Idle servers sleep after `IdleUnloadMinutes`.
+- **Requests** (`LlmClient`): OpenAI-style chat on the server's `/v1` with the key, `chat_template_kwargs.enable_thinking`,
+  `reasoning_effort`, JSON schemas and tools; llama.cpp's timings (cached, prompt and output tokens and times) come back
+  on every result (`LlmResult.Timings`). A server that died is restarted once.
+- With *Stop Ollama for games* on, a game on the card stops the model there; the next question loads it again.
+
 ## 9. Taskbar
 
 The tray icon is a raw `Shell_NotifyIcon` (no WinForms) on a hidden message window that also receives global
@@ -268,8 +309,11 @@ Ask is an agent with tools (`Core/Ai/Assistant`), not a single prompt. Every ans
    in its plan): links you typed are always opened and only links from the chat are (an address the model makes
    up is never fetched), a "query" that is just the question is replaced by its subject, unknown kinds, folders
    and skills are dropped. With files attached, a message about them ("summarise the attached notes") searches
-   nothing on the PC unless it asks for other files. Questions about your own records ("when is my boiler
-   service due?") search your files when Use my PC is on. The plan is shown as the first activity step.
+   nothing on the PC unless it asks for other files. In a chat with a folder attached, only a question about files
+   or what's "in here" searches it (the rules and the planner's prompt agree; a file name the model guessed for
+   another question is dropped), so "what's the capital of France?" isn't answered from the folder. Questions about
+   your own records ("when is my boiler service due?") search your files when Use my PC is on. The plan is shown as
+   the first activity step.
 3. **Gathering.** Measured on `qwen3.5:9b`: with answer-style rules in the prompt the model called
    `search_files` in 0 of 3 tries for "when is my boiler service due?", and never searched the web for facts it
    thought it knew. So Ask gathers what the plan says before the model answers: a taught skill's fixed steps;
@@ -300,39 +344,60 @@ Ask is an agent with tools (`Core/Ai/Assistant`), not a single prompt. Every ans
 | **Research** | A fixed plan instead of the loop: the model writes 3–4 queries → parallel searches → up to *N* pages (relevance, established outlets, at most 2 per site) → a streamed report (answer, *Key findings*, *Where sources differ*, *What to watch*), every claim cited. |
 | **Think** | Reasoning on (`think: true`, sent only to a model with Ollama's `thinking` capability), shown collapsed as *Thought for n s*. |
 | **Use my PC** | `search_files` (name words, kind, folder), `read_file` (documents; pictures are shown to vision models), `list_folder`, `take_screenshot`, `system_status`, `read_clipboard`, `open_item`, `launch_app` (Launchpad, any Start-menu app, Windows Settings pages), `media_control`, `run_scene`, `do_not_disturb` (Aqua's own notifications); with *Let Ask operate apps*: `list_windows`, `read_window` (UI Automation: numbered buttons, fields, links, menu items), `focus_window`, `click` (invoke, toggle, select, expand), `type_text` (value or keystrokes, never password fields), `press_keys` (Ctrl/Shift/Alt with letters, digits, F-keys and navigation keys; never the Windows key or Alt+F4), `close_window` (a close request). |
-| Attachments | Files (text, code, CSV/JSON, HTML, Word, Excel, PowerPoint, OpenDocument, RTF, PDF, images), pasted images, a screenshot of the screen or a snip. Office files are read from their XML (`Documents`), PDFs are rendered and read with Windows OCR (`Windows.Data.Pdf` + `Windows.Media.Ocr`), and images go to vision models as images (with OCR text for the rest). A **folder** (`AskOptions.Folders`, kept with the open chat, not saved) gives that chat `search_files`, `list_folder` and `read_file` inside it, with Use my PC's rules, even while Use my PC is off; its newest entries go into the context. |
+| Attachments | Files (text, code, CSV/JSON, HTML, Word, Excel, PowerPoint, OpenDocument, RTF, PDF, images), pasted images, a screenshot of the screen or a snip. Office files are read from their XML (`Documents`), PDFs are rendered and read with Windows OCR (`Windows.Data.Pdf` + `Windows.Media.Ocr`), and images go to vision models as images (with OCR text for the rest). A **folder** (`ChatThread.Folders`, kept with the open chat and never saved: `AskOptions.Folders` is left out of the stored options, and every question — *Retry*, *Dig deeper* and *Edit* included — takes the chat's folders as they are then) gives that chat `search_files`, `list_folder` and `read_file` inside it, with Use my PC's rules, even while Use my PC is off; its newest entries go into the context. Each shared folder has a chip above the box for as long as the chat can read it, and its × takes it back at once. A folder that is itself a junction or link is judged by where it leads as well (`LocalFiles.IsSensitiveRoot`). A message takes up to eight attachments; more are counted on a *Not attached* chip rather than dropped silently. |
 
-**Safety.** Tool results are fenced as untrusted data. Tools are classed Hub / Web / Private / Act:
+**Safety.** Tool results — and a chat's notes, summary and earlier turns — are fenced as untrusted data
+(`Prompts.Fenced`, which defuses a fence mark inside the text, so it can't close the block early). Tools are classed
+Hub / Web / Private / Act:
 *Act* tools (open, launch, media, clipboard) show **Allow / Allow for this chat / Don't allow** in the chat first
 (Settings › Ask Aqua › Ask before acting), with the whole text, keys, query or address; screenshots Ask decides
-to take need an OK too. Typing that presses Enter and key presses need an OK each time. Once an answer has read
+to take need an OK too (the card says when the screenshot will be kept with the chat). Typing that presses Enter and key presses need an OK each time. Once an answer has read
 anything that isn't your own words (`AskRun.SawUntrusted`: pages, results, feed items, files, the screen, app
 windows, the clipboard, attachments), typing, clicking, key presses and closing windows ask every time, even with
 approvals off. Keystrokes only go to the approved window (`DesktopWindows.IsInFront`, checked before every
 chunk); `DesktopRules` keeps anything that runs typed commands (terminals, File Explorer and the Run dialog,
 editors with a terminal, script hosts), system tools, sign-in prompts, password managers and Aqua itself off
 limits, and stops `launch_app` starting shells, installers and admin tools. Once an answer has seen private
-data (files, screen, attachments, clipboard), anything that would reach the internet — a search, a page or a
-link opened in the browser — needs an OK, so a page can't steer the model into sending your data out; so does
-one carrying names from your calendar or from what Aqua remembers. Files are read only
-inside the folders you allow (resolved paths, so `..` can't escape) or that you attached, never credential
-files or keys, and programs, scripts and shortcuts are never opened. `WebReader` checks every connection
-(redirects included) at connect time and refuses loopback, private, link-local, CGNAT and unique-local
-addresses. Unanswered approvals are declined after three minutes.
+data (files, screen, attachments, clipboard, your holdings), anything that would reach the internet — a search, a page
+or a link opened in the browser — needs an OK, so a page can't steer the model into sending your data out. The chat
+keeps that (`ChatSummary.ReadPrivate`, read back as `AskRun.EarlierPrivate`), so its later answers ask too: its
+messages, notes and summary carry what was read. A search or link carrying two names or numbers from your calendar,
+from what Aqua remembers or from the chat's notes needs an OK as well (`AskRun.PrivateTerms`; one long number, such as
+an account, is enough). Files are read only inside the folders you allow or that you attached — resolved paths
+(`Path.GetFullPath` spells out 8.3 short names, so neither `..` nor `SSH~1` escapes the folder rules), no junction or
+symbolic link inside them followed, and an attached folder that is itself a link judged by its target too — never
+credential files or keys, and programs, scripts and shortcuts are never opened. `WebReader` checks every connection (redirects included)
+at connect time and refuses loopback, private, link-local, CGNAT and unique-local addresses. Unanswered approvals are
+declined after three minutes.
 
 **Aqua's agents** (`AgentJobs`, `RunAgentTool`). A message that asks in so many words — *refresh the news*,
 *update my markets and the weather*, *get the latest prices*, *rerun the market analyst*, *write me a fresh brief*,
 or *refresh it* after a question about the weather — runs those agents before anything else (collectors side by
-side, then the AI ones), so even a model that never calls tools answers from what they brought in. The context says
-what each did and, after the news, lists the stories that weren't there before; the planner is told, so it doesn't
-search the web for "the news". *Run* and *rewrite* need a name straight after them ("run the numbers on my
-portfolio" runs nothing; "rewrite this story" is about your text). For follow-ups the model has `run_agent`, with
+side, then the AI ones), so even a model that never calls tools answers from what they brought in — within five
+minutes in all (`AskAgent.RefreshBudget`; an AI job that would start later is skipped and the answer says so), and
+not when the message brings attachments or a folder, whose question is about them. The context says what each did
+and, after the news, lists the stories that weren't there before; the planner is told, so it doesn't search the
+web for "the news". "All" or "everything" means every job only on its own or with
+Aqua's things ("refresh everything", "update all the agents"), not "update all my documents".
+*Run* and *rewrite* need a name straight after them ("run the numbers on my portfolio" runs
+nothing; "rewrite this story" is about your text), the AI agents' work counts only by its full name ("a fresh
+brief", "a new market analysis", not "an analysis of this contract" or "a brief summary"), and a topic word that
+names something else isn't a job: "the prices in my spreadsheet", "my calendar with a dentist visit", "the weather
+widget", "my news sources" (`AgentJobs.Requested`; each of these is a test case). A job counts as refreshed only
+when it brought something: a collector must have refreshed its area since it was asked (`HubState.FreshAt`), and
+an AI agent whose run changed nothing or was paused (`AgentStatus.NothingNew`) is reported as not refreshed. A
+brief asked for is flagged for the briefing agent (`BriefingAgent.ManualFlag`), so a run already under way that
+missed it is followed by one that takes it up, and the flag is withdrawn if the answer stops waiting. With the model
+off or paused, the collectors asked for still run (they don't need it) and the answer from the feeds starts with
+how it went; the AI agents' work says it waits for the model (`AskAgent.RefreshWithoutModelAsync`). For follow-ups
+the model has `run_agent`, with
 a fixed list of jobs — news, social, markets, predictions, agenda, weather, brief, market analysis, pulse,
 Foresight — never an agent by id. Each job runs at most once per answer (a repeat returns the same outcome
 without a second activity line) through `AgentRuntime.RunAndWaitAsync`, which waits 45 s to 4 minutes depending on
 the job; the answer lets go of the model while an AI agent writes, as it does while you're asked for an OK. The
-prompt forbids claiming a refresh that no tool result shows. A question about your portfolio gets your holdings
-as the Markets page's card values them.
+prompt forbids claiming a refresh that no tool result shows. A question about your own holdings ("my portfolio",
+"our ETF holdings", not "my portfolio website") gets them as the Markets page's card values them, and counts as private
+data for the rule above.
 
 **Answers** render as selectable rich text (`MarkdownView`): select and copy any part, right-click → *Ask about
 this* or *Search the web for this*, or use *Copy*, *Read aloud*, *Ask again* (the last answer is rewritten in
@@ -343,19 +408,23 @@ out counts as a citation too. "Remember …" / "Forget …" answers offer *Undo*
 Your questions are selectable as well, with *Copy* and *Edit and ask again* (in place: the question and what
 followed are replaced; ↑ in an empty box edits the last one).
 
-**Tables and maths.** `AnswerMarkdown` parses an answer into blocks — headings, paragraphs, lists nested to any
-depth (bulleted, numbered, task lists), quotes, rules, code, tables and display maths — and their inline spans, and
+**Tables and maths.** `AnswerMarkdown` parses an answer into blocks — headings, paragraphs, lists nested up to
+ten levels (bulleted, numbered, task lists; deeper lines become text), quotes, rules, code, tables and display maths — and their inline spans, and
 `MarkdownView` lays them out in a `FlowDocument`. A Markdown table becomes a native WPF table (a shaded header row,
 each column's alignment, widths shared by how much each column holds). LaTeX — `$…$`, `\(…\)`, `$$…$$`, `\[…\]` or a
 bare `\begin{align}` — is drawn by XAML-Math (`MathView`; inline formulae sit on the text's baseline). XAML-Math
 knows a subset of LaTeX, so `MathText.Normalize` first rewrites what models write into it (`\dfrac`, `\mathbb` and
-the other font commands, `cases`, `bmatrix` and the other matrices, `aligned`, `\tag`, Unicode such as ×, ≤, π, ²,
-½), and `MathText.Drawable` turns away formulae long or nested enough to overflow its recursive parser; whatever it
-still can't draw is shown as its source. Prices stay text: as in Pandoc, `$` opens maths only with no space after it
-and closes it only with no space before it and no digit after, so "$5 and $10" is two prices. A table or formula
-still streaming in shows as text until it's complete. Copying keeps the Markdown: everything selected copies the
-answer as written, a table, formula or block selected whole copies its source, and part of a block its text with
-formulae as their LaTeX.
+the other font commands, `cases`, `bmatrix` and the other matrices, `aligned`, `\tag`, `\text` in a sub- or
+superscript — which XAML-Math would draw full size — as upright `\mathrm`, Unicode such as ×, ≤, π, ², ½), and
+XAML-Math's parser is recursive (each `\\` line break parses the rest of the formula again) and .NET can't catch a
+stack overflow, so `MathText.ForDrawing` shows a formula as its source when it's over 1,500 characters, nested more
+than 24 groups deep or has more than 100 line breaks, and `MathView` draws on a thread of its own with a 32 MB stack
+(the limits are tested against the parser on a 512 KB one); whatever it still can't draw is shown as its source. Prices stay text: as in Pandoc, `$` opens maths only with no space after it and
+closes it only with no space before it and no digit after, so "$5 and $10" is two prices. A table or formula still
+streaming in shows as text until it's complete. Copying keeps the Markdown: everything selected copies the answer as
+written, a table, formula or block selected whole copies its source, and part of a block its text with formulae as
+their LaTeX. *Read aloud* says formulae in words ("E equals mc squared"; a long one or a matrix is "a formula") and
+skips table rules (`AnswerText.Spoken`).
 
 **Chats** (`ChatStore`, `AskSession`). Every chat is kept in the local database — an index plus each chat's
 messages — with a title from the first question (renamed by the model once it has answered). The history
@@ -363,27 +432,46 @@ panel groups chats (Starred, Today, Yesterday, Previous 7 and 30 days, Older), s
 and stars, renames and deletes them. Unstarred chats not used for *Delete chats after* days (30 by default,
 or never) are deleted at start-up; *Keep Ask chats* off deletes them all. Each chat is a `ChatThread` with its
 own answer in flight, so an answer keeps streaming in a chat you've left. Everything a chat keeps beside its
-messages — notes, compression, pictures — is deleted with it.
+messages — notes, compression, pictures — is deleted with it, and a chat deleted while its answer or compression is
+still running stays deleted: both stop, and the store won't save it again (`ChatStore` remembers deleted ids). A chat
+keeps its last 300 messages; when older ones go, a compression's summary is moved to match (`ChatStore.Rebase`).
+Questions, compression and its fingerprint read the messages by one rule (`ChatCompressor.TurnOf`).
 
 **Notes** (`ChatNotes`, `UpdateNotesTool`). Each chat has notes — facts, decisions and open questions — that go into
 every answer's context ahead of the situation digest (so they're the last thing trimmed), even once the messages
 they came from are no longer sent. The model keeps them with `update_notes` (at most six changes an answer, up to 400
 characters a note, 60 notes; a note repeating one already there — in other words, but with the same numbers — is
-refused). The notes panel beside the chat shows them as plain text under three headings, and you can edit it: an edit
-keeps notes Aqua added while you typed, and lines you wrote are marked as yours. Notes Aqua wrote count as untrusted
-(they came from what the chat read), so an answer that reads them asks before acting as if it had read a page.
-They're separate from Memory: they belong to the chat, and go into its export.
+refused; removing one takes its text, words only it holds, or most of its words, so "budget" with two budgets noted
+removes neither). The notes panel beside the chat shows them as plain text under three headings, and you can edit it:
+an edit keeps notes Aqua added while you typed, and lines you wrote are marked as yours. Notes Aqua wrote count as
+untrusted (they came from what the chat read), so an answer that reads them asks before acting as if it had read a
+page. They're separate from Memory: they belong to the chat, and go into its export. The model can't remove a note
+you wrote (`update_notes` answers that it's yours), a note you removed while an answer was being written isn't put
+back, and an edit past 60 notes keeps the first 60 and says how many lines it left out. Names and numbers in the
+notes count as private details for the web rule above.
+
+The answer model rarely calls `update_notes` by itself — live on `qwen3.5:9b`, not once in five messages that gave a
+size, a budget, a new budget and a decision — so the notes a message gives don't wait for it. When the model plans
+the answer, the plan also lists the facts and decisions the message gives and the notes it overturns
+(`AskPlanner.ReadNotes`); in a plain chat, which isn't planned, one small JSON call after the answer, at background
+priority, does the same (`AskPlanner.NotesRequest`), so the answer isn't kept waiting. Only facts and decisions — up
+to four a message, one short line each, never the question itself or a description of the request — and an
+overturned note comes off as the one note the model's quote fits (`ChatNotes.RemoveOutdated`: the same text or the
+same note in other words, else the one sharing a number and a word; nothing when two fit). Each change is shown as a
+step ("Noted “Budget: €11,000”"). With the same rules, the model noted the size, place, budget and choice a message
+gave, replaced the budget when it changed, and noted nothing for general questions.
 
 **Compression** (`ChatCompressor`). *Compress* in the context meter's popup — or, with *Compress long chats on
 their own* on, a check after each answer, once there are more messages than a question sends or the last answer
-filled 80 % of the largest window Ask may use — replaces whole exchanges at the start of the chat (all but the last two) with a summary
-the model writes under fixed headings (*What was asked*, *What Aqua found*, *Decisions*, *Open questions*), told to
-keep every name, number, date, price, decision and source; a reply that isn't clearly shorter than what it replaces
-is refused. A long chat is compressed in steps, each on top of the summary so far. The model then gets the summary
-instead of those messages, and the chat says what it saved ("about 9,800 → 1,100 tokens"); the messages stay in the
-chat and its history, dimmed, and *Undo* sends them in full again (and stops that chat compressing on its own). A
-summary carries a fingerprint of the messages it stands in for, so editing or re-asking one of them drops it. After a
-failed automatic attempt it waits two exchanges before trying again.
+filled 80 % of the largest window Ask may use — replaces whole exchanges at the start of the chat (all but the last
+two) with a summary the model writes under fixed headings (*What was asked*, *What Aqua found*, *Decisions*, *Open
+questions*), told to keep every name, number, date, price, decision and source; a reply that isn't clearly shorter
+than what it replaces is refused. A long chat is compressed in steps, each on top of the summary so far. The model
+then gets the summary instead of those messages, and the chat says what it saved ("about 9,800 → 1,100 tokens") with
+*Show summary* laying the summary out as an answer is; the messages stay in the chat and its history, dimmed, and
+*Undo* sends them in full again (and stops that chat compressing on its own). A summary carries a fingerprint of the
+messages it stands in for, so editing or re-asking one of them drops it. After a failed automatic attempt it waits two
+exchanges before trying again, and an automatic compression stops when you ask a question, which goes first.
 
 **Pictures** (`AskRun.Saw`, `ChatMedia`). The screenshots Ask takes and the pictures it reads, or looks at while
 searching for one you described, show as thumbnails in the answer — each once, at most eight, the ones that match
@@ -391,10 +479,17 @@ first; a click opens a screenshot in a window of its own and a picture on the PC
 Privacy › *Keep pictures with chats* (on by default) they're kept with the chat in
 `%LOCALAPPDATA%\AquaHub\chat-media\<chat>`: screenshots and pasted pictures whole, pictures on the PC as a 320-pixel
 thumbnail beside their path (the file stays where it is, and opens from there; if it has gone, the thumbnail opens).
-Pictures you attach to a question are kept the same way and open from their chip. Files are named from a hash of
-their content, so a picture is kept once and a name read back from the database can only reach that folder. The
-folder goes with its chat (folders whose chat is gone are tidied away when Ask loads its history), and switching the
-setting off deletes every chat's pictures.
+Pictures you attach to a question are kept the same way and open from their chip (a button: a click, Enter or Space).
+Files are named from a hash of their content, so a picture is kept once and a name read back from the database can
+only reach that folder; a linked picture's path opens only from a drive, never a network path. A picture on the PC
+is turned into its thumbnail off the UI thread before the chat is saved. The folder goes with its chat (folders whose
+chat is gone are tidied away when Ask loads its history), and switching the setting off deletes every chat's pictures
+and the chats' record of them (paths and notes; `ChatStore.ForgetPictures`, run again at start-up while it's off).
+Settings shows how much space they take.
+
+**Screen readers** hear when Aqua adds notes, a chat is compressed or a folder stops being shared (a polite live
+region, `AskPage.Announce`); the notes button says whether the panel is open and how many notes there are, and a
+picture's match and note are in its help text.
 
 **Model.** A picker in the composer chooses the model Ask answers with (Settings › AI's model until you pick
 one). Every call of an answer goes to it (`LlmRequest.Model`): planning, reading a long page in parts, looking

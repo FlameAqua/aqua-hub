@@ -72,11 +72,20 @@ public static partial class AgentJobs
         lock (run.Bag) return run.Bag.TryGetValue(Done, out var o) && ((Dictionary<string, Task<Outcome>>)o).ContainsKey(job.Key);
     }
 
+    /// <summary>The part of Aqua each collector job refreshes (its agents mark it fresh only once they've fetched).</summary>
+    private static string? AreaOf(Job job) => job.Key switch
+    {
+        "news" or "social" or "markets" or "predictions" or "weather" => job.Key,
+        "agenda" => "events",
+        _ => null,
+    };
+
     /// <summary>
     /// Runs a job's agents in turn and waits for them, at most once per answer: asking again gets the same outcome back.
-    /// After the news, the stories that weren't there before are listed (numbered for citing).
+    /// After the news, the stories that weren't there before are listed (numbered for citing). <paramref name="limit"/>
+    /// shortens the job's own wait.
     /// </summary>
-    public static async Task<Outcome> RunAsync(Job job, AskRun run, CancellationToken ct)
+    public static async Task<Outcome> RunAsync(Job job, AskRun run, CancellationToken ct, TimeSpan? limit = null)
     {
         TaskCompletionSource<Outcome>? mine = null;
         Task<Outcome> task;
@@ -92,52 +101,78 @@ public static partial class AgentJobs
         }
         if (mine is not null)
         {
-            try { mine.SetResult(await RunOnceAsync(job, run, ct).ConfigureAwait(false)); }
+            try { mine.SetResult(await RunOnceAsync(job, run, limit is { } l && l < job.Wait ? l : job.Wait, ct).ConfigureAwait(false)); }
             catch (OperationCanceledException) { mine.SetCanceled(ct); }
             catch (Exception ex) { mine.SetException(ex); }
         }
         return await task.ConfigureAwait(false);
     }
 
-    private static async Task<Outcome> RunOnceAsync(Job job, AskRun run, CancellationToken ct)
+    private static async Task<Outcome> RunOnceAsync(Job job, AskRun run, TimeSpan wait, CancellationToken ct)
     {
         if (run.RunAgent is null) return new(job, false, false, "not available here", "Aqua's agents can't be run from here.");
-        // The Chief of Staff only rewrites a current brief when asked to (as the Today page's refresh button does).
-        if (job.Key == "brief") BriefingAgent.ManualFlag.Request();
+        var brief = job.Key == "brief";
+        var area = AreaOf(job);
+        var freshBefore = area is null ? null : run.State.FreshAt(area);
         var before = job.Key == "news" ? run.State.Stories.Select(c => c.Id).ToHashSet(StringComparer.Ordinal) : null;
         var sw = Stopwatch.StartNew();
         var lines = new List<string>();
         string? summary = null;
         bool ok = true, finished = true;
-        foreach (var id in job.Agents)
+        AgentStatus? last = null;
+        try
         {
-            var left = job.Wait - sw.Elapsed;
-            if (left <= TimeSpan.Zero) { finished = false; break; }
-            var report = await run.RunAgent(id, left, ct).ConfigureAwait(false);
-            if (report is null) { ok = false; summary ??= "not available here"; lines.Add($"The agent for {job.What} isn't available."); break; }
-            var s = report.Status;
-            if (report.End == AgentRunEnd.Disabled)
+            foreach (var id in job.Agents)
             {
-                ok = false; summary ??= "switched off in Settings";
-                lines.Add($"{s.Name} is switched off in Settings, so it didn't run.");
-                break;
+                var left = wait - sw.Elapsed;
+                if (left <= TimeSpan.Zero) { finished = false; break; }
+                // The Chief of Staff only rewrites a current brief when asked to (as the Today page's refresh button does).
+                if (brief) BriefingAgent.ManualFlag.Request();
+                var report = await run.RunAgent(id, left, ct).ConfigureAwait(false);
+                // A run already under way when the request came may have looked before it: one more run takes it up.
+                if (brief && report is { End: AgentRunEnd.Finished } && BriefingAgent.ManualFlag.Pending && wait - sw.Elapsed > TimeSpan.Zero)
+                    report = await run.RunAgent(id, wait - sw.Elapsed, ct).ConfigureAwait(false);
+                if (report is null) { ok = false; summary ??= "not available here"; lines.Add($"The agent for {job.What} isn't available."); break; }
+                var s = report.Status;
+                if (report.End == AgentRunEnd.Disabled)
+                {
+                    ok = false; summary ??= "switched off in Settings";
+                    lines.Add($"{s.Name} is switched off in Settings, so it didn't run.");
+                    break;
+                }
+                if (report.End == AgentRunEnd.Paused)
+                {
+                    ok = false; summary ??= "agents are paused";
+                    lines.Add($"The user paused Aqua's agents (Agents page › Resume all), so {s.Name} didn't run.");
+                    break;
+                }
+                if (report.End == AgentRunEnd.StillRunning)
+                {
+                    finished = false; summary ??= "still working";
+                    lines.Add($"{s.Name} is still working after {Seconds(sw.Elapsed)}; what it brings in will show up in Aqua when it's done.");
+                    break;
+                }
+                last = s;
+                var failed = s.State == AgentState.Error;
+                summary ??= failed ? "failed: " + s.LastMessage : s.LastMessage;
+                lines.Add($"{s.Name}: {s.LastMessage}" + (failed ? " (it failed)" : s.State == AgentState.Paused ? " (it's waiting)" : ""));
+                if (failed) { ok = false; break; }
             }
-            if (report.End == AgentRunEnd.Paused)
-            {
-                ok = false; summary ??= "agents are paused";
-                lines.Add($"The user paused Aqua's agents (Agents page › Resume all), so {s.Name} didn't run.");
-                break;
-            }
-            if (report.End == AgentRunEnd.StillRunning)
-            {
-                finished = false; summary ??= "still working";
-                lines.Add($"{s.Name} is still working after {Seconds(sw.Elapsed)}; what it brings in will show up in Aqua when it's done.");
-                break;
-            }
-            var failed = s.State == AgentState.Error;
-            summary ??= failed ? "failed: " + s.LastMessage : s.LastMessage;
-            lines.Add($"{s.Name}: {s.LastMessage}" + (failed ? " (it failed)" : s.State == AgentState.Paused ? " (it's waiting)" : ""));
-            if (failed) { ok = false; break; }
+        }
+        finally
+        {
+            // A request no run took up is taken back (one still working keeps it): it was for this answer, not a later run.
+            if (brief && finished) BriefingAgent.ManualFlag.Withdraw();
+        }
+
+        // It ran, but did anything come in? A collector marks its part of Aqua fresh only once it has fetched ("No place
+        // chosen yet" doesn't); an AI agent may only have kept what was there ("Brief is current") or written a fallback.
+        if (ok && finished && last is not null)
+        {
+            var stale = area is not null
+                ? !(run.State.FreshAt(area) is { } after && (freshBefore is null || after > freshBefore))
+                : last.State == AgentState.Paused || last.NothingNew;
+            if (stale) ok = false;
         }
 
         var sb = new StringBuilder();
@@ -164,34 +199,63 @@ public static partial class AgentJobs
 
     // ───────────────────────────── Asked for in so many words ─────────────────────────────
 
+    private const string Verbs = @"re-?run|refresh|reload|update|re-?check|re-?fetch|run|redo|re-?write|regenerate|remake|rebuild";
+
     // "Refresh the news", "can you update my markets and the weather?", "rerun the market analyst", "rewrite my brief" —
-    // a request, not "an update on…" or "update me on…".
-    [GeneratedRegex(@"(?:^|[.!?;:,]\s*|\b(?:please|pls|aqua|hey|ok|okay|can you|could you|would you|will you|can u|go|and|then|now|just|also|to)\s+)(?<verb>re-?run|refresh|reload|update(?!\s+(?:me|us|on|about|you)\b)|re-?check|re-?fetch|run|redo|re-?write|regenerate|remake|rebuild)\s+(?<what>[^.!?;\n]{1,90})", RegexOptions.IgnoreCase)]
+    // a request, not "an update on…" or "update me on…". What it names stops at another request ("update the app and
+    // refresh the news", "update the app, then refresh the news" ask for the news).
+    [GeneratedRegex(@"(?:^|[.!?;:,]\s*|\b(?:please|pls|aqua|hey|ok|okay|can you|could you|would you|will you|can u|go|and|then|now|just|also|to|first|quickly)\s+)(?<verb>re-?run|refresh|reload|update(?!\s+(?:me|us|on|about|you)\b)|re-?check|re-?fetch|run|redo|re-?write|regenerate|remake|rebuild)\s+(?<what>(?:(?!(?:\b(?:and|then)\s+|,\s*(?:(?:and|then)\s+)?)(?:then\s+)?(?:" + Verbs + @")\b)[^.!?;\n]){1,90})", RegexOptions.IgnoreCase)]
     private static partial Regex AskedRx();
 
+    /// <summary>What the AI agents write, by its full name ("a fresh analysis" alone is about anything).</summary>
+    private const string AiThings = @"(?:morning\s+|evening\s+|daily\s+)?brief(?:ing)?|(?:morning|evening|daily)\s+digest|market\s+(?:analysis|brief)|analysis\s+of\s+(?:the\s+)?markets?|(?:social\s+)?pulse|foresight";
+
+    private const string FreshThings = AiThings + @"|forecast|weather|(?:(?:market|stock|share|watchlist|crypto)\s+)?(?:prices|quotes)|headlines|news|posts|odds";
+
     // "write me a fresh brief", "give me an updated market analysis", "get the latest market prices" (not "a new story
-    // about…", nor "what's the latest news?", which the feeds already answer).
-    [GeneratedRegex(@"\b(?:write|make|give|get|create|generate|produce|do|fetch|pull)\s+(?:me\s+|us\s+)?(?:(?:a|an|the|some|my)\s+)?(?:new|fresh|updated|latest|newest|current)\s+(?<what>(?:morning\s+|evening\s+|daily\s+)?brief(?:ing)?|digest|market\s+(?:analysis|brief)|analysis|(?:social\s+)?pulse|foresight|forecast|weather|(?:(?:market|stock|share|watchlist|crypto)\s+)?(?:prices|quotes)|headlines|news|posts|odds)\b", RegexOptions.IgnoreCase)]
+    // about…", nor "what's the latest news?", which the feeds already answer). What follows is checked too: "new posts
+    // for my blog" is the user's own.
+    [GeneratedRegex(@"\b(?:write|make|give|get|create|generate|produce|do|fetch|pull)\s+(?:me\s+|us\s+)?(?:(?:a|an|the|some|my)\s+)?(?:new|fresh|updated|latest|newest|current)\s+(?<what>" + FreshThings + @")\b(?<rest>[^.!?;\n]{0,60})", RegexOptions.IgnoreCase)]
     private static partial Regex FreshRx();
 
+    // "I'd like a fresh brief", "can I have a new market analysis?", "New brief please": the AI agents' work, by name.
+    [GeneratedRegex(@"(?:\b(?:i'?d\s+like|i\s+would\s+like|i\s+want|i\s+need|can\s+i\s+(?:get|have)|could\s+i\s+(?:get|have)|let'?s\s+(?:get|have))\s+(?:(?:a|an|the|some|my)\s+)?|^\s*(?:(?:a|an)\s+)?)(?:new|fresh|updated)\s+(?<what>" + AiThings + @")\b(?<rest>[^.!?;\n]{0,60})", RegexOptions.IgnoreCase)]
+    private static partial Regex WantRx();
+
+    // "…a fresh brief and a new market analysis": a second thing asked for in the same breath.
+    [GeneratedRegex(@"\band\s+(?:(?:a|an|the|some|my)\s+)?(?:new|fresh|updated|latest)\s+(?<what>" + FreshThings + @")\b(?<rest>[^.!?;\n]{0,60})", RegexOptions.IgnoreCase)]
+    private static partial Regex AndAlsoRx();
+
     // Where the request ends and the question about it begins: "refresh the news and tell me what's new".
-    [GeneratedRegex(@",|\b(?:then|so|and\s+(?:then|tell|show|give|let|summari[sz]e|list|explain|say|answer|what|how|why|which|who|is|are|see|check))\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@",|\b(?:then|so|and\s+(?:then|tell|show|give|let|summari[sz]e|list|explain|say|answer|what|how|why|which|who|is|are|see|check|(?:a|an)\s+(?:new|fresh)|" + Verbs + @"))\b", RegexOptions.IgnoreCase)]
     private static partial Regex ClauseEndRx();
 
-    // "refresh my memory", "update the app", "run a health check", "run the numbers"
-    [GeneratedRegex(@"^(?:(?:the|my|your|our|a|an|all|of|this|that|it)\s+)*(?:memory|app|aqua|windows|drivers?|page|screen|health|numbers|scan|scene|test|game|program|script|command)\b", RegexOptions.IgnoreCase)]
+    // "refresh my memory", "update the app", "run a health check", "run the numbers" (but "refresh Aqua's agents" is a job)
+    [GeneratedRegex(@"^(?:(?:the|my|your|our|a|an|all|of|this|that|it)\s+)*(?:memory|app|aqua(?!['’]s)|windows|drivers?|page|screen|health|numbers|scan|scene|test|game|program|script|command)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NotAJobRx();
 
-    [GeneratedRegex(@"^(?:(?:the|my|your|our|a|an|all|of|some|this|today'?s)\s+)+", RegexOptions.IgnoreCase)]
+    // About something of the user's own rather than what Aqua collects: "the prices in my spreadsheet", "an analysis of
+    // this contract", "my calendar with a dentist visit", "the schedule for my team meeting".
+    [GeneratedRegex(@"\b(?:in|of|on|about|from|into|for|to)\s+(?:this|these|that|those|the\s+(?:attached|following|above|below|files?|document|doc|text|article|page|pdf|e-?mail|contract|spreadsheet|sheet|data)|(?:my|our)\s+(?!(?:news|feeds?|markets?|portfolio|watch\s*list|stocks|shares|agenda|calendar|weather|brief(?:ing)?|area|town|city|place|home)\b)[\w'’-]+|a\s+(?:spreadsheet|document|file|table|list|chart|report|e-?mail|letter|presentation|slide|post))\b|\bwith\s+(?:a|an)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex UserThingRx();
+
+    // "the weather widget", "my news sources", "the markets page": named after a topic, but not the topic itself.
+    [GeneratedRegex(@"^\s*(?:widgets?|apps?|code|api|sources?|settings?|section|layout|template|spreadsheet|sheet|document|doc|file|script|function|module|component|page|tab|column|cell|bot|plugin|model|card|icon|button|feed\s+urls?)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex CompoundRx();
+
+    [GeneratedRegex(@"^(?:(?:the|my|your|our|a|an|all|both|of|some|this|today'?s|aqua['’]s|latest|newest|new|fresh|current|updated|whole|entire)\s+)+", RegexOptions.IgnoreCase)]
     private static partial Regex LeadingWordsRx();
 
     private static readonly (string[] Keys, Regex Rx)[] Topics =
     {
-        (Everything, Rx(@"\beverything\b|\ball\b(?!\s+(?:of\s+)?(?:the\s+|my\s+|your\s+)?(?:news|headlines|stories|social|posts|markets?|stocks|prices|quotes|predictions|odds|events|weather|forecasts?|briefs?|feeds?))|\bagents\b")),
-        (new[] { "market_analysis" }, Rx(@"\bmarket\s+(?:analys[ie]s|analyst|brief|insights?|ideas)\b|\banalyst\b|\banalys[ie]s\b")),
+        // "Refresh everything", "update all" with nothing after it, "rerun all the agents", "refresh all your data" — not
+        // "update all my documents", "refresh all my tabs" or "all my markets" (that's the markets).
+        (Everything, Rx(@"^(?:everything|all)(?:\s+(?:please|now|again|for\s+me|quickly))*\s*$|\b(?:everything|all)\s+(?:of\s+)?(?:the\s+|my\s+|your\s+|aqua['’]s\s+)?(?:agents|scouts|collectors|data|info(?:rmation)?|widgets|cards|dashboard|hub|things|stuff)\b|\bagents\b")),
+        (new[] { "market_analysis" }, Rx(@"\bmarket\s+(?:analys[ie]s|analyst|brief|insights?|ideas)\b|\banalys[ie]s\s+of\s+(?:the\s+)?markets?\b")),
         (new[] { "pulse" }, Rx(@"\b(?:social\s+)?pulse\b")),
         (new[] { "foresight" }, Rx(@"\bforesight\b|\bwhat'?s\s+coming(?:\s+up)?\b")),
-        (new[] { "brief" }, Rx(@"\b(?:morning\s+|evening\s+|daily\s+)?brief(?:ing)?s?\b|\bdigest\b|\bchief\s+of\s+staff\b")),
+        // "a brief summary", "a brief email" are something else.
+        (new[] { "brief" }, Rx(@"\b(?:morning\s+|evening\s+|daily\s+)?brief(?:ing)?s?\b(?!\s+(?:summary|summaries|overview|description|explanation|intro(?:duction)?|history|note|notes|answer|reply|response|e-?mail|letter|message|version|outline|bio|statement|look|word|words|paragraph|list|rundown|recap|guide|report))|\b(?:morning|evening|daily)\s+digest\b|\bchief\s+of\s+staff\b")),
         (new[] { "predictions" }, Rx(@"\bprediction(?:\s+(?:markets?|scout)|s)?\b|\bodds\b|\bpolymarket\b|\bkalshi\b|\bmanifold\b")),
         (new[] { "news", "social" }, Rx(@"\bfeeds?\b")),
         (new[] { "news" }, Rx(@"\bnews(?:\s+scout)?\b|\bheadlines?\b|\bstor(?:y|ies)\b|\b(?:story\s+)?curator\b|\barticles?\b")),
@@ -206,8 +270,9 @@ public static partial class AgentJobs
     /// <summary>
     /// The jobs a message asks for in so many words — "refresh the news", "update my markets and the weather", "rerun the
     /// market analyst", "write me a fresh brief" — so they run before the answer even when the model wouldn't call tools.
-    /// "Run" needs an agent's name straight after it ("run the numbers on my portfolio" isn't a request), and "rewrite"
-    /// or "redo" only fit what the AI agents write ("rewrite this story" is about the user's text).
+    /// What's asked for has to be the thing itself ("my knowledge of stocks", "the weather widget", "the prices in my
+    /// spreadsheet" aren't), "run" needs an agent's name straight after it ("run the numbers on my portfolio" isn't a
+    /// request), and "rewrite" or "redo" only fit what the AI agents write ("rewrite this story" is about the user's text).
     /// </summary>
     /// <param name="earlier">The user's previous message, for "refresh it" when this one doesn't say what "it" is.</param>
     public static List<Job> Requested(string message, string? earlier = null)
@@ -225,14 +290,20 @@ public static partial class AgentJobs
                 keys.UnionWith(rewrite ? found.Where(k => Find(k) is { UsesAi: true }) : found);
                 continue;
             }
-            Collect(m.Groups["what"].Value, nameFirst: rewrite || verb == "run", aiOnly: rewrite, keys);
+            Collect(m.Groups["what"].Value, "", nameFirst: rewrite || verb == "run", aiOnly: rewrite, keys, run: verb == "run");
         }
-        foreach (Match m in FreshRx().Matches(message)) Collect(m.Groups["what"].Value, nameFirst: true, aiOnly: false, keys);
+        foreach (var rx in new[] { FreshRx(), WantRx() })
+            foreach (Match m in rx.Matches(message)) Collect(m.Groups["what"].Value, m.Groups["rest"].Value, nameFirst: true, aiOnly: false, keys);
+        if (keys.Count > 0)
+            foreach (Match m in AndAlsoRx().Matches(message)) Collect(m.Groups["what"].Value, m.Groups["rest"].Value, nameFirst: true, aiOnly: false, keys);
         return All.Where(j => keys.Contains(j.Key)).ToList();
     }
 
     [GeneratedRegex(@"^\s*(?:it|them|that|those|this|these)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PronounRx();
+
+    [GeneratedRegex(@"\b(?:agents|scouts|collectors)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex AgentsRx();
 
     /// <summary>What a text mentions that Ask can refresh ("the weather front", "my watchlist"); "everything" doesn't count here.</summary>
     private static HashSet<string> Mentioned(string text)
@@ -247,24 +318,43 @@ public static partial class AgentJobs
         return found;
     }
 
-    private static void Collect(string what, bool nameFirst, bool aiOnly, HashSet<string> keys)
+    /// <param name="what">What the request names.</param>
+    /// <param name="rest">What follows it ("for my blog"), when the name was matched on its own.</param>
+    /// <param name="run">Asked with "run": everything only by the agents' name ("run all the agents", not "run all" or "run everything").</param>
+    private static void Collect(string what, string rest, bool nameFirst, bool aiOnly, HashSet<string> keys, bool run = false)
     {
-        var end = ClauseEndRx().Match(what);
-        var raw = (end.Success ? what[..end.Index] : what).Trim();
-        if (raw.Length == 0 || NotAJobRx().IsMatch(raw)) return;
-        var clause = LeadingWordsRx().Replace(raw, "");
+        var tail = what + rest;
+        var end = ClauseEndRx().Match(tail);
+        var raw = (end.Success ? tail[..end.Index] : tail).Trim();
+        if (raw.Length == 0 || NotAJobRx().IsMatch(raw) || UserThingRx().IsMatch(raw)) return;
+        var named = rest.Length == 0 ? raw : what.Trim();
+        var clause = LeadingWordsRx().Replace(named, "");
         // "Run" and "a fresh …" name the thing straight away: "run the market analyst", "run all agents".
-        if (nameFirst && !Topics.Any(t => t.Rx.Match(clause) is { Success: true, Index: 0 }) && Topics[0].Rx.Match(raw) is not { Success: true, Index: 0 })
+        if (nameFirst && !Topics.Any(t => t.Rx.Match(clause) is { Success: true, Index: 0 }) && Topics[0].Rx.Match(named) is not { Success: true, Index: 0 })
             return;
         var found = new HashSet<string>(StringComparer.Ordinal);
-        if (Topics[0].Rx.IsMatch(raw)) found.UnionWith(Topics[0].Keys);
+        if ((Topics[0].Rx.Match(named) is { Success: true, Index: 0 } || Topics[0].Rx.Match(clause) is { Success: true, Index: 0 })
+            && (!run || AgentsRx().IsMatch(named)))
+            found.UnionWith(Topics[0].Keys);
+        var text = clause;
+        var first = int.MaxValue;
         foreach (var (topicKeys, rx) in Topics.Skip(1))
         {
-            if (!rx.IsMatch(clause)) continue;
-            found.UnionWith(topicKeys);
-            // A matched name isn't read twice: "prediction markets" isn't also markets, "social pulse" isn't social posts.
-            clause = rx.Replace(clause, m => new string(' ', m.Length));
+            var seen = text;
+            text = rx.Replace(text, m =>
+            {
+                // "the weather widget", "my news sources": named after a topic, not the topic itself.
+                if (!CompoundRx().IsMatch(seen[(m.Index + m.Length)..]))
+                {
+                    found.UnionWith(topicKeys);
+                    first = Math.Min(first, m.Index);
+                }
+                // A matched name isn't read twice: "prediction markets" isn't also markets, "social pulse" isn't social posts.
+                return new string(' ', m.Length);
+            });
         }
+        // The thing asked for comes first: "my knowledge of stocks" isn't the markets.
+        if (first != int.MaxValue && clause[..first].Trim().Length > 0) return;
         keys.UnionWith(aiOnly ? found.Where(k => Find(k) is { UsesAi: true }) : found);
     }
 }

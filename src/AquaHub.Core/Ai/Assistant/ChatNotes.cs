@@ -32,6 +32,8 @@ public sealed partial class ChatNotes
 
     private readonly object _gate = new();
     private List<ChatNote> _items;
+    // Notes taken off lately (by Aqua, or a newer message), so an edit started before doesn't bring them back.
+    private readonly List<(string Text, DateTimeOffset At)> _removed = new();
 
     public ChatNotes(IEnumerable<ChatNote>? items = null) => _items = Clean(items ?? Array.Empty<ChatNote>()).ToList();
 
@@ -63,19 +65,44 @@ public sealed partial class ChatNotes
     [GeneratedRegex(@"\d+(?:[.,]\d+)*")]
     private static partial Regex NumberRx();
 
+    /// <summary>A text's numbers in order, written the same way ("€9,000" and "9000" are both 9000).</summary>
+    private static IEnumerable<string> Numbers(string text) => NumberRx().Matches(text).Select(m => Regex.Replace(m.Value, @"[.,](?=\d{3}(?:\D|$))", ""));
+
     /// <summary>
-    /// The same note in other words? The same numbers (a new budget is a change, not a repeat) and most of the shorter
-    /// one's words, three at least — or simply the same text.
+    /// The same note in other words? The same numbers in the same order (a new budget is a change, not a repeat, and
+    /// "2 bedrooms and 3 bathrooms" corrects "3 bedrooms and 2 bathrooms") and most of the shorter one's words, three at
+    /// least — or simply the same text.
     /// </summary>
     private static bool Same(string a, string b)
     {
         if (string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
-        var numbers = NumberRx().Matches(a).Select(m => m.Value).Order().SequenceEqual(NumberRx().Matches(b).Select(m => m.Value).Order());
-        if (!numbers) return false;
-        var x = TextTools.Signature(a);
-        var y = TextTools.Signature(b);
+        if (!Numbers(a).SequenceEqual(Numbers(b))) return false;
+        var x = Words(a);
+        var y = Words(b);
         var shared = x.Count(y.Contains);
         return shared >= 3 && shared * 5 >= Math.Min(x.Count, y.Count) * 4;
+    }
+
+    /// <summary>A note's words, its numbers written one way ("€9,000" is the word "9000", as "9000 euro" is, not "9" and "000").</summary>
+    private static HashSet<string> Words(string text) => TextTools.Signature(Regex.Replace(text, @"(?<=\d)[.,](?=\d{3}(?:\D|$))", ""));
+
+    /// <summary>
+    /// A note that says nothing <paramref name="existing"/> doesn't: every word of it is in that note already, and its
+    /// numbers too, in the same order ("Heat pump budget: €11,000" beside "Heat pump budget: €11,000, up from €9,000 with a
+    /// grant" — live, the model wrote both from one message). "2 bedrooms and 3 bathrooms" after "3 bedrooms and 2
+    /// bathrooms" is a correction, not a repeat.
+    /// </summary>
+    private static bool Within(string existing, string text)
+    {
+        var words = Words(text);
+        if (words.Count < 2 || !words.IsSubsetOf(Words(existing))) return false;
+        using var numbers = Numbers(existing).GetEnumerator();
+        return Numbers(text).All(n =>
+        {
+            while (numbers.MoveNext())
+                if (numbers.Current == n) return true;
+            return false;
+        });
     }
 
     /// <summary>Adds a note; false, with the reason, when it's empty, already there or the notes are full.</summary>
@@ -85,7 +112,7 @@ public sealed partial class ChatNotes
         lock (_gate)
         {
             if (note.Text.Length == 0) { why = "the note is empty"; return false; }
-            if (_items.FirstOrDefault(n => Same(n.Text, note.Text)) is { } existing) { why = "it's already noted: “" + existing.Text + "”"; return false; }
+            if (_items.FirstOrDefault(n => Same(n.Text, note.Text) || Within(n.Text, note.Text)) is { } existing) { why = "it's already noted: “" + existing.Text + "”"; return false; }
             if (_items.Count >= MaxNotes) { why = $"the notes are full ({MaxNotes}); remove one that's settled first"; return false; }
             _items.Add(note);
         }
@@ -94,22 +121,84 @@ public sealed partial class ChatNotes
         return true;
     }
 
-    /// <summary>Removes the note <paramref name="text"/> means: the same text, one containing it, or the closest in words.</summary>
-    public ChatNote? Remove(string text)
+    /// <summary>
+    /// Removes the note <paramref name="text"/> means: the same text, the one note holding it as whole words (or held
+    /// whole in it), or the one note that says the same in other words. Text that fits several notes ("the", "budget",
+    /// "Budget: €4,000" beside two budgets of €4,000) removes none. <paramref name="aquasOnly"/>: only a note Aqua wrote
+    /// (the model's update_notes can't take off one you wrote).
+    /// </summary>
+    public ChatNote? Remove(string text, bool aquasOnly = false)
     {
         var t = Tidy(text, MaxLength);
         if (t.Length == 0) return null;
         ChatNote? gone;
         lock (_gate)
         {
-            gone = _items.FirstOrDefault(n => string.Equals(n.Text, t, StringComparison.OrdinalIgnoreCase))
-                   ?? _items.FirstOrDefault(n => n.Text.Contains(t, StringComparison.OrdinalIgnoreCase) || t.Contains(n.Text, StringComparison.OrdinalIgnoreCase) && n.Text.Length >= 12)
-                   ?? _items.FirstOrDefault(n => Same(n.Text, t));
+            var items = aquasOnly ? _items.Where(n => n.By != "you").ToList() : _items;
+            var holding = items.Where(n => Inside(t, n.Text, 4) || Inside(n.Text, t, 12)).Take(2).ToList();
+            gone = items.FirstOrDefault(n => string.Equals(n.Text, t, StringComparison.OrdinalIgnoreCase))
+                   ?? (holding.Count == 1 ? holding[0] : null)
+                   ?? (items.Where(n => Same(n.Text, t)).Take(2).ToList() is [var same] ? same : null);
             if (gone is null) return null;
             _items.Remove(gone);
+            Removed(gone);
         }
         Changed?.Invoke();
         return gone;
+    }
+
+    /// <summary>Whether <paramref name="text"/> means a note you wrote (what update_notes is told when it may not remove it).</summary>
+    public bool IsYours(string text)
+    {
+        var t = Tidy(text, MaxLength);
+        lock (_gate) return t.Length > 0 && _items.Any(n => n.By == "you" && (string.Equals(n.Text, t, StringComparison.OrdinalIgnoreCase) || Inside(t, n.Text, 4) || Same(n.Text, t)));
+    }
+
+    private void Removed(ChatNote note)
+    {
+        _removed.Add((note.Text, DateTimeOffset.Now));
+        if (_removed.Count > 20) _removed.RemoveAt(0);
+    }
+
+    /// <summary>
+    /// Takes off the note a newer message overturns, as a model quoted it ("Budget for the heat pump: €9,000" for the note
+    /// "Budget: €9,000"): as <see cref="Remove"/> does, or else the one note that shares a number and a word with the
+    /// quote, or two words. Nothing when two notes fit.
+    /// </summary>
+    public ChatNote? RemoveOutdated(string text)
+    {
+        if (Remove(text) is { } removed) return removed;
+        var t = Tidy(text, MaxLength);
+        if (t.Length == 0) return null;
+        var words = TextTools.Signature(t);
+        var numbers = NumberRx().Matches(t).Select(m => m.Value).ToHashSet(StringComparer.Ordinal);
+        ChatNote gone;
+        lock (_gate)
+        {
+            var close = _items.Where(n =>
+            {
+                var shared = TextTools.Signature(n.Text).Count(words.Contains);
+                return shared >= 2 || shared >= 1 && NumberRx().Matches(n.Text).Any(m => numbers.Contains(m.Value));
+            }).Take(2).ToList();
+            if (close.Count != 1) return null;
+            gone = close[0];
+            _items.Remove(gone);
+            Removed(gone);
+        }
+        Changed?.Invoke();
+        return gone;
+    }
+
+    /// <summary>Whether <paramref name="part"/> (at least <paramref name="min"/> characters) is in <paramref name="whole"/> as whole words.</summary>
+    private static bool Inside(string part, string whole, int min)
+    {
+        if (part.Length < min) return false;
+        for (var i = whole.IndexOf(part, StringComparison.OrdinalIgnoreCase); i >= 0; i = whole.IndexOf(part, i + 1, StringComparison.OrdinalIgnoreCase))
+        {
+            var end = i + part.Length;
+            if ((i == 0 || !char.IsLetterOrDigit(whole[i - 1])) && (end == whole.Length || !char.IsLetterOrDigit(whole[end]))) return true;
+        }
+        return false;
     }
 
     /// <summary>Replaces every note (an edit beside the chat).</summary>
@@ -126,14 +215,20 @@ public sealed partial class ChatNotes
 
     /// <summary>
     /// Applies what you typed beside the chat: your text becomes the notes, keeping when and by whom each unchanged note
-    /// was written — plus any Aqua added while you were typing (since <paramref name="editStarted"/>), so they aren't lost.
+    /// was written — plus any Aqua added while you were typing (since <paramref name="editStarted"/>), so they aren't lost,
+    /// and without any it took off meanwhile, which your text still had. Returns how many lines didn't fit
+    /// (<see cref="MaxNotes"/> is the limit), for the panel to say so.
     /// </summary>
-    public void ApplyEdit(string text, DateTimeOffset editStarted, DateTimeOffset now)
+    public int ApplyEdit(string text, DateTimeOffset editStarted, DateTimeOffset now)
     {
         var before = Items;
-        var edited = FromText(text, now, before);
-        var addedMeanwhile = before.Where(n => n.By == "aqua" && n.At > editStarted && !edited.Any(e => Same(e.Text, n.Text)));
-        Replace(edited.Concat(addedMeanwhile));
+        List<string> removedMeanwhile;
+        lock (_gate) removedMeanwhile = _removed.Where(r => r.At > editStarted).Select(r => r.Text).ToList();
+        var edited = FromText(text, now, before).Where(n => !removedMeanwhile.Contains(n.Text, StringComparer.OrdinalIgnoreCase)).ToList();
+        var addedMeanwhile = before.Where(n => n.By == "aqua" && n.At > editStarted && !edited.Any(e => Same(e.Text, n.Text))).ToList();
+        var all = edited.Concat(addedMeanwhile).ToList();
+        Replace(all);
+        return Math.Max(0, all.DistinctBy(n => n.Text.Trim().ToLowerInvariant()).Count() - MaxNotes);
     }
 
     private static readonly (string Kind, string Heading)[] Sections = { (Fact, "Facts"), (Decision, "Decisions"), (Question, "Open questions") };
@@ -203,8 +298,9 @@ public sealed partial class ChatNotes
 }
 
 /// <summary>
-/// update_notes: the model keeps the chat's notes — one fact, decision or open question at a time, or removes one that's
-/// settled. Only touches this chat's own notes, which you can see and edit, so it needs no OK; at most six changes an answer.
+/// update_notes: the model keeps the chat's notes — one fact, decision or open question at a time, or removes one of its
+/// own that's settled (never one you wrote). Only touches this chat's own notes, which you can see and edit, so it needs
+/// no OK; at most six changes an answer.
 /// </summary>
 public sealed class UpdateNotesTool : AskTool
 {
@@ -236,8 +332,11 @@ public sealed class UpdateNotesTool : AskTool
         var said = new List<string>();
         if (remove.Length > 0)
         {
-            var gone = notes.Remove(remove);
-            said.Add(gone is null ? "No note matched “" + HtmlText.Truncate(remove, 80) + "”." : "Removed “" + gone.Text + "”.");
+            // Only notes Aqua wrote: a page the answer read, or a confused model, mustn't take off one the user wrote.
+            var gone = notes.Remove(remove, aquasOnly: true);
+            said.Add(gone is not null ? "Removed “" + gone.Text + "”."
+                : notes.IsYours(remove) ? "That note is the user's own: leave it (they can change it themselves)."
+                : "No note matched “" + HtmlText.Truncate(remove, 80) + "”.");
             if (gone is not null) changes++;
         }
         if (add.Length > 0)

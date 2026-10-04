@@ -101,6 +101,11 @@ public partial class App : Application
         Hub.Windows = new WindowManager();
         Hub.Ask = new AskSession();
         Hub.Ollama = new OllamaManager();
+        Hub.LlamaHost = new LlamaProcessHost();
+        Hub.Llama = new AquaHub.Core.Ai.Local.LlamaRuntime(() => Hub.S, Hub.Core.LlamaSetup, Hub.Core.Models, Hub.LlamaHost,
+            () => GpuReader.Read(Hub.System), new AquaHub.Core.Ai.Local.SpeedBook(Path.Combine(Hub.Core.Paths.Llama, "speed.json")));
+        Hub.Core.Llm.Llama = Hub.Llama;
+        Hub.LocalAi = new LocalAi();
         Hub.Updates = new UpdateService(Sandbox.Enabled, args.DataDir is null ? Array.Empty<string>() : new[] { "--data-dir", paths.Root },
             args.DemoUpdate);
         // A version downloaded earlier ("Later") installs now, before anything opens: Velopack's updater waits for this
@@ -160,6 +165,7 @@ public partial class App : Application
         Hub.Core.Start();
         Hub.Windows.StartIdleTrim();
         Hub.Ollama.Start();
+        Hub.LocalAi.Start();
         Hub.Updates.Start();
         // Asking something (or a scheduled brief) may start a stopped local server, if Settings allow it.
         Hub.Core.Llm.StartServer = ct => Hub.S.Ai.StartOllamaOnDemand && OllamaPolicy.Applies(Hub.S.Ai)
@@ -271,6 +277,9 @@ public partial class App : Application
         {
             Hub.Speech?.Stop();
             Hub.Ollama?.OnAppExit();
+            Hub.LocalAi?.Dispose();
+            Hub.Llama?.Dispose();
+            Hub.LlamaHost?.Dispose();
             Hub.Hotkeys?.Dispose();
             Hub.Tray?.Dispose();
             Hub.System?.Dispose();

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Documents;
@@ -69,10 +71,11 @@ public sealed class MathView : FrameworkElement
         return drawn is null ? null : new MathView(latex, display, drawn);
     }
 
-    private static Drawn? Draw(string latex, bool display, double scale)
+    private static Drawn? Draw(string latex, bool display, double scale) =>
+        MathText.ForDrawing(latex) is { } tex ? FormulaThread.Run(() => Layout(tex, display, scale)) : null;
+
+    private static Drawn? Layout(string tex, bool display, double scale)
     {
-        var tex = MathText.Normalize(latex);
-        if (!MathText.Drawable(tex)) return null;
         try
         {
             var formula = WpfTeXFormulaParser.Instance.Parse(tex, null);
@@ -88,7 +91,9 @@ public sealed class MathView : FrameworkElement
             var height = Math.Max(root.TotalHeight * scale, ink ? bounds.Bottom : 0) - top;
             if (width <= 0 || height <= 0) return null;
             group.Transform = new TranslateTransform(-left, -top);
-            if (group.CanFreeze) group.Freeze();
+            // Made on the formula thread: only a frozen drawing can be used on the UI thread.
+            if (!group.CanFreeze) return null;
+            group.Freeze();
             return new Drawn(group, Math.Ceiling(width + 1), Math.Ceiling(height + 1), root.Height * scale - top);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -96,6 +101,44 @@ public sealed class MathView : FrameworkElement
             // XAML-Math reports unknown commands as TexParseException, and a few malformed inputs crash it differently.
             Core.Util.Log.Debug("ask", "A formula couldn't be drawn: " + ex.Message);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The one thread formulas are parsed and laid out on, with a stack 20 times the UI thread's: XAML-Math recurses,
+    /// and a stack overflow ends the process whatever tries to catch it. <see cref="MathText.Drawable"/> keeps formulas
+    /// inside a quarter of the UI thread's stack; this is room for anything it doesn't know about. The UI thread waits
+    /// for each formula, as it did when it drew them itself (a few milliseconds, once: drawings are cached).
+    /// </summary>
+    private static class FormulaThread
+    {
+        private static readonly BlockingCollection<Action> Work = new();
+
+        static FormulaThread()
+        {
+            var thread = new Thread(() => { foreach (var work in Work.GetConsumingEnumerable()) work(); }, 32 * 1024 * 1024)
+            {
+                IsBackground = true,
+                Name = "Formulas",
+            };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+        }
+
+        public static T Run<T>(Func<T> work)
+        {
+            T result = default!;
+            Exception? error = null;
+            using var done = new ManualResetEventSlim();
+            Work.Add(() =>
+            {
+                try { result = work(); }
+                catch (Exception ex) { error = ex; }
+                finally { done.Set(); }
+            });
+            done.Wait();
+            if (error is not null) ExceptionDispatchInfo.Throw(error);
+            return result;
         }
     }
 

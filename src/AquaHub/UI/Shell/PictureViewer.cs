@@ -29,6 +29,8 @@ public static class PictureViewer
         window.SetResourceReference(Control.BackgroundProperty, "B.WindowOpaque");
         window.SetResourceReference(Control.ForegroundProperty, "B.Text");
         AutomationProperties.SetAutomationId(window, "picture-viewer");
+        // The title bar follows Aqua's theme, as the main window's does (a theme change later reaches it too).
+        window.SourceInitialized += (_, _) => Platform.WindowEffects.SetDark(window, Services.Hub.Theme.IsDark);
         window.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;

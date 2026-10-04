@@ -78,7 +78,7 @@ public sealed partial class AskAgent
         options = options with { Model = caps.Model };
         Func<string, string?>? known = platform is null ? null : platform.KnownFolder;
         // Folders attached to the chat are searched first; app data, system and key folders are never taken.
-        var attached = options.Folders.Where(f => Directory.Exists(f) && !LocalFiles.IsSensitiveFolder(f)).ToList();
+        var attached = options.Folders.Where(f => Directory.Exists(f) && !LocalFiles.IsSensitiveRoot(f)).ToList();
         options = options with { Folders = attached };
         var files = options.Computer || attached.Count > 0
             ? new LocalFiles(
@@ -99,9 +99,10 @@ public sealed partial class AskAgent
         if (attachments.Count > 0) run.SawPrivate = run.SawUntrusted = true;
 
         // "Refresh the news and…": those agents run first, so the answer starts from what they bring in.
-        var refreshed = await RefreshFirstAsync(question, history, run, ct).ConfigureAwait(false);
+        var refreshed = attachments.Count > 0 || options.Folders.Count > 0 ? "" : await RefreshFirstAsync(question, history, run, ct).ConfigureAwait(false);
         var context = refreshed + await BuildContextAsync(question, attachments, run, ct, earlier).ConfigureAwait(false);
         run.Plan = await PlanAsync(question, history, attachments, run, ct).ConfigureAwait(false);
+        KeepNotes(run, run.Plan.Notes, run.Plan.NotesOutdated);
         if (run.Plan.Skill.Length > 0) run.Skill = skills.FirstOrDefault(k => k.Name.Equals(run.Plan.Skill, StringComparison.OrdinalIgnoreCase));
         if (run.Skill is not null) _workbench?.RecordUse(run.Skill.Id, run.Now);
 
@@ -121,8 +122,12 @@ public sealed partial class AskAgent
             text = AnswerText.RepairLinks(text, seen, out var mended);
             if (mended > 0) Log.Info("ask", $"Mended or dropped {Plural.Of(mended, "made-up link")}");
         }
+        // No plan from the model (a plain chat: no web, PC, link or skills) means no notes from it either: they come from a
+        // small call after the answer instead, in the background, so the answer isn't kept waiting.
+        var noteTaking = run.Notes is not null && !run.Plan.ByModel && s.Ask.PlanWithModel ? TakeNotesAsync(question, history, run) : Task.CompletedTask;
         return result with
         {
+            NoteTaking = noteTaking,
             Text = text,
             Model = caps.Model,
             Elapsed = sw.Elapsed,
@@ -130,6 +135,7 @@ public sealed partial class AskAgent
             Sources = run.Book.Keep(text),
             UsedWeb = run.PagesRead > 0 || run.SawWeb || result.UsedWeb,
             UsedPc = run.SawPrivate && (options.Computer || options.Folders.Count > 0),
+            SawPrivate = run.SawPrivate,
             Mode = options.Research ? "research" : options.Think ? "think" : "",
             Skill = run.Skill?.Name ?? "",
         };
@@ -137,30 +143,101 @@ public sealed partial class AskAgent
 
     // ───────────────────────────── Context ─────────────────────────────
 
+    /// <summary>The longest the AI agents asked for in a message may hold up its answer, all of them together.</summary>
+    internal static readonly TimeSpan RefreshBudget = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// Runs the agents a message asks for in so many words ("refresh the news", "a fresh brief") before anything else —
-    /// collectors side by side, then the AI ones — and says how it went at the top of the context.
+    /// collectors side by side, then the AI ones, together within <see cref="RefreshBudget"/> — and says how it went at
+    /// the top of the context. Not for a message with attachments or a folder: "a fresh analysis" there is of those.
     /// </summary>
-    internal static async Task<string> RefreshFirstAsync(string question, IReadOnlyList<LlmMessage> history, AskRun run, CancellationToken ct)
+    internal static async Task<string> RefreshFirstAsync(string question, IReadOnlyList<LlmMessage> history, AskRun run, CancellationToken ct,
+        TimeSpan? budget = null)
     {
         if (run.RunAgent is null) return "";
         // "Refresh it" after a question about the markets: the earlier question says what "it" is.
         var jobs = AgentJobs.Requested(question, history.LastOrDefault(m => m.Role == "user")?.Content);
         if (jobs.Count == 0) return "";
-        async Task<AgentJobs.Outcome> One(AgentJobs.Job job)
+        var sw = Stopwatch.StartNew();
+        var total = budget ?? RefreshBudget;
+        async Task<AgentJobs.Outcome> One(AgentJobs.Job job, TimeSpan? limit)
         {
             var id = run.Host.StepStarted("agents", $"Refreshing {job.What}…");
-            var outcome = await AgentJobs.RunAsync(job, run, ct).ConfigureAwait(false);
-            run.Host.StepFinished(id, outcome.Ok ? $"Refreshed {job.What} · {outcome.Summary}" : $"Couldn't refresh {job.What} — {outcome.Summary}", outcome.Ok);
+            AgentJobs.Outcome outcome;
+            try { outcome = await AgentJobs.RunAsync(job, run, ct, limit).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Warn("ask", $"Refreshing {job.What} failed", ex);
+                outcome = new AgentJobs.Outcome(job, false, true, "failed", $"Couldn't refresh {job.What}: {ex.Message}\n");
+            }
+            run.Host.StepFinished(id, outcome is { Ok: true, Finished: true } ? $"Refreshed {job.What} · {outcome.Summary}"
+                : outcome.Ok ? $"Still refreshing {job.What} · {outcome.Summary}" : $"Couldn't refresh {job.What} — {outcome.Summary}", outcome.Ok);
             return outcome;
         }
         run.Host.Status(jobs.Count == 1 ? $"Refreshing {jobs[0].What}…" : "Refreshing what you asked for…");
-        var outcomes = (await Task.WhenAll(jobs.Where(j => !j.UsesAi).Select(One)).ConfigureAwait(false)).ToList();
-        foreach (var job in jobs.Where(j => j.UsesAi)) outcomes.Add(await One(job).ConfigureAwait(false));
+        var outcomes = (await Task.WhenAll(jobs.Where(j => !j.UsesAi).Select(j => One(j, null))).ConfigureAwait(false)).ToList();
+        foreach (var job in jobs.Where(j => j.UsesAi))
+        {
+            var left = total - sw.Elapsed;
+            if (left <= TimeSpan.Zero)
+            {
+                outcomes.Add(new AgentJobs.Outcome(job, false, false, "not started", $"Didn't start {job.What}: the answer had waited long enough. The user can ask again.\n"));
+                continue;
+            }
+            outcomes.Add(await One(job, left).ConfigureAwait(false));
+        }
         run.Host.Status("");
         var sb = new StringBuilder("WHAT AQUA'S AGENTS DID FOR THIS MESSAGE (already done, as the user asked — don't run them again; tell the user how it went):\n");
         foreach (var o in outcomes) sb.Append(o.Text);
         return sb.Append('\n').ToString();
+    }
+
+    /// <summary>
+    /// With no model to answer: the collectors a message asks for ("refresh the news") still run — they don't need one —
+    /// and a line for the user says how it went; the AI agents' work waits for the model. "" when nothing was asked.
+    /// </summary>
+    /// <param name="earlier">The question before, for "refresh it".</param>
+    public async Task<string> RefreshWithoutModelAsync(string question, string? earlier, IAskHost host, CancellationToken ct)
+    {
+        var jobs = AgentJobs.Requested(question, earlier);
+        if (jobs.Count == 0 || RunAgent is null) return "";
+        var run = new AskRun
+        {
+            State = _state, Db = _db, Settings = _settings(), Book = new SourceBook(), Options = new AskOptions(), Host = host,
+            Question = question, AllowedForChat = new HashSet<string>(StringComparer.Ordinal), RunAgent = RunAgent,
+        };
+        var collectors = jobs.Where(j => !j.UsesAi).ToList();
+        var lines = new List<string>();
+        if (collectors.Count > 0)
+        {
+            host.Status(collectors.Count == 1 ? $"Refreshing {collectors[0].What}…" : "Refreshing what you asked for…");
+            var outcomes = await Task.WhenAll(collectors.Select(async job =>
+            {
+                var id = host.StepStarted("agents", $"Refreshing {job.What}…");
+                AgentJobs.Outcome outcome;
+                try { outcome = await AgentJobs.RunAsync(job, run, ct).ConfigureAwait(false); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Log.Warn("ask", $"Refreshing {job.What} failed", ex);
+                    outcome = new AgentJobs.Outcome(job, false, true, "it failed", "");
+                }
+                host.StepFinished(id, outcome is { Ok: true, Finished: true } ? $"Refreshed {job.What} · {outcome.Summary}"
+                    : outcome.Ok ? $"Still refreshing {job.What} · {outcome.Summary}" : $"Couldn't refresh {job.What} — {outcome.Summary}", outcome.Ok);
+                return outcome;
+            })).ConfigureAwait(false);
+            host.Status("");
+            foreach (var o in outcomes)
+                lines.Add(o is { Ok: true, Finished: true } ? $"Refreshed {o.Job.What} ({o.Summary})."
+                    : o.Ok ? $"Still refreshing {o.Job.What}: it shows up in Aqua when it's done."
+                    : $"Couldn't refresh {o.Job.What} ({o.Summary}).");
+        }
+        var written = jobs.Where(j => j.UsesAi).Select(j => j.What).ToList();
+        if (written.Count > 0)
+        {
+            var names = written.Count == 1 ? written[0] : string.Join(", ", written.Take(written.Count - 1)) + " and " + written[^1];
+            lines.Add(char.ToUpperInvariant(names[0]) + names[1..] + (written.Count == 1 ? " needs the local model, so it wasn't rewritten." : " need the local model, so they weren't rewritten."));
+        }
+        return string.Join(" ", lines);
     }
 
     /// <summary>What the model sees before it calls anything: today, the situation, the subject story, matching items, attachments.</summary>
@@ -181,6 +258,8 @@ public sealed partial class AskAgent
         {
             sb.Append("NOTES FOR THIS CHAT (kept with it by Aqua and the user: facts, decisions and open questions):\n").Append(notes).Append('\n');
             if (run.Notes.Items.Any(n => n.By != "you")) run.SawUntrusted = true;
+            // Like Memory, the notes are private: a search or link carrying their names and numbers asks first.
+            foreach (var n in run.Notes.Items) run.PrivateTerms.UnionWith(NotedTerms(n.Text));
         }
         // Aqua's own digest: context, not a source (a model once listed the brief's headline as a site's article).
         sb.Append("THE USER'S SITUATION (Aqua's own summary for context — not a source: never cite it, link it or present it as an article):\n")
@@ -246,8 +325,12 @@ public sealed partial class AskAgent
             foreach (var i in mb.Insights.Take(8)) sb.Append("- ").Append(i.Symbol).Append(": ").Append(i.Stance).Append(" — ").Append(i.Summary).Append('\n');
         }
         // The user's own holdings, valued as the Markets page's portfolio card values them.
-        if (PortfolioRx().IsMatch(question) && Markets.Portfolio.Holdings(s.Markets).Any())
+        if (AsksAboutPortfolio(question) && Markets.Portfolio.Holdings(s.Markets).Any())
+        {
             sb.Append(PortfolioText(Markets.Portfolio.Value(s.Markets, _state.Quotes, _state.Fx)));
+            // Their holdings are private: from here on, a search or link needs an OK like after their files.
+            run.SawPrivate = true;
+        }
         if ((q.Contains("predict") || q.Contains("odds") || q.Contains("chance") || q.Contains("likely") || q.Contains("expect")) && _state.Predictions.Count > 0)
         {
             sb.Append("PREDICTION MARKETS (crowd odds):\n");
@@ -342,7 +425,8 @@ public sealed partial class AskAgent
     internal async Task<AskPlan> PlanAsync(string question, IReadOnlyList<LlmMessage> history, IReadOnlyList<AskAttachment> attachments, AskRun run, CancellationToken ct)
     {
         var o = run.Options;
-        var rules = AskPlanner.Heuristic(question, history, o, attachments.Count(a => a.Kind != AttachmentKind.Folder));
+        var rules = AskPlanner.Heuristic(question, history, o, attachments.Count(a => a.Kind != AttachmentKind.Folder),
+            folderNow: attachments.Any(a => a.Kind == AttachmentKind.Folder));
         var plan = rules;
         var worth = o.StoryId is null && run.Settings.Ask.PlanWithModel && question.Trim().Length > 3 &&
                     (o.UsesWeb || o.Computer || o.Folders.Count > 0 || rules.Urls.Count > 0 || run.Skills.Count > 0);
@@ -358,6 +442,7 @@ public sealed partial class AskAgent
                     Folders = o.Folders.Select(Path.GetFileName).OfType<string>()
                         .Concat(o.Computer ? run.Settings.Ask.Folders.Select(FolderLabel) : Array.Empty<string>()).ToList(),
                     Memories = run.Memories,
+                    Notes = run.Notes?.Items.Select(n => n.Text).ToList(),
                     Skills = run.Skills.Select(k => (k.Name, k.Description)).ToList(),
                     FeedMatches = run.FeedMatches,
                     Attachments = attachments.Select(a => a.Name + (a.Kind == AttachmentKind.Image ? " (picture)" : "")).ToList(),
@@ -379,6 +464,42 @@ public sealed partial class AskAgent
         if (o.SkillId is { } id && run.Skills.FirstOrDefault(k => k.Id == id) is { } forced) plan = plan with { Skill = forced.Name };
         else if (plan.Skill.Length == 0 && Workbench.Match(run.Skills, question) is { } matched) plan = plan with { Skill = matched.Name };
         return plan;
+    }
+
+    /// <summary>
+    /// The facts and decisions picked out of a message go into the chat's notes, and the ones it overturns come off, each
+    /// shown as a step. The answer model alone rarely calls update_notes: live on qwen3.5:9b, not once in five messages
+    /// that gave a size, a budget, a change of budget and a decision.
+    /// </summary>
+    private static void KeepNotes(AskRun run, IReadOnlyList<ChatNote> add, IReadOnlyList<string> outdated)
+    {
+        if (run.Notes is not { } notes) return;
+        foreach (var quote in outdated)
+            if (notes.RemoveOutdated(quote) is { } gone) Step(run.Host, "Took “" + HtmlText.Truncate(gone.Text, 80) + "” off the notes");
+        foreach (var note in add)
+            if (notes.Add(note.Kind, note.Text, "aqua", run.Now, out _)) Step(run.Host, "Noted “" + HtmlText.Truncate(note.Text, 80) + "”");
+
+        static void Step(IAskHost host, string text) => host.StepFinished(host.StepStarted("note", text), text);
+    }
+
+    /// <summary>A plain chat's notes, after its answer: one small call at background priority that never fails the answer.</summary>
+    private async Task TakeNotesAsync(string question, IReadOnlyList<LlmMessage> history, AskRun run)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            var request = AskPlanner.NotesRequest(question, history, run.Notes!.Items.Select(n => n.Text).ToList(), run.Now);
+            var (doc, _) = await _llm.CompleteJsonAsync(request with { Model = run.Options.Model }, timeout.Token).ConfigureAwait(false);
+            using (doc)
+            {
+                var (add, outdated) = AskPlanner.ReadNotes(doc.RootElement);
+                KeepNotes(run, add, outdated);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info("ask", "Couldn't bring the chat's notes up to date: " + ex.Message);
+        }
     }
 
     /// <summary>"%PICTURES%" → "Pictures"; paths stay as they are.</summary>
@@ -526,7 +647,7 @@ public sealed partial class AskAgent
         var instructions = SystemPrompt(s, run.Options, run.Plan, caps.Tools, hasImages, run.Now, caps.Tools ? byName.Keys.ToList() : Array.Empty<string>(), run.Memories, run.Skill);
         var answerTokens = run.Options.Think ? 4500 : 2000;
         var (window, dropped, fitted) = FitToWindow(instructions, context, messages, s, answerTokens + (caps.Tools ? 2500 : 0), AutomaticLimitNow);
-        var system = instructions + "\n\nCONTEXT:\n<<<DATA\n" + fitted + "DATA>>>";
+        var system = instructions + "\n\nCONTEXT:\n" + Prompts.Fenced(fitted);
 
         // Holds the model between steps (background agents wait); let go while the user is asked for an OK.
         using var hold = new ModelHold(await _llm.ReserveAsync(ct).ConfigureAwait(false));
@@ -578,12 +699,12 @@ public sealed partial class AskAgent
             {
                 toolCalls++;
                 // Let go of the model while the user is asked, or while an AI agent works with it.
-                var letGo = WillAsk(call, byName, run) || WaitsForModel(call, byName);
+                var letGo = WillAsk(call, byName, run) || WaitsForModel(call, byName, run);
                 if (letGo) hold.Release();
                 ToolResult result;
                 try { result = await RunToolAsync(call, byName, run, ct).ConfigureAwait(false); }
                 finally { if (letGo) await hold.RetakeAsync(_llm.ReserveAsync, ct).ConfigureAwait(false); }
-                messages.Add(new LlmMessage("tool", "<<<DATA\n" + result.Text + "\nDATA>>>")
+                messages.Add(new LlmMessage("tool", Prompts.Fenced(result.Text))
                 {
                     ToolName = call.Name, ToolCallId = call.Id,
                     Images = result.Image is { } img && caps.Vision ? new[] { img } : null,
@@ -614,13 +735,14 @@ public sealed partial class AskAgent
     }
 
     /// <summary>Whether this call waits on work that needs the model (an AI agent writing).</summary>
-    private static bool WaitsForModel(LlmToolCall call, IReadOnlyDictionary<string, AskTool> tools)
+    private static bool WaitsForModel(LlmToolCall call, IReadOnlyDictionary<string, AskTool> tools, AskRun run)
     {
         if (!tools.TryGetValue(call.Name, out var tool)) return false;
         try
         {
             using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
-            return tool.WaitsForModel(doc.RootElement);
+            // Asked again for what this answer already ran: it only reads the outcome back, so the model isn't let go.
+            return tool.WaitsForModel(doc.RootElement) && !tool.AlreadyDone(doc.RootElement, run);
         }
         catch (JsonException) { return false; }
     }
@@ -741,10 +863,12 @@ public sealed partial class AskAgent
             }
         }
 
-        if (tool.AlreadyDone(args, run)) return await tool.RunAsync(args, run, ct).ConfigureAwait(false);
-        var id = run.Host.StepStarted(tool.Icon, description + "…");
+        // Done already in this answer: the outcome is read back without another step.
+        var again = tool.AlreadyDone(args, run);
+        var id = again ? 0 : run.Host.StepStarted(tool.Icon, description + "…");
         try
         {
+            if (again) return await tool.RunAsync(args, run, ct).ConfigureAwait(false);
             var result = await tool.RunAsync(args, run, ct).ConfigureAwait(false);
             if (tool.Access == ToolAccess.Private) run.SawPrivate = true;
             if (tool.Access == ToolAccess.Web && result.Ok) run.SawWeb = true;
@@ -757,7 +881,7 @@ public sealed partial class AskAgent
         catch (Exception ex)
         {
             Log.Warn("ask", $"Tool {call.Name} failed", ex);
-            run.Host.StepFinished(id, $"{description} — failed", ok: false);
+            if (!again) run.Host.StepFinished(id, $"{description} — failed", ok: false);
             return ToolResult.Fail(ex.Message);
         }
     }
@@ -773,36 +897,63 @@ public sealed partial class AskAgent
                 "This answer has read text that isn't yours (web pages, feeds, files or app windows). Make sure this is what you asked for — nothing Aqua reads can tell it what to type or click.",
                 tool.Icon, AllowForChat: false);
         if (tool.NeedsApproval(s) && !run.AllowedForChat.Contains(tool.Name))
-            return new ToolApproval(tool.Name, description, tool.Access == ToolAccess.Act
-                ? "Aqua will do this on your PC."
-                : "Aqua will look at this and use it only for this answer.", tool.Icon, AllowForChat: !tool.OneAtATime(args));
+            return new ToolApproval(tool.Name, description, tool.Access == ToolAccess.Act ? "Aqua will do this on your PC." : LookDetail(tool, run),
+                tool.Icon, AllowForChat: !tool.OneAtATime(args));
         // A link opened in the browser reaches the internet just like a search.
         var reachesWeb = tool.Access == ToolAccess.Web || tool.OpensLink(args);
         // After private data, anything that reaches the internet needs an OK: a web page could otherwise steer the model
-        // into putting your data in a search or a link.
-        if (reachesWeb && run.SawPrivate && !run.AllowedForChat.Contains("web-after-private"))
-            return new ToolApproval("web-after-private", description,
-                "This answer has used your files, screen or attachments. Check the address or search above doesn't contain anything private before allowing it.", "globe");
-        // Your agenda and what Aqua remembers are in every answer's context: a search or link carrying their details
-        // (names, places) needs an OK, unless the words were already in your own question.
+        // into putting your data in a search or a link. Private data read by an earlier answer counts too: it's in the
+        // messages, notes and summary this answer is sent.
+        if (reachesWeb && (run.SawPrivate || run.EarlierPrivate) && !run.AllowedForChat.Contains("web-after-private"))
+            return new ToolApproval("web-after-private", description, (run.SawPrivate ? "This answer has used" : "This chat has used")
+                + " your files, screen, attachments or holdings. Check the address or search above doesn't contain anything private before allowing it.", "globe");
+        // Your agenda, what Aqua remembers and the chat's notes are in the context: a search or link carrying their details
+        // (names, places, numbers) needs an OK, unless they were already in your own question.
         if (reachesWeb && CarriesPrivateDetails(args, run) && !run.AllowedForChat.Contains("web-with-calendar"))
             return new ToolApproval("web-with-calendar", description,
-                "This would send details from your calendar or from what Aqua remembers to the web. Allow only if that's what you want.", "globe");
+                "This would send details from your calendar, from what Aqua remembers or from this chat's notes to the web. Allow only if that's what you want.", "globe");
         return null;
     }
 
     /// <summary>
-    /// True when a web tool's query or link contains at least two distinctive words from your calendar that your question
-    /// didn't contain (unit-tested).
+    /// What the card says Aqua does with something it looks at: a screenshot is kept whole with the chat while Settings
+    /// keep chats and their pictures (the card is where you decide, so it says so); anything else is for this answer.
+    /// </summary>
+    private static string LookDetail(AskTool tool, AskRun run) =>
+        tool.Name == "take_screenshot" && run.Chat is not null && run.Settings.Ask.KeepPictures && run.Settings.Privacy.KeepAskHistory
+            ? "Aqua will look at your screen. The screenshot is kept with this chat until the chat is deleted — switch that off in Settings › Privacy › Keep pictures with chats."
+            : "Aqua will look at this and use it only for this answer.";
+
+    /// <summary>
+    /// True when a web tool's query or link carries at least two distinctive words or numbers from your calendar, Memory or
+    /// the chat's notes that your question didn't (a long number — an account, a passport, a phone — is enough on its
+    /// own). Unit-tested.
     /// </summary>
     internal static bool CarriesPrivateDetails(JsonElement args, AskRun run)
     {
         if (run.PrivateTerms.Count == 0 || args.ValueKind != JsonValueKind.Object) return false;
-        var text = string.Join(' ', args.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String).Select(p => p.Value.GetString()));
-        var words = TextTools.Signature(Uri.UnescapeDataString(text.Replace('+', ' ').Replace('-', ' ').Replace('_', ' ')));
+        var text = Uri.UnescapeDataString(string.Join(' ', args.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String).Select(p => p.Value.GetString())));
+        var words = TextTools.Signature(text.Replace('+', ' ').Replace('-', ' ').Replace('_', ' '));
+        words.UnionWith(NumbersIn(text));
         var asked = TextTools.Signature(run.Question);
-        return words.Count(w => run.PrivateTerms.Contains(w) && !asked.Contains(w)) >= 2;
+        asked.UnionWith(NumbersIn(run.Question));
+        return words.Where(w => run.PrivateTerms.Contains(w) && !asked.Contains(w)).Sum(w => w.Length > 6 && w[0] == '#' ? 2 : 1) >= 2;
     }
+
+    [GeneratedRegex(@"\d(?:[\d.,]*\d)?")]
+    private static partial Regex NumberRx();
+
+    /// <summary>
+    /// The numbers in a text that could identify something, as "#" and their digits ("4,200" → "#4200"): three digits or
+    /// more, and not a year.
+    /// </summary>
+    internal static IEnumerable<string> NumbersIn(string text) =>
+        NumberRx().Matches(text).Select(m => new string(m.Value.Where(char.IsDigit).ToArray()))
+            .Where(d => d.Length >= 3 && !(d.Length == 4 && d[0] is '1' or '2' && int.Parse(d, Inv) is >= 1900 and <= 2100))
+            .Select(d => "#" + d);
+
+    /// <summary>What in a chat note would give its details away: its names and its numbers.</summary>
+    internal static IEnumerable<string> NotedTerms(string note) => AskPlanner.NamesIn(note).Concat(NumbersIn(note));
 
     /// <summary>The words the check above looks for: your agenda's, and the names in what Aqua remembers.</summary>
     internal static HashSet<string> PrivateTermsFor(HubState state, IReadOnlyList<string> memories, DateTimeOffset now)
@@ -815,8 +966,12 @@ public sealed partial class AskAgent
     [GeneratedRegex(@"\b(near me|nearby|near here|around here|around me|in my area|my area|local|locally|in town|my city|my town|my county|where i live)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NearMeRx();
 
-    [GeneratedRegex(@"\b(?:portfolio|holdings?|my\s+(?:shares|stocks|investments?|positions?|etfs?))\b", RegexOptions.IgnoreCase)]
+    /// <summary>"my portfolio", "our ETF holdings", "how are my shares", "the portfolio" — not "my portfolio website" or "Berkshire's holdings".</summary>
+    [GeneratedRegex(@"\b(?:(?:my|our)\s+(?:[\w-]+\s+)?(?:portfolio|holdings?|shares|stocks|investments?|positions?|etfs?)|the\s+portfolio)\b(?!\s+(?:website|site|page|pdf|template|design|photos?|app)\b)", RegexOptions.IgnoreCase)]
     private static partial Regex PortfolioRx();
+
+    /// <summary>Whether a question is about the user's own holdings (only then are they in the context).</summary>
+    internal static bool AsksAboutPortfolio(string question) => PortfolioRx().IsMatch(question);
 
     /// <summary>The portfolio card in words: its value in the portfolio's currency, today's move and the gain since bought, holding by holding.</summary>
     internal static string PortfolioText(Markets.PortfolioSummary p)
@@ -1252,7 +1407,7 @@ public sealed partial class AskAgent
                     System = "You take notes on one part of a long page, for someone who will answer a question about the whole page. " + Prompts.UntrustedNotice,
                     Messages =
                     {
-                        new LlmMessage("user", $"The question: \"{HtmlText.Truncate(question, 300)}\"\nThe page: {page.Title}\nPart {i + 1} of {parts.Count}:\n<<<DATA\n{parts[i]}\nDATA>>>\n\n" +
+                        new LlmMessage("user", $"The question: \"{HtmlText.Truncate(question, 300)}\"\nThe page: {page.Title}\nPart {i + 1} of {parts.Count}:\n{Prompts.Fenced(parts[i])}\n\n" +
                                                $"Write {least} to {most} words of notes on this part, in order: what happens or what it says — names, places, events, facts, numbers, and any line worth quoting. No introduction."),
                     },
                     Think = false,
@@ -1353,6 +1508,8 @@ public sealed partial class AskAgent
         }
         if (hits.Count == 0)
         {
+            // Only a question about files hears that none matched (a side search for a name in the question stays quiet).
+            if (plan.Intent != "files") return sb.ToString();
             sb.Append("FILES: nothing matched ").Append(label).Append(" in ").Append(string.Join(", ", files.Roots))
               .Append(stats is { } st ? $" (looked at {st.Files.ToString("N0", Inv)} files)" : "")
               .Append(". Say what was searched and suggest other words or a folder; more folders can be allowed in Settings › Ask Aqua.\n");
@@ -1670,7 +1827,7 @@ public sealed partial class AskAgent
         var messages = HistoryFor(history, Math.Min(4, s.Ask.HistoryMessages));
         messages.Add(UserMessage(question, attachments, caps.Vision));
         var (window, dropped, fitted) = FitToWindow(instructions, material.ToString(), messages, s, 2600, AutomaticLimitNow);
-        var system = instructions + "\n\nCONTEXT:\n<<<DATA\n" + fitted + "DATA>>>";
+        var system = instructions + "\n\nCONTEXT:\n" + Prompts.Fenced(fitted);
         var request = new LlmRequest
         {
             Purpose = "ask-research",

@@ -188,6 +188,8 @@ public sealed class HotkeyManager : IDisposable
     {
         foreach (var id in _actions.Keys) Native.UnregisterHotKey(_tray.Handle, id);
         _actions.Clear();
+        // Ids start again (hotkeys are cleared and registered again on every pause and settings change): they never reach the probe's.
+        _nextId = 0x5A00;
     }
 
     /// <summary>Registers e.g. "Ctrl+Alt+H". Returns an error message on failure (conflict / parse).</summary>
@@ -205,7 +207,8 @@ public sealed class HotkeyManager : IDisposable
     /// <summary>Whether Windows would give these keys to Aqua now: they're held for a moment and let go.</summary>
     public bool IsFree(string gesture)
     {
-        const int probe = 0x5BFF;
+        // Well away from the ids Register hands out (0x5A00 up), and within the range an app may use (below 0xC000).
+        const int probe = 0xBFFE;
         if (!TryParse(gesture, out var mods, out var vk) || !Native.RegisterHotKey(_tray.Handle, probe, mods | Native.MOD_NOREPEAT, vk)) return false;
         Native.UnregisterHotKey(_tray.Handle, probe);
         return true;
