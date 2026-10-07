@@ -9,20 +9,24 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <Grid Margin="0,0,12,16">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Social pulse" Style="{StaticResource T.Title}"/>
-                <TextBlock x:Name="Subtitle" Style="{StaticResource T.Body2}" Margin="0,4,0,0" Text="What people around you are talking about."/>
+                <TextBlock x:Name="Subtitle" Style="{StaticResource T.Body2}" Margin="0,4,14,0" TextWrapping="Wrap" Text="What people around you are talking about."/>
             </StackPanel>
-            <Button Style="{StaticResource Btn.Standard}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnConfigure">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+            <c:FeedRefresh x:Name="RefreshFeedButton" AgentId="social-scout" Label="social" Margin="0,0,10,0"/>
+            <Button Style="{StaticResource Btn.Standard}" VerticalAlignment="Top" Click="OnConfigure">
                 <StackPanel Orientation="Horizontal"><c:Icon Kind="settings" Width="14" Height="14"/><TextBlock Text="Sources" Margin="8,0,0,0"/></StackPanel>
             </Button>
+            </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="5*" MinWidth="380"/>
+                <ColumnDefinition Width="5*"/>
                 <ColumnDefinition Width="16"/>
-                <ColumnDefinition Width="4*" MinWidth="340"/>
+                <ColumnDefinition Width="4*"/>
             </Grid.ColumnDefinitions>
 
             <!-- Topics (AI) -->

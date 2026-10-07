@@ -51,7 +51,6 @@ public partial class NewsPage : UserControl, IPage
 
     public void OnNavigatedTo(string? arg)
     {
-        Hub.State.Changed -= OnChanged;
         Hub.State.Changed -= OnChanged; // navigating to the page already shown must not subscribe twice
         Hub.State.Changed += OnChanged;
         _focus = arg;

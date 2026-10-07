@@ -126,6 +126,7 @@ public static partial class Prompts
         return new LlmRequest
         {
             Purpose = "story",
+            Editorial = true,
             System = "You are the news desk editor of a private briefing app. " + Style(s.Ai, s.Location) + " " +
                      "Summarise ONLY what the sources say; if they disagree, say so. " + UntrustedNotice,
             Messages =
@@ -165,6 +166,7 @@ public static partial class Prompts
         return new LlmRequest
         {
             Purpose = "pulse",
+            Editorial = true,
             System = "You distil social media chatter into a calm local briefing so the reader never has to doom-scroll. " +
                      Style(s.Ai, s.Location) + " Group posts into 3-6 real topics; ignore memes, spam and self-promotion. " +
                      "heat is 1 (minor) to 5 (everyone is talking about it). post_numbers reference the [n] posts. " + UntrustedNotice,
@@ -278,6 +280,7 @@ public static partial class Prompts
         return new LlmRequest
         {
             Purpose = "foresight",
+            Editorial = true,
             System = "You help a busy person see what's coming. " + Style(s.Ai, s.Location) + " " +
                      "Pick the most consequential upcoming events and the most informative crowd forecasts. " +
                      "Quote probabilities exactly as given and always name the MOST likely outcome first. importance: 1 (minor) to 3 (major). " + UntrustedNotice,

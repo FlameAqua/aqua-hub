@@ -5,7 +5,7 @@ using AquaHub.Core.Util;
 
 namespace AquaHub.Core.Ai.Local;
 
-/// <summary>Where a model runs: the graphics card (one model at a time) or the processor (background and search models).</summary>
+/// <summary>Where a model runs: the graphics card (one generation model at a time) or the processor (e.g. embedding models).</summary>
 public enum LlamaLane { Gpu, Cpu }
 
 /// <summary>How one model's server is started: its arguments and environment, and what they settle.</summary>

@@ -157,13 +157,14 @@ public partial class SocialPage : UserControl, IPage
         AutomationProperties.SetName(FeedEmptyAction, state.Action);
     }
 
-    private void OnFeedEmptyAction(object sender, RoutedEventArgs e)
+    private async void OnFeedEmptyAction(object sender, RoutedEventArgs e)
     {
         if (_empty is null) return;
         if (_empty.Target == "@refresh")
         {
-            Hub.Core.Agents.RunNow("social-scout");
-            FeedEmptyBody.Text = "Checking your sources…";
+            FeedEmptyAction.IsEnabled = false;
+            try { await RefreshFeedButton.RefreshAsync(); }
+            finally { FeedEmptyAction.IsEnabled = true; }
             return;
         }
         Hub.Windows.ShowMain("settings", _empty.Target);

@@ -48,11 +48,34 @@ public partial class AskPage : UserControl, IPage
     private string _beforeDictation = "";
     private string? _untidied;
     private CancellationTokenSource? _tidyCts;
+    private static string _activeTab = "chat";
+    private bool _selectingTabs;
+
+    private void OnAskTab(object sender, RoutedEventArgs e) => SelectTab((sender as FrameworkElement)?.Tag as string ?? "chat");
+
+    internal void SelectTab(string mode)
+    {
+        if (_selectingTabs || ChatSurface is null) return;
+        _selectingTabs = true;
+        _activeTab = mode is "images" or "roleplay" ? mode : "chat";
+        ChatTab.IsChecked = _activeTab == "chat";
+        ImageTab.IsChecked = _activeTab == "images";
+        RoleplayTab.IsChecked = _activeTab == "roleplay";
+        ChatSurface.Visibility = _activeTab == "chat" ? Visibility.Visible : Visibility.Collapsed;
+        ImageTabHost.Visibility = _activeTab == "images" ? Visibility.Visible : Visibility.Collapsed;
+        RoleplayTabHost.Visibility = _activeTab == "roleplay" ? Visibility.Visible : Visibility.Collapsed;
+        if (_activeTab == "images") ImageTabHost.Content ??= new ImageGenerationPanel();
+        if (_activeTab == "roleplay") RoleplayTabHost.Content ??= new RoleplayPanel();
+        ContextPopup.IsOpen = false;
+        _selectingTabs = false;
+    }
 
     public AskPage()
     {
         InitializeComponent();
         _scroll = new UiThrottle(() => { if (_follow) Scroller.ScrollToEnd(); }, 60);
+        PopupToggle.Attach(ContextPopup, ContextButton);
+        if (ScreenshotButton.ContextMenu is { } captureMenu) PopupToggle.Attach(captureMenu, ScreenshotButton);
         Scroller.ScrollChanged += (_, e) =>
         {
             // Follow the answer while the reader is at the bottom; stop following once they scroll up to read.
@@ -88,6 +111,8 @@ public partial class AskPage : UserControl, IPage
 
     public void OnNavigatedTo(string? arg)
     {
+        SelectTab(arg is "images" or "roleplay" ? arg : string.IsNullOrEmpty(arg) ? _activeTab : "chat");
+        if (arg is "images" or "roleplay") arg = null;
         Session.EnsureLoaded();
         Bind();
         Session.ChatChanged -= OnChatChanged;
@@ -132,7 +157,7 @@ public partial class AskPage : UserControl, IPage
         UpdateSubtitle();
         _ = HandleArgAsync(arg);
         _follow = true;
-        Dispatcher.BeginInvoke(() => { Scroller.ScrollToEnd(); Input.Focus(); }, System.Windows.Threading.DispatcherPriority.Input);
+        Dispatcher.BeginInvoke(() => { Scroller.ScrollToEnd(); if (_activeTab == "chat") Input.Focus(); }, System.Windows.Threading.DispatcherPriority.Input);
     }
 
     public void OnNavigatedFrom()
@@ -170,6 +195,7 @@ public partial class AskPage : UserControl, IPage
 
     private void OnChatChanged() => Hub.OnUi(() =>
     {
+        CancelCurrentTitle();
         // What you were typing in the notes belongs to the chat you were in.
         CommitNotes();
         _compressSaid = null;
@@ -447,11 +473,50 @@ public partial class AskPage : UserControl, IPage
     {
         var summary = Session.Current.Summary;
         PageTitle.Text = summary is null ? "Ask Aqua" : summary.Title;
+        PageTitle.ContextMenu!.IsEnabled = summary is not null;
         StarChatButton.Visibility = summary is null ? Visibility.Collapsed : Visibility.Visible;
         var starred = summary?.Starred == true;
         StarOutline.Visibility = starred ? Visibility.Collapsed : Visibility.Visible;
         StarFilled.Visibility = starred ? Visibility.Visible : Visibility.Collapsed;
         StarChatButton.ToolTip = starred ? "Starred — this chat is kept until you delete it" : "Star this chat (starred chats never expire)";
+    }
+
+    private void OnRenameCurrentChat(object sender, RoutedEventArgs e)
+    {
+        if (Session.Current.Summary is null) return;
+        PageTitleEdit.Text = Session.Current.Summary.Title;
+        PageTitle.Visibility = Visibility.Collapsed;
+        PageTitleEditor.Visibility = Visibility.Visible;
+    }
+
+    private void OnCurrentTitleEditVisible(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is TextBox { IsVisible: true } box)
+            Dispatcher.BeginInvoke(() => { box.Focus(); box.SelectAll(); }, System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void OnCurrentTitleKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { e.Handled = true; SaveCurrentTitle(); }
+        else if (e.Key == Key.Escape) { e.Handled = true; CancelCurrentTitle(); }
+    }
+
+    private void OnSaveCurrentTitle(object sender, RoutedEventArgs e) => SaveCurrentTitle();
+    private void OnCancelCurrentTitle(object sender, RoutedEventArgs e) => CancelCurrentTitle();
+
+    private void SaveCurrentTitle()
+    {
+        if (Session.Current.Summary is { } summary) Session.Rename(summary.Id, PageTitleEdit.Text);
+        PageTitleEditor.Visibility = Visibility.Collapsed;
+        PageTitle.Visibility = Visibility.Visible;
+        UpdateTitle();
+    }
+
+    private void CancelCurrentTitle()
+    {
+        PageTitleEditor.Visibility = Visibility.Collapsed;
+        PageTitle.Visibility = Visibility.Visible;
+        UpdateTitle();
     }
 
     private void UpdateRetention()
@@ -490,6 +555,12 @@ public partial class AskPage : UserControl, IPage
     private void OnEditLast(object sender, RoutedEventArgs e) => EditLast();
 
     private void OnEditBoxVisible(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is TextBox { IsVisible: true } box)
+            Dispatcher.BeginInvoke(() => { box.Focus(); box.CaretIndex = box.Text.Length; box.BringIntoView(); }, System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void OnGuidanceBoxVisible(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (sender is TextBox { IsVisible: true } box)
             Dispatcher.BeginInvoke(() => { box.Focus(); box.CaretIndex = box.Text.Length; box.BringIntoView(); }, System.Windows.Threading.DispatcherPriority.Input);
@@ -566,6 +637,7 @@ public partial class AskPage : UserControl, IPage
 
     private void OnAskAboutSelection(string selection)
     {
+        SelectTab("chat");
         var quote = selection.Length > 400 ? selection[..400] + "…" : selection;
         Input.Text = $"About “{quote.Replace('\n', ' ')}”: ";
         Input.CaretIndex = Input.Text.Length;
@@ -574,6 +646,7 @@ public partial class AskPage : UserControl, IPage
 
     private void OnSearchSelection(string selection)
     {
+        SelectTab("chat");
         var q = selection.Length > 200 ? selection[..200] : selection;
         _ = Session.SendAsync($"Look this up on the web: {q.Replace('\n', ' ')}", new AskOptions { Web = true, Think = Session.Think });
     }
@@ -582,7 +655,15 @@ public partial class AskPage : UserControl, IPage
     private void OnScrollerWheel(object sender, MouseWheelEventArgs e)
     {
         var inner = e.OriginalSource as DependencyObject;
-        while (inner is not null && inner != Scroller && inner is not ScrollViewer) inner = VisualTreeHelper.GetParent(inner) ?? LogicalTreeHelper.GetParent(inner);
+        while (inner is not null && inner != Scroller && inner is not ScrollViewer)
+        {
+            // Text runs and other content elements live in the logical tree and are not Visuals; asking
+            // VisualTreeHelper for their parent throws and prevents the chat from receiving the wheel.
+            var parent = inner is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(inner)
+                : null;
+            inner = parent ?? LogicalTreeHelper.GetParent(inner);
+        }
         if (inner is not ScrollViewer sv || sv == Scroller) return;
         var canScroll = e.Delta < 0 ? sv.VerticalOffset < sv.ScrollableHeight - 0.5 : sv.VerticalOffset > 0.5;
         if (canScroll && sv.ScrollableHeight > 0) return;
@@ -904,6 +985,11 @@ public partial class AskPage : UserControl, IPage
     private void OnScreenshotMenu(object sender, RoutedEventArgs e)
     {
         if (ScreenshotButton.ContextMenu is not { } menu) return;
+        if (menu.IsOpen)
+        {
+            menu.IsOpen = false;
+            return;
+        }
         bool hasImage;
         try { hasImage = Clipboard.ContainsImage(); } catch { hasImage = false; }
         PasteImageItem.IsEnabled = hasImage;
@@ -973,12 +1059,13 @@ public partial class AskPage : UserControl, IPage
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Effects = _activeTab == "chat" && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void OnDrop(object sender, DragEventArgs e)
     {
+        if (_activeTab != "chat") { e.Handled = true; return; }
         if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
         {
             e.Handled = true;

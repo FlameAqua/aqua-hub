@@ -149,7 +149,7 @@ public partial class MarketsPage : UserControl, IPage
         var bar = MarketBar.Items(s);
         _vm.Editing = _editing;
         var barItems = bar.Select((w, i) => new BarItemVM(w.Symbol, string.IsNullOrWhiteSpace(w.Name) ? w.Symbol : w.Name,
-            quotes.TryGetValue(w.Symbol, out var bq) ? Fmt.Price(bq.Price, bq.Currency) : "—", i > 0, i < bar.Count - 1)).ToList();
+            quotes.TryGetValue(w.Symbol, out var bq) ? Fmt.QuotePrice(bq) : "—", i > 0, i < bar.Count - 1)).ToList();
         // A new price alone doesn't rebuild the editor, which would take the keyboard off the button in use.
         if (!barItems.Select(b => (b.Symbol, b.Name, b.CanMoveLeft, b.CanMoveRight)).SequenceEqual(_vm.BarItems.Select(b => (b.Symbol, b.Name, b.CanMoveLeft, b.CanMoveRight))))
             _vm.BarItems = barItems;
@@ -211,7 +211,7 @@ public partial class MarketsPage : UserControl, IPage
     /// <summary>"You own 2.5 · $577.15 (€513.89) · +105.6% since you bought": the gain is in your currency, like the cost.</summary>
     private static string HoldingText(double shares, Quote q, PortfolioLine? line, string currency)
     {
-        var text = $"You own {shares.ToString("0.####", CultureInfo.CurrentCulture)} · {Fmt.PriceExact(q.Price * shares, q.Currency)}";
+        var text = $"You own {shares.ToString("0.####", CultureInfo.CurrentCulture)} · {Fmt.PriceExactWithCurrencyStatus(q.Price * shares, q.Currency)}";
         if (line is not null && !string.Equals(FxRates.Major(q.Currency).Currency, currency, StringComparison.OrdinalIgnoreCase))
             text += $" ({Fmt.PriceExact(line.Value, currency)})";
         if (line?.GainPercent is { } gain) text += $" · {Fmt.Pct(gain, 1)} since you bought";

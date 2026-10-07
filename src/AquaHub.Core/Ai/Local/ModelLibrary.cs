@@ -129,7 +129,16 @@ public sealed class ModelLibrary
         }
         // A download of a file Ollama also has (the same SHA-256) is shown once, as Aqua's.
         var ordered = models.GroupBy(m => m.Sha256 ?? m.Path, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.OrderBy(m => m.Source).First())
+            .Select(g =>
+            {
+                var preferred = g.OrderBy(m => m.Source).First();
+                var aliases = g.SelectMany(Identities).Concat(g.SelectMany(m => m.Aliases))
+                    .Where(id => !id.Equals(preferred.Id, StringComparison.OrdinalIgnoreCase)
+                                 && !id.Equals(preferred.Name, StringComparison.OrdinalIgnoreCase))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                return preferred with { Aliases = aliases };
+            })
             .OrderBy(m => m.Embedding).ThenByDescending(m => m.Info.Parameters).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
         lock (_gate)
@@ -151,10 +160,24 @@ public sealed class ModelLibrary
         var n = name.Trim();
         var models = Models;
         return models.FirstOrDefault(m => m.Id.Equals(n, StringComparison.OrdinalIgnoreCase))
-               ?? models.FirstOrDefault(m => m.Source == ModelSource.Ollama && (m.Name.Equals(n, StringComparison.OrdinalIgnoreCase)
-                   || m.Aliases.Any(a => a.Equals(n, StringComparison.OrdinalIgnoreCase) || ("ollama:" + a).Equals(n, StringComparison.OrdinalIgnoreCase))
-                   || (m.Name + ":latest").Equals(n, StringComparison.OrdinalIgnoreCase)))
+               ?? models.FirstOrDefault(m => Identities(m).Any(id => id.Equals(n, StringComparison.OrdinalIgnoreCase)
+                   || ("ollama:" + id).Equals(n, StringComparison.OrdinalIgnoreCase)))
+               ?? models.FirstOrDefault(m =>
+               {
+                   var unprefixed = n.StartsWith("ollama:", StringComparison.OrdinalIgnoreCase) ? n[7..] : n;
+                   if (unprefixed.Contains(':')) return false;
+                   var latest = unprefixed + ":latest";
+                   return Identities(m).Any(id => id.Equals(latest, StringComparison.OrdinalIgnoreCase)
+                       || id.Equals("ollama:" + latest, StringComparison.OrdinalIgnoreCase));
+               })
                ?? models.FirstOrDefault(m => Path.GetFileName(m.Path).Equals(n, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<string> Identities(LocalModel model)
+    {
+        yield return model.Id;
+        yield return model.Name;
+        foreach (var alias in model.Aliases) yield return alias;
     }
 
     /// <summary>
@@ -228,12 +251,12 @@ public sealed class ModelLibrary
             lock (_headers)
                 if (_headers.TryGetValue(key, out var known)) return known;
             var info = Gguf.Read(path);
-            lock (_headers) _headers[key] = info;
             if (info.Type is "mmproj" or "adapter")
             {
                 problems.Add($"{label}: a {(info.Type == "mmproj" ? "vision projector" : "adapter")}, not a model on its own");
                 return null;
             }
+            lock (_headers) _headers[key] = info;
             return info;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or GgufFormatException)

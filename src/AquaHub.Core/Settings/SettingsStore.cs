@@ -104,6 +104,7 @@ public sealed partial class SettingsStore
         {
             var next = Copy(_current);
             mutate(next);
+            CarryModels(_current, next);
             Validate(next);
             Volatile.Write(ref _current, next);
             Persist(next);
@@ -116,6 +117,7 @@ public sealed partial class SettingsStore
         lock (_gate)
         {
             var next = Copy(settings);
+            CarryModels(_current, next);
             Validate(next);
             Volatile.Write(ref _current, next);
             Persist(next);
@@ -138,6 +140,7 @@ public sealed partial class SettingsStore
             var target = JsonSerializer.SerializeToNode(_current, JsonUtil.Options)!;
             if (!ApplyChanges(before, after, target)) return false;
             var next = target.Deserialize<HubSettings>(JsonUtil.Options)!;
+            CarryModels(_current, next);
             Validate(next);
             Volatile.Write(ref _current, next);
             Persist(next);
@@ -175,6 +178,7 @@ public sealed partial class SettingsStore
         {
             var text = File.ReadAllText(_path);
             var parsed = JsonSerializer.Deserialize<HubSettings>(text, JsonUtil.Options) ?? new HubSettings();
+            CarryModels(Current, parsed);
             Validate(parsed);
             Volatile.Write(ref _current, parsed);
             Raise();
@@ -303,6 +307,7 @@ public sealed partial class SettingsStore
         s.Predictions.RefreshMinutes = Math.Clamp(s.Predictions.RefreshMinutes, 5, 240);
         s.Predictions.SwingAlertPoints = Math.Clamp(s.Predictions.SwingAlertPoints, 2, 50);
 
+        s.ImageGeneration ??= new();
         s.Ai.Temperature = Math.Clamp(s.Ai.Temperature, 0, 1.5);
         s.Ai.ContextTokens = Math.Clamp(s.Ai.ContextTokens, 2048, 131072);
         s.Ai.StopOllamaIdleMinutes = Math.Clamp(s.Ai.StopOllamaIdleMinutes, 0, 1440);
@@ -311,6 +316,13 @@ public sealed partial class SettingsStore
         s.Ai.BriefTimes = Clean(s.Ai.BriefTimes).Where(t => TimePattern().IsMatch(t)).Distinct().ToList();
         if (string.IsNullOrWhiteSpace(s.Ai.Model)) s.Ai.Model = "auto";
         s.Ai.Provider = (s.Ai.Provider ?? "").Trim().ToLowerInvariant() is var provider && provider is "ollama" or "openai" or "llamacpp" ? provider : "ollama";
+        s.Ai.ProviderModels = (s.Ai.ProviderModels ?? new())
+            .Where(kv => kv.Key is "ollama" or "openai" or "llamacpp" && kv.Value is not null)
+            .ToDictionary(kv => kv.Key, kv => new ProviderModelChoice
+            {
+                Model = (kv.Value.Model ?? "").Trim() is { Length: > 0 and <= 300 } m ? m : "auto",
+                DeepModel = (kv.Value.DeepModel ?? "").Trim() is { Length: <= 300 } d ? d : "",
+            });
         var llama = s.Ai.Llama ??= new();
         llama.Backend = llama.Backend is "auto" or "cuda12" or "cuda13" or "vulkan" or "cpu" ? llama.Backend : "auto";
         // Only a llama-server.exe on a local drive: a settings file can't make Aqua start some other program.
@@ -336,6 +348,7 @@ public sealed partial class SettingsStore
         if (s.Ask.SearxngUrl.Length > 0 && !IsSafeHttpUrl(s.Ask.SearxngUrl)) s.Ask.SearxngUrl = "";
         s.Ask.Folders = Clean(s.Ask.Folders).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         s.Ask.ChatRetentionDays = Math.Clamp(s.Ask.ChatRetentionDays, 0, 3650);
+        s.ImageGeneration.RetentionDays = Math.Clamp(s.ImageGeneration.RetentionDays, 0, 3650);
         s.Ask.ContextWindow = s.Ask.ContextWindow is 0 or 8192 or 16384 or 32768 or 65536 or 131072 ? s.Ask.ContextWindow : 0;
         s.Ask.HistoryMessages = Math.Clamp(s.Ask.HistoryMessages, 2, 40);
         s.Ask.Voice = s.Ask.Voice is "offline" or "online" or "whisper" or "off" ? s.Ask.Voice : "offline";
@@ -362,6 +375,42 @@ public sealed partial class SettingsStore
         (values ?? new()).Select(v => v?.Trim() ?? "").Where(v => v.Length > 0).ToList();
 
     /// <summary>A fully qualified path on a drive ("D:\Models"), not a network share or a relative path.</summary>
+    /// <summary>
+    /// Each provider keeps its own model choices. When an edit switches provider, the old one's Model and DeepModel are
+    /// stored and the new one's restored (unless the same edit set them). With nothing stored yet, a name that means the
+    /// same on both is kept — Ollama's names work on Aqua's runtime, which reads Ollama's store, and back — and anything
+    /// else goes back to automatic. Without a switch, the current choice is stored under its provider.
+    /// </summary>
+    internal static void CarryModels(HubSettings previous, HubSettings next)
+    {
+        var ai = next.Ai;
+        ai.ProviderModels ??= new();
+        var from = Provider(previous.Ai.Provider);
+        var to = Provider(ai.Provider);
+        if (from != to)
+        {
+            var setModel = ai.Model != previous.Ai.Model;
+            var setDeep = ai.DeepModel != previous.Ai.DeepModel;
+            ai.ProviderModels[from] = new ProviderModelChoice { Model = previous.Ai.Model, DeepModel = previous.Ai.DeepModel };
+            if (ai.ProviderModels.TryGetValue(to, out var saved) && saved is not null)
+            {
+                if (!setModel) ai.Model = saved.Model;
+                if (!setDeep) ai.DeepModel = saved.DeepModel;
+            }
+            else
+            {
+                if (!setModel && !Portable(ai.Model, from, to)) ai.Model = "auto";
+                if (!setDeep && !Portable(ai.DeepModel, from, to)) ai.DeepModel = "";
+            }
+        }
+        ai.ProviderModels[to] = new ProviderModelChoice { Model = ai.Model, DeepModel = ai.DeepModel };
+
+        static string Provider(string? p) => (p ?? "").Trim().ToLowerInvariant() is var v && v is "ollama" or "openai" or "llamacpp" ? v : "ollama";
+        static bool Portable(string? model, string from, string to) =>
+            string.IsNullOrWhiteSpace(model) || model.Equals("auto", StringComparison.OrdinalIgnoreCase)
+            || (from is "ollama" or "llamacpp" && to is "ollama" or "llamacpp" && !model.StartsWith("hf:", StringComparison.OrdinalIgnoreCase));
+    }
+
     internal static bool IsLocalDrivePath(string path) =>
         path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/'
         && path.IndexOfAny(Path.GetInvalidPathChars()) < 0 && Path.IsPathFullyQualified(path);

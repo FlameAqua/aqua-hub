@@ -103,7 +103,8 @@ public partial class App : Application
         Hub.Ollama = new OllamaManager();
         Hub.LlamaHost = new LlamaProcessHost();
         Hub.Llama = new AquaHub.Core.Ai.Local.LlamaRuntime(() => Hub.S, Hub.Core.LlamaSetup, Hub.Core.Models, Hub.LlamaHost,
-            () => GpuReader.Read(Hub.System), new AquaHub.Core.Ai.Local.SpeedBook(Path.Combine(Hub.Core.Paths.Llama, "speed.json")));
+            () => GpuReader.Read(Hub.System), new AquaHub.Core.Ai.Local.SpeedBook(Path.Combine(Hub.Core.Paths.Llama, "speed.json")),
+            new AquaHub.Core.Ai.Local.CompatBook(Path.Combine(Hub.Core.Paths.Llama, "compat.json")), OllamaManager.EngineServer);
         Hub.Core.Llm.Llama = Hub.Llama;
         Hub.LocalAi = new LocalAi();
         Hub.Updates = new UpdateService(Sandbox.Enabled, args.DataDir is null ? Array.Empty<string>() : new[] { "--data-dir", paths.Root },
@@ -166,6 +167,7 @@ public partial class App : Application
         Hub.Windows.StartIdleTrim();
         Hub.Ollama.Start();
         Hub.LocalAi.Start();
+        Hub.Images.Start();
         Hub.Updates.Start();
         // Asking something (or a scheduled brief) may start a stopped local server, if Settings allow it.
         Hub.Core.Llm.StartServer = ct => Hub.S.Ai.StartOllamaOnDemand && OllamaPolicy.Applies(Hub.S.Ai)
@@ -276,6 +278,7 @@ public partial class App : Application
         try
         {
             Hub.Speech?.Stop();
+            Hub.Images.Stop();
             Hub.Ollama?.OnAppExit();
             Hub.LocalAi?.Dispose();
             Hub.Llama?.Dispose();

@@ -93,6 +93,8 @@ public partial class SettingsPage : UserControl, IPage
         };
         HistoryMessagesCombo.ItemsSource = new[] { 4, 6, 10, 16, 20, 30, 40 };
         WhisperModelCombo.ItemsSource = WhisperCatalog.Choices.Select(c => new WhisperOption(c.Id, c.Label(Hub.S.Location.Language))).ToList();
+        RuntimeCard.SaveRequested += SaveNow;
+        RuntimeCard.UseRequested += () => SwitchProvider("llamacpp");
     }
 
     public sealed record RetentionOption(int Days, string Label);
@@ -126,6 +128,9 @@ public partial class SettingsPage : UserControl, IPage
     /// <summary>Scrolls a setting to the top of the view, flashes it and focuses its first input.</summary>
     private void Reveal(FrameworkElement row)
     {
+        for (DependencyObject? p = row; p is not null; p = LogicalTreeHelper.GetParent(p))
+            if (p is Expander expander) expander.IsExpanded = true;
+        Scroller.UpdateLayout();
         var top = row.TransformToAncestor(Panels).Transform(new Point(0, 0)).Y;
         Scroller.ScrollToVerticalOffset(Math.Max(0, top - 12));
         var flash = new System.Windows.Media.Animation.DoubleAnimation(0.35, 1, TimeSpan.FromMilliseconds(900)) { EasingFunction = new System.Windows.Media.Animation.QuadraticEase() };
@@ -280,6 +285,8 @@ public partial class SettingsPage : UserControl, IPage
         _s = Hub.Core.Settings.Clone();
         _original = SettingsStore.DeepCopy(_s);
         DataContext = _s;
+        AiProvider.SelectedValue = _s.Ai.Provider;
+        UpdateProviderRows();
         LocalKeywords.SetItems(_s.Location.LocalKeywords);
         Interests.SetItems(_s.News.Interests);
         Muted.SetItems(_s.News.Muted);
@@ -373,6 +380,13 @@ public partial class SettingsPage : UserControl, IPage
     private static List<WatchSymbol> MergeSymbols(List<WatchSymbol> existing, List<string> symbols, string kind) =>
         symbols.Select(sym => existing.FirstOrDefault(e => e.Symbol.Equals(sym, StringComparison.OrdinalIgnoreCase))
                               ?? new WatchSymbol { Symbol = sym, Name = sym.TrimStart('^'), Kind = sym.EndsWith("=X", StringComparison.Ordinal) ? "fx" : sym.Contains('-') ? "crypto" : sym.EndsWith("=F", StringComparison.Ordinal) ? "commodity" : kind }).ToList();
+
+    private void OnThemeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || _s is null || sender is not ComboBox { SelectedValue: string theme }) return;
+        _s.General.Theme = theme;
+        Hub.Theme.Apply(_s.General);
+    }
 
     private void OnAnyChange(object sender, RoutedEventArgs e)
     {
@@ -832,6 +846,56 @@ public partial class SettingsPage : UserControl, IPage
     }
 
     // ───────────── AI ─────────────
+    private bool _switchingProvider;
+    private void OnAiProvider(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || _switchingProvider || AiProvider.SelectedValue is not string provider) return;
+        RuntimeCard.WantsRuntime = provider == "llamacpp";
+        if (provider == "llamacpp" && !Hub.LocalAi.RuntimeReady)
+        {
+            ProviderNotice.Text = "Install Aqua's runtime below to use it. Your current provider stays active until installation finishes.";
+            _loading = true;
+            AiProvider.SelectedValue = _s.Ai.Provider;
+            _loading = false;
+            RuntimeCard.BringIntoView();
+            return;
+        }
+        SwitchProvider(provider);
+    }
+
+    private async void SwitchProvider(string provider)
+    {
+        if (_switchingProvider || provider == Hub.S.Ai.Provider) return;
+        _switchingProvider = true; AiProvider.IsEnabled = false; ProviderNotice.Text = "";
+        try
+        {
+            SaveNow();
+            // UseRuntimeAsync(false) always selects Ollama. Switching directly to an external server must retain
+            // that provider while still unloading Aqua's servers and refreshing the connection state.
+            if (provider is "llamacpp" or "ollama") await Hub.LocalAi.UseRuntimeAsync(provider == "llamacpp");
+            else
+            {
+                Hub.Core.Settings.Update(s => s.Ai.Provider = provider);
+                await Hub.LocalAi.StopAsync(null);
+            }
+            await Hub.Core.Llm.CheckAsync();
+            Load();
+        }
+        catch (Exception ex) { ProviderNotice.Text = ex.Message; Load(); }
+        finally { _switchingProvider = false; AiProvider.IsEnabled = true; RuntimeCard.Update(); }
+    }
+
+    private void UpdateProviderRows()
+    {
+        var runtime = _s.Ai.Provider == "llamacpp";
+        RuntimeGamingRow.Visibility = runtime ? Visibility.Visible : Visibility.Collapsed;
+        OllamaSettings.Visibility = _s.Ai.Provider == "ollama" ? Visibility.Visible : Visibility.Collapsed;
+        ApiKeyRow.Visibility = _s.Ai.Provider == "openai" ? Visibility.Visible : Visibility.Collapsed;
+        EndpointRow.Visibility = LegacyModelRow.Visibility = runtime ? Visibility.Collapsed : Visibility.Visible;
+        // Keep this legacy override visible so it cannot silently override the Models page's main role.
+        DeepModelRow.Visibility = Visibility.Visible;
+    }
+
     private void FillModels()
     {
         var installed = Hub.State.Ai?.Models.Select(m => m.Name).ToList() ?? new List<string>();
@@ -849,7 +913,7 @@ public partial class SettingsPage : UserControl, IPage
 
     /// <summary>"Connected to Ollama 0.12.3 · 3 models · using qwen3.5:9b", or why not — for the Connection row.</summary>
     private static string AiStatus(Core.Ai.LlmHealth? h) => h is null ? "" : !h.Available ? h.Error ?? "Not connected"
-        : $"Connected to {(h.Provider == "ollama" ? "Ollama" : "an OpenAI-compatible server")}{(string.IsNullOrEmpty(h.Version) ? "" : " " + h.Version)}"
+        : $"Connected to {(h.Provider == "ollama" ? "Ollama" : h.Provider == "llamacpp" ? "Aqua's runtime" : "an OpenAI-compatible server")}{(string.IsNullOrEmpty(h.Version) ? "" : " " + h.Version)}"
           + $" · {Plural.Of(h.Models.Count, "model")} · using {h.ActiveModel}";
 
     private void OnModelChanged(object sender, SelectionChangedEventArgs e)

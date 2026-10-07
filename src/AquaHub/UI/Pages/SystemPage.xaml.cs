@@ -275,7 +275,7 @@ public partial class SystemPage : UserControl, IPage
         _vm.ShowSetupHint = ai is { Enabled: true, Available: false };
         _vm.AiState = ai is null ? "Checking…" : !ai.Enabled ? "AI is turned off in Settings" : !ai.Available ? ai.Error ?? "Offline" :
             ai.Paused ? $"Paused — {ai.PauseReason}" : "Ready · runs entirely on this PC";
-        _vm.AiSub = ai is null ? "" : $"{(ai.Provider == "ollama" ? "Ollama" : "OpenAI-compatible")} {ai.Version} · {ai.Endpoint}";
+        _vm.AiSub = ai is null ? "" : $"{(ai.Provider == "ollama" ? "Ollama" : ai.Provider == "llamacpp" ? "Aqua's runtime" : "OpenAI-compatible")} {ai.Version} · {ai.Endpoint}";
         _vm.PauseLabel = Hub.Core.Llm.UserPaused ? "Resume AI" : "Pause AI";
         _vm.TokensPerSecond = stats.LastTokensPerSecond > 0 ? $"{stats.LastTokensPerSecond:0} tok/s" : "—";
         _vm.Calls = stats.Calls.ToString();
@@ -306,7 +306,8 @@ public partial class SystemPage : UserControl, IPage
 
     private void OnTool(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string id } && !MaintenanceTools.Open(id))
+        if (sender is FrameworkElement { Tag: string id } && !MaintenanceTools.Open(id,
+                runAsAdmin: (Keyboard.Modifiers & ModifierKeys.Shift) != 0))
             SetStatusFor(id);
     }
 
@@ -330,7 +331,7 @@ public partial class SystemPage : UserControl, IPage
     }
 
     private void OnGraphicsSettings(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl("ms-settings:display-advancedgraphics", allowAppProtocols: true);
-    private void OnGetOllama(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl("https://ollama.com/download");
+    private void OnAiSettings(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "ai");
 
     // ───────────── Storage ─────────────
 

@@ -79,6 +79,7 @@ public interface IAskHost
     void Status(string text);
     /// <summary>Adds a step to the answer's activity list; returns its id.</summary>
     int StepStarted(string icon, string text);
+    /// <summary>Completes an activity. Empty text removes a transient step with nothing useful to report.</summary>
     void StepFinished(int id, string text, bool ok = true, string? url = null);
     void Thinking(string delta);
     void Text(string delta);

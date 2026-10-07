@@ -31,7 +31,7 @@ public sealed class WatchRowVM : System.ComponentModel.IDataErrorInfo
         _cost = Numbers.Format(w.CostBasis, culture);
         _above = Numbers.Format(w.AlertAbove, culture);
         _below = Numbers.Format(w.AlertBelow, culture);
-        Currencies = new[] { new CurrencyOption("", priceCurrency.Length > 0 ? priceCurrency : "Same as price") }
+        Currencies = new[] { new CurrencyOption("", priceCurrency.Length > 0 ? priceCurrency : "Currency unavailable") }
             .Concat(new[] { baseCurrency, w.CostCurrency }.Concat(CommonCurrencies)
                 .Where(c => c.Length == 3 && c != priceCurrency)
                 .Distinct(StringComparer.OrdinalIgnoreCase)

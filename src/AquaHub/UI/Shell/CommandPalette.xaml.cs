@@ -192,7 +192,7 @@ public partial class CommandPalette : Window
         {
             ("today", "Today", "home"), ("news", "News", "news"), ("social", "Social pulse", "social"), ("markets", "Markets", "markets"),
             ("upcoming", "Upcoming & predictions", "upcoming"), ("system", "This PC", "system"), ("launchpad", "Launchpad", "launchpad"),
-            ("ask", "Ask Aqua", "ask"), ("workbench", "Workbench", "wand"), ("agents", "Agents", "agents"), ("settings", "Settings", "settings"),
+            ("ask", "Ask Aqua", "ask"), ("workbench", "Workbench", "wand"), ("agents", "Agents", "agents"), ("models", "Models", "cube"), ("settings", "Settings", "settings"),
         };
         foreach (var (id, name, icon) in pages)
             all.Add(new PaletteItem { Title = name, Subtitle = "Go to page", Icon = icon, Hint = "Page", Keywords = "go show page " + id, Run = () => { Hub.Windows.ShowMain(id); return Task.CompletedTask; } });
@@ -202,7 +202,7 @@ public partial class CommandPalette : Window
             all.Add(new PaletteItem
             {
                 Title = $"{w.Name} ({w.Symbol})",
-                Subtitle = quote is null ? "Open in Markets" : $"{ViewModels.Fmt.Price(quote.Price, quote.Currency)}  {ViewModels.Fmt.Pct(quote.ChangePercent)}",
+                Subtitle = quote is null ? "Open in Markets" : $"{ViewModels.Fmt.QuotePrice(quote)}  {ViewModels.Fmt.Pct(quote.ChangePercent)}",
                 Icon = "markets", Hint = "Ticker", Keywords = "stock quote " + w.Symbol,
                 Run = () => { Hub.Windows.ShowMain("markets", w.Symbol); return Task.CompletedTask; },
             });

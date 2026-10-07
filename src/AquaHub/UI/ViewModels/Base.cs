@@ -60,15 +60,30 @@ public static class Fmt
             "GBP" => "£" + s,
             "GBp" => s + "p",
             "" => s,
-            _ => s,
+            _ => s + " " + currency,
         };
     }
+
+    /// <summary>Formats a quoted market price without inventing a unit when the source omitted its currency.</summary>
+    public static string QuotePrice(Quote quote, double? value = null)
+    {
+        var amount = value ?? quote.Price;
+        var currencyRequired = quote.Kind is not (InstrumentKind.Index or InstrumentKind.Fx);
+        if (!currencyRequired) return Price(amount);
+        return PriceWithCurrencyStatus(amount, quote.Currency);
+    }
+
+    public static string PriceWithCurrencyStatus(double value, string? currency) =>
+        string.IsNullOrWhiteSpace(currency) ? Price(value) + " (currency unavailable)" : Price(value, currency.Trim());
 
     /// <summary>
     /// One price in full, for hover read-outs: always cents (€234.56, $6,512.30), four decimals below 1, pence for GBp,
     /// and the currency code for currencies without a symbol here.
     /// </summary>
     public static string PriceExact(double v, string currency = "") => Core.Util.Money.Exact(v, currency, C);
+
+    public static string PriceExactWithCurrencyStatus(double value, string? currency) =>
+        string.IsNullOrWhiteSpace(currency) ? PriceExact(value) + " (currency unavailable)" : PriceExact(value, currency.Trim());
 
     public static string Pct(double v, int decimals = 2) => (v >= 0 ? "+" : "−") + Math.Abs(v).ToString("N" + decimals, C) + "%";
     public static string Signed(double v, int decimals = 2) => (v >= 0 ? "+" : "−") + Math.Abs(v).ToString("N" + decimals, C);

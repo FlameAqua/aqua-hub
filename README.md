@@ -122,8 +122,8 @@ The local model runs in Ollama's own process (qwen3.5:9b ≈ 6–7 GB of VRAM wh
 after 10 idle minutes, and *Free VRAM* or the Game mode scene unloads it at once).
 
 Aqua can also run models itself (provider `llamacpp`, Phase 4): a pinned llama.cpp build matched to your card, using
-the models Ollama has already downloaded (read in place) or GGUF files from Hugging Face, with one model on the
-graphics card at a time and background ones on the processor.
+the models Ollama has already downloaded (read in place) or GGUF files from Hugging Face. Generation uses one model
+on the graphics card at a time; interactive requests take priority over background analysis.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Requirements

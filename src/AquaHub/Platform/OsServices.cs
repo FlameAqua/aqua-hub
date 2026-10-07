@@ -11,7 +11,7 @@ namespace AquaHub.Platform;
 /// <summary>One running instance per user; later launches signal the first one and exit.</summary>
 public sealed class SingleInstance : IDisposable
 {
-    public static readonly string[] Pages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "settings" };
+    public static readonly string[] Pages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "models", "settings" };
 
     /// <summary>What a second launch can ask the running instance to do (`--page markets` becomes "page-markets").</summary>
     public static readonly string[] Commands = new[] { "activate", "flyout", "palette", "tray-menu", "read-brief", "quit" }

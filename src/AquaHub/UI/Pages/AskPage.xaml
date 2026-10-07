@@ -94,15 +94,20 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <!-- Your question: selectable text you can copy -->
-        <Style x:Key="QuestionText" TargetType="TextBox" BasedOn="{StaticResource ReadOnlyText}">
-            <Setter Property="Foreground" Value="{DynamicResource B.Text}"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
-        </Style>
     </UserControl.Resources>
 
-    <Grid Margin="24,26,28,24">
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Border Margin="24,16,28,0" BorderBrush="{DynamicResource B.Divider}" BorderThickness="0,0,0,1" Padding="0,0,0,12">
+        <StackPanel Orientation="Horizontal">
+          <ToggleButton x:Name="ChatTab" Content="Chat" Style="{StaticResource Chip}" IsChecked="True" Click="OnAskTab" Checked="OnAskTab" Tag="chat" Padding="18,7" Margin="0,0,8,0" AutomationProperties.AutomationId="ask-tab-chat"/>
+          <ToggleButton x:Name="ImageTab" Content="Image Gen" Style="{StaticResource Chip}" Click="OnAskTab" Checked="OnAskTab" Tag="images" Padding="18,7" Margin="0,0,8,0" AutomationProperties.AutomationId="ask-tab-images"/>
+          <ToggleButton x:Name="RoleplayTab" Content="Roleplay" Style="{StaticResource Chip}" Click="OnAskTab" Checked="OnAskTab" Tag="roleplay" Padding="18,7" AutomationProperties.AutomationId="ask-tab-roleplay"/>
+        </StackPanel>
+      </Border>
+      <ContentControl x:Name="ImageTabHost" Grid.Row="1" Visibility="Collapsed"/>
+      <ContentControl x:Name="RoleplayTabHost" Grid.Row="1" Visibility="Collapsed"/>
+    <Grid x:Name="ChatSurface" Grid.Row="1" Margin="24,20,28,24">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
@@ -230,7 +235,20 @@
                     <c:Icon Kind="message" Width="16" Height="16"/>
                 </Button>
                 <StackPanel Grid.Column="1">
-                    <TextBlock x:Name="PageTitle" Text="Ask Aqua" Style="{StaticResource T.Title}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="PageTitle" Text="Ask Aqua" Style="{StaticResource T.Title}" TextTrimming="CharacterEllipsis"
+                               AutomationProperties.AutomationId="ask-chat-title" ToolTip="Right-click to rename this chat">
+                        <TextBlock.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Rename this chat…" Click="OnRenameCurrentChat"/>
+                            </ContextMenu>
+                        </TextBlock.ContextMenu>
+                    </TextBlock>
+                    <StackPanel x:Name="PageTitleEditor" Orientation="Horizontal" Visibility="Collapsed">
+                        <TextBox x:Name="PageTitleEdit" MinWidth="240" MaxWidth="520" TextWrapping="NoWrap" Text="" AutomationProperties.AutomationId="ask-chat-title-edit" AutomationProperties.Name="Chat name"
+                                 IsVisibleChanged="OnCurrentTitleEditVisible" KeyDown="OnCurrentTitleKeyDown"/>
+                        <Button Style="{StaticResource Btn.Accent}" Padding="10,4" Margin="6,0,0,0" Content="Save" Click="OnSaveCurrentTitle"/>
+                        <Button Style="{StaticResource Btn.Standard}" Padding="10,4" Margin="4,0,0,0" Content="Cancel" Click="OnCancelCurrentTitle"/>
+                    </StackPanel>
                     <!-- Wraps on a narrow window, so "Turn on local AI" moves to the next line instead of off the edge -->
                     <WrapPanel Margin="0,4,0,0">
                         <TextBlock x:Name="Subtitle" Style="{StaticResource T.Body2}" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="700" Margin="0,0,6,0"/>
@@ -325,16 +343,9 @@
                                                 <MenuItem Header="Edit and ask again" Command="{Binding EditCommand}"/>
                                             </ContextMenu>
                                         </Border.ContextMenu>
-                                        <TextBox Style="{StaticResource QuestionText}" Text="{Binding Text, Mode=OneWay}" AutomationProperties.AutomationId="ask-question"
-                                                 AutomationProperties.Name="Your question">
-                                            <TextBox.ContextMenu>
-                                                <ContextMenu>
-                                                    <MenuItem Command="ApplicationCommands.Copy" Header="Copy selection"/>
-                                                    <MenuItem Header="Copy the whole question" Command="{Binding CopyCommand}"/>
-                                                    <MenuItem Header="Edit and ask again" Command="{Binding EditCommand}"/>
-                                                </ContextMenu>
-                                            </TextBox.ContextMenu>
-                                        </TextBox>
+                                        <!-- Render Markdown while keeping the original question string on the VM for editing and copying. -->
+                                        <c:MarkdownView Markdown="{Binding Text}" FontSize="14" MaxWidth="632" ContextMenu="{x:Null}"
+                                                        AutomationProperties.AutomationId="ask-question" AutomationProperties.Name="Your question"/>
                                     </Border>
                                     <!-- Editing in place -->
                                     <Border CornerRadius="14" Background="{DynamicResource B.CardInner}" BorderBrush="{DynamicResource B.Accent}" BorderThickness="1" Padding="10"
@@ -538,6 +549,10 @@
                                                     <Button Style="{StaticResource MsgAction}" Command="{Binding RetryCommand}" ToolTip="Ask again" Visibility="{Binding Question, Converter={StaticResource Vis}}">
                                                         <c:Icon Kind="refresh" Width="13" Height="13"/>
                                                     </Button>
+                                                    <Button Style="{StaticResource MsgAction}" Command="{Binding RetryWithGuidanceCommand}" ToolTip="Regenerate with extra guidance"
+                                                            Visibility="{Binding Question, Converter={StaticResource Vis}}">
+                                                        <c:Icon Kind="edit" Width="13" Height="13"/>
+                                                    </Button>
                                                     <Button Style="{StaticResource Btn.Link}" Command="{Binding DeeperCommand}" FontSize="12" Padding="6,2" Visibility="{Binding Question, Converter={StaticResource Vis}}"
                                                             ToolTip="Research it: several searches and a cited report">
                                                         <StackPanel Orientation="Horizontal"><c:Icon Kind="research" Width="12" Height="12"/><TextBlock Text="Dig deeper" Margin="5,0,0,0"/></StackPanel>
@@ -549,6 +564,19 @@
                                                             ToolTip="It wasn't something to remember: answer it as a question"/>
                                                 </StackPanel>
                                             </Grid>
+                                            <Border Margin="0,8,0,0" Padding="10" CornerRadius="10" Background="{DynamicResource B.CardInner}"
+                                                    Visibility="{Binding IsGuidanceEditing, Converter={StaticResource Vis}}">
+                                                <StackPanel>
+                                                    <TextBlock Text="What should Aqua change or take into account?" FontSize="12.5" Margin="0,0,0,6"/>
+                                                    <TextBox Text="{Binding RetryGuidance, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
+                                                             MinHeight="54" MaxHeight="120" VerticalScrollBarVisibility="Auto"
+                                                             AutomationProperties.Name="Extra guidance for regenerating the answer" IsVisibleChanged="OnGuidanceBoxVisible"/>
+                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,7,0,0">
+                                                        <Button Style="{StaticResource Btn.Standard}" Padding="10,4" Margin="0,0,6,0" Content="Cancel" Command="{Binding CancelGuidedRetryCommand}"/>
+                                                        <Button Style="{StaticResource Btn.Accent}" Padding="10,4" Content="Regenerate" Command="{Binding SubmitGuidedRetryCommand}"/>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Border>
                                         </StackPanel>
                                     </Border>
                                 </Grid>
@@ -806,5 +834,6 @@
                            AutomationProperties.AutomationId="ask-notes-status"/>
             </Grid>
         </c:GroupBorder>
+    </Grid>
     </Grid>
 </UserControl>

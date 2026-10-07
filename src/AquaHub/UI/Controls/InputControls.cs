@@ -7,8 +7,8 @@ namespace AquaHub.UI.Controls;
 
 /// <summary>
 /// Records a shortcut for any app: click it and press the keys (e.g. Ctrl+Alt+H) instead of typing their names.
-/// Esc puts back what was there, Backspace or Delete leaves it empty (no shortcut), Tab still moves focus. Keys that
-/// <see cref="Check"/> refuses aren't taken; <see cref="Problem"/> says why.
+/// Plain Esc puts back what was there; plain Backspace or Delete leaves it empty; plain Tab still moves focus. Modified
+/// versions can be recorded as shortcuts. Keys that <see cref="Check"/> refuses aren't taken; <see cref="Problem"/> says why.
 /// </summary>
 public sealed class HotkeyBox : TextBox
 {
@@ -29,7 +29,7 @@ public sealed class HotkeyBox : TextBox
         IsReadOnlyCaretVisible = false;
         Cursor = Cursors.Hand;
         UiProps.SetPlaceholder(this, "Press a shortcut…");
-        ToolTip = "Click, then press the keys. Esc cancels, Backspace clears.";
+        ToolTip = "Click, then press a keyboard shortcut. Global shortcuts are keyboard-only; Windows doesn't register mouse buttons as system-wide hotkeys. Esc cancels, Backspace clears.";
     }
 
     public string DefaultGesture { get => (string)GetValue(DefaultGestureProperty); set => SetValue(DefaultGestureProperty, value); }
@@ -57,17 +57,21 @@ public sealed class HotkeyBox : TextBox
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        if (key == Key.Tab) return;
+        var modifiers = Keyboard.Modifiers;
+        var win = Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin);
+        var anyModifier = modifiers != ModifierKeys.None || win;
+        var globalModifier = (modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0 || win;
+        if (key == Key.Tab && !globalModifier) return;
         e.Handled = true;
         _down.Add(key);
         switch (key)
         {
-            case Key.Escape:
+            case Key.Escape when !anyModifier:
                 Problem?.Invoke(null);
                 Commit(_before);
                 MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
                 return;
-            case Key.Back or Key.Delete:
+            case Key.Back or Key.Delete when !anyModifier:
                 Problem?.Invoke(null);
                 Commit("");
                 return;
@@ -137,6 +141,42 @@ public sealed class HotkeyBox : TextBox
         >= Key.F1 and <= Key.F24 => k.ToString(),
         Key.Space => "Space",
         Key.Enter => "Enter",
+        Key.Escape => "Escape",
+        Key.Tab => "Tab",
+        Key.Home => "Home",
+        Key.End => "End",
+        Key.Prior => "PageUp",
+        Key.Next => "PageDown",
+        Key.Left => "Left",
+        Key.Up => "Up",
+        Key.Right => "Right",
+        Key.Down => "Down",
+        Key.Insert => "Insert",
+        Key.Delete => "Delete",
+        Key.Back => "Backspace",
+        >= Key.NumPad0 and <= Key.NumPad9 => "NumPad" + ((int)(k - Key.NumPad0)).ToString(CultureInfo.InvariantCulture),
+        Key.Add => "NumPadAdd",
+        Key.Subtract => "NumPadSubtract",
+        Key.Multiply => "NumPadMultiply",
+        Key.Divide => "NumPadDivide",
+        Key.Decimal => "NumPadDecimal",
+        Key.Separator => "NumPadSeparator",
+        Key.NumLock => "NumLock",
+        Key.PrintScreen => "PrintScreen",
+        Key.Scroll => "ScrollLock",
+        Key.Pause => "Pause",
+        Key.Oem1 => "Semicolon",
+        Key.OemPlus => "Equal",
+        Key.OemComma => "Comma",
+        Key.OemMinus => "Minus",
+        Key.OemPeriod => "Period",
+        Key.OemQuestion => "Slash",
+        Key.Oem3 => "Tilde",
+        Key.Oem4 => "OpenBracket",
+        Key.Oem5 => "Backslash",
+        Key.Oem6 => "CloseBracket",
+        Key.Oem7 => "Quote",
+        Key.Oem102 => "IntlBackslash",
         _ => null,
     };
 }

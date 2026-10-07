@@ -1,0 +1,124 @@
+<UserControl x:Class="AquaHub.UI.Controls.ImageGenerationPanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:AquaHub.UI.Controls" xmlns:ui="clr-namespace:AquaHub.UI"
+ AutomationProperties.AutomationId="image-studio" Loaded="OnLoaded" Unloaded="OnUnloaded" SizeChanged="OnResize">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <StackPanel Margin="28,24,28,32" MaxWidth="1440">
+   <DockPanel Margin="0,0,0,20">
+    <Button x:Name="StartServer" DockPanel.Dock="Right" Content="Start ComfyUI" Click="OnStartServer" Style="{StaticResource Btn.Standard}" VerticalAlignment="Top" Margin="12,0,0,0" AutomationProperties.AutomationId="image-start-server"/>
+    <StackPanel><TextBlock Text="Imagine something." Style="{StaticResource T.Title}"/>
+     <TextBlock Text="A private canvas, powered by your GPU." Style="{StaticResource T.Body2}" Margin="0,5,0,0"/>
+    </StackPanel>
+   </DockPanel>
+   <Grid x:Name="Workspace">
+    <Grid.ColumnDefinitions><ColumnDefinition x:Name="FormColumn" Width="330"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel x:Name="Form" Margin="0,0,24,0">
+     <TextBlock Text="YOUR PROMPT" Style="{StaticResource T.Overline}" Margin="0,0,0,8"/>
+     <TextBox x:Name="Prompt" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="170" MaxLength="4000"
+      Padding="12" VerticalContentAlignment="Top" ui:UiProps.Placeholder="Describe your image…" TextChanged="OnPromptChanged"
+      AutomationProperties.AutomationId="image-prompt" AutomationProperties.Name="Image prompt"/>
+     <Border x:Name="ReferenceBanner" Background="{DynamicResource B.AccentSoft}" CornerRadius="6" Padding="10" Margin="0,8,0,0" Visibility="Collapsed">
+      <DockPanel><Button Content="Clear" Click="OnClearReference" DockPanel.Dock="Right" Style="{StaticResource Btn.Link}" AutomationProperties.AutomationId="image-clear-reference"/>
+       <TextBlock Text="Editing with a reference image. Describe what should change." TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,0,8,0"/></DockPanel>
+     </Border>
+     <TextBlock Text="Start with an idea" Style="{StaticResource T.Caption}" Margin="0,10,0,5"/>
+     <WrapPanel>
+      <Button Content="Coastal light" Click="OnExample" Tag="A quiet Atlantic coastline at blue hour, a small white lighthouse on weathered cliffs, sea spray catching the last light, cinematic landscape photography, natural colours" Style="{StaticResource Btn.Standard}" FontSize="12" Padding="10,5" Margin="0,0,6,6"/>
+      <Button Content="Paper worlds" Click="OnExample" Tag="A tiny botanical garden made entirely of layered paper, delicate leaves and miniature glasshouses, soft studio lighting, intricate editorial illustration, warm cream background" Style="{StaticResource Btn.Standard}" FontSize="12" Padding="10,5" Margin="0,0,6,6"/>
+     </WrapPanel>
+     <TextBlock Text="Canvas" Style="{StaticResource T.CardTitle}" Margin="0,16,0,7"/>
+     <ComboBox x:Name="Aspect" SelectedIndex="0" AutomationProperties.AutomationId="image-aspect" AutomationProperties.Name="Canvas size">
+      <ComboBoxItem Content="Square · 1024 × 1024" Tag="1024,1024"/>
+      <ComboBoxItem Content="Landscape · 1216 × 832" Tag="1216,832"/>
+      <ComboBoxItem Content="Portrait · 832 × 1216" Tag="832,1216"/>
+     </ComboBox>
+     <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <StackPanel Margin="0,0,10,0"><TextBlock Text="Quality" Style="{StaticResource T.CardTitle}" Margin="0,0,0,7"/>
+       <ComboBox x:Name="Quality" SelectedIndex="1" AutomationProperties.Name="Sampling quality">
+        <ComboBoxItem Content="Draft (20)" Tag="20"/><ComboBoxItem Content="Standard (35)" Tag="35"/><ComboBoxItem Content="Fine (50)" Tag="50"/>
+       </ComboBox>
+      </StackPanel>
+      <StackPanel Grid.Column="1"><TextBlock Text="Seed" Style="{StaticResource T.CardTitle}" Margin="0,0,0,7"/>
+       <TextBox x:Name="Seed" ui:UiProps.Placeholder="Random" MaxLength="16" AutomationProperties.Name="Image seed" ToolTip="Leave blank for a new composition, or reuse a seed to reproduce an image."/>
+      </StackPanel>
+     </Grid>
+     <TextBlock x:Name="QualityHint" Text="Klein Base · more detail and variation, at a gentler pace." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,10,0,16"/>
+     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <Button x:Name="Generate" Content="Generate image" Click="OnGenerate" Style="{StaticResource Btn.Accent}" Padding="18,10" AutomationProperties.AutomationId="image-generate"/>
+      <Button x:Name="Cancel" Grid.Column="1" Content="Cancel" Click="OnCancel" Style="{StaticResource Btn.Standard}" Margin="8,0,0,0" Visibility="Collapsed" AutomationProperties.AutomationId="image-cancel"/>
+     </Grid>
+     <ProgressBar x:Name="Progress" IsIndeterminate="True" Height="3" Margin="0,12,0,0" Visibility="Collapsed" AutomationProperties.Name="Image generation progress"/>
+     <TextBlock x:Name="Status" Text="Connect your local image server below to get started." Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,10,0,8" AutomationProperties.AutomationId="image-status" AutomationProperties.LiveSetting="Polite"/>
+     <Button x:Name="Recover" Content="Check GPU release" Click="OnRecover" Style="{StaticResource Btn.Standard}" Visibility="Collapsed" Margin="0,0,0,10" AutomationProperties.AutomationId="image-recover"/>
+     <TextBlock Text="Images are saved locally. Set their expiry below; export a copy to keep it." Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
+    </StackPanel>
+    <StackPanel x:Name="PreviewColumn" Grid.Column="1">
+     <Border Background="{DynamicResource B.Subtle}" BorderBrush="{DynamicResource B.Divider}" BorderThickness="1" CornerRadius="16" Height="460" Padding="16">
+      <Grid>
+       <Image x:Name="Preview" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="Generated image"/>
+       <StackPanel x:Name="EmptyCanvas" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="330">
+        <c:Icon Kind="image" Width="44" Height="44" Foreground="{DynamicResource B.Accent}" HorizontalAlignment="Center" Margin="0,0,0,18"/>
+        <TextBlock Text="From a thought to a frame." FontSize="20" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"/>
+        <TextBlock Text="Your next creation appears here. Try a scene, an illustration, or an entirely new world." Style="{StaticResource T.Body2}" TextAlignment="Center" Margin="10,10,10,0"/>
+       </StackPanel>
+      </Grid>
+     </Border>
+     <WrapPanel Margin="0,12,0,0">
+      <Button x:Name="Regenerate" Content="Regenerate" Click="OnRegenerate" Style="{StaticResource Btn.Standard}" IsEnabled="False" Margin="0,0,6,6" ToolTip="Use this image's prompt and settings with a fresh seed." AutomationProperties.AutomationId="image-regenerate"/>
+      <Button x:Name="EditImage" Content="Edit image" Click="OnEditImage" Style="{StaticResource Btn.Standard}" IsEnabled="False" Margin="0,0,6,6" AutomationProperties.AutomationId="image-edit"/>
+      <Button x:Name="SaveImage" Content="Save as…" Click="OnSave" Style="{StaticResource Btn.Standard}" IsEnabled="False" Margin="6,0,0,6" AutomationProperties.AutomationId="image-save"/>
+      <Button x:Name="OpenImage" Content="View full size" Click="OnOpen" Style="{StaticResource Btn.Standard}" IsEnabled="False" Margin="6,0,0,6"/>
+      <Button x:Name="DeleteImage" Content="Delete" Click="OnDelete" Style="{StaticResource Btn.Standard}" IsEnabled="False" Margin="6,0,0,6" AutomationProperties.AutomationId="image-delete"/>
+     </WrapPanel>
+     <Border x:Name="DeleteConfirmation" Visibility="Collapsed" Background="{DynamicResource B.Subtle}" CornerRadius="6" Padding="12" Margin="0,6,0,10">
+      <StackPanel><TextBlock Text="Permanently delete this image and its saved settings? Exported copies are kept." TextWrapping="Wrap" Style="{StaticResource T.Body2}"/>
+       <WrapPanel Margin="0,8,0,0"><Button Content="Delete permanently" Click="OnConfirmDelete" Style="{StaticResource Btn.Standard}" AutomationProperties.AutomationId="image-confirm-delete"/>
+        <Button Content="Cancel" Click="OnCancelDelete" Style="{StaticResource Btn.Link}" Margin="12,0,0,0"/></WrapPanel></StackPanel>
+     </Border>
+     <TextBlock x:Name="ImageDetails" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,8,6"/>
+     <TextBlock Text="RECENT CREATIONS" Style="{StaticResource T.Overline}" Margin="0,18,0,8"/>
+     <ItemsControl x:Name="Gallery" AutomationProperties.AutomationId="image-gallery"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate><DataTemplate><Button Style="{StaticResource Btn.Standard}" Click="OnGallery" Padding="3" Margin="0,0,8,8" ToolTip="{Binding Item.Prompt}" AutomationProperties.Name="{Binding Item.Prompt}">
+       <Image Source="{Binding Thumbnail}" Width="68" Height="68" Stretch="UniformToFill"/>
+      </Button></DataTemplate></ItemsControl.ItemTemplate>
+     </ItemsControl>
+     <WrapPanel Margin="0,8,0,0"><Button Content="Open image folder" Click="OnFolder" Style="{StaticResource Btn.Standard}" Margin="0,0,16,8" AutomationProperties.AutomationId="image-folder"/>
+      <TextBlock Text="Keep images" VerticalAlignment="Center" Margin="0,0,8,8"/>
+      <ComboBox x:Name="Retention" SelectionChanged="OnRetention" MinWidth="130" Margin="0,0,0,8" AutomationProperties.AutomationId="image-retention" AutomationProperties.Name="Image expiry">
+       <ComboBoxItem Content="1 day" Tag="1"/><ComboBoxItem Content="7 days" Tag="7"/><ComboBoxItem Content="30 days" Tag="30"/><ComboBoxItem Content="90 days" Tag="90"/><ComboBoxItem Content="Keep forever" Tag="0"/>
+      </ComboBox>
+     </WrapPanel>
+     <TextBlock x:Name="RetentionHint" Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
+    </StackPanel>
+   </Grid>
+   <Expander x:Name="Setup" Header="Local image server &amp; models" IsExpanded="True" Margin="0,24,0,0" Foreground="{DynamicResource B.Text}" AutomationProperties.AutomationId="image-setup">
+    <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+     <StackPanel x:Name="SetupFields">
+      <TextBlock Text="Connect ComfyUI" Style="{StaticResource T.Subtitle}"/>
+      <TextBlock Text="Choose your ComfyUI launcher once, then use Start ComfyUI above. Aqua sends each workflow directly." Style="{StaticResource T.Body2}" Margin="0,5,0,12"/>
+      <DockPanel Margin="0,0,0,10"><Button Content="Choose launcher…" Click="OnChooseLauncher" DockPanel.Dock="Right" Style="{StaticResource Btn.Standard}" Margin="10,0,0,0" AutomationProperties.AutomationId="image-choose-launcher"/>
+       <TextBlock x:Name="LauncherLabel" Text="ComfyUI.exe or run_nvidia_gpu.bat" Style="{StaticResource T.Caption}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel>
+      <DockPanel><Button x:Name="Check" Content="Check connection" Click="OnCheck" Style="{StaticResource Btn.Standard}" DockPanel.Dock="Right" Margin="10,0,0,0" AutomationProperties.AutomationId="image-check"/>
+       <TextBox x:Name="Endpoint" Text="http://127.0.0.1:8188" AutomationProperties.Name="Local ComfyUI address" AutomationProperties.AutomationId="image-endpoint"/>
+      </DockPanel>
+      <c:FlowGrid MaxColumns="3" MinColumnWidth="220" Gap="12" Margin="0,14,0,0">
+       <StackPanel><TextBlock Text="Diffusion model" Style="{StaticResource T.CardTitle}" Margin="0,0,0,7"/><ComboBox x:Name="Diffusion" FontSize="12" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}" AutomationProperties.AutomationId="image-diffusion" AutomationProperties.Name="Diffusion model"/></StackPanel>
+       <StackPanel><TextBlock Text="Text encoder" Style="{StaticResource T.CardTitle}" Margin="0,0,0,7"/><ComboBox x:Name="Encoder" FontSize="12" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}" AutomationProperties.AutomationId="image-encoder" AutomationProperties.Name="Text encoder"/></StackPanel>
+       <StackPanel><TextBlock Text="VAE" Style="{StaticResource T.CardTitle}" Margin="0,0,0,7"/><ComboBox x:Name="Vae" FontSize="12" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}" AutomationProperties.AutomationId="image-vae" AutomationProperties.Name="Image decoder"/></StackPanel>
+      </c:FlowGrid>
+      <WrapPanel Margin="0,14,0,0"><TextBlock Text="Model family" VerticalAlignment="Center" Margin="0,0,10,0"/>
+       <ComboBox x:Name="Variant" SelectedIndex="0" SelectionChanged="OnVariant" MinWidth="220" AutomationProperties.AutomationId="image-variant" AutomationProperties.Name="Image model family"><ComboBoxItem Content="Klein Base 4B · quality" Tag="base"/><ComboBoxItem Content="Klein 4B · fast, 4 steps" Tag="distilled"/></ComboBox>
+       <Button Content="Download guide" Click="OnGuide" Style="{StaticResource Btn.Link}" Margin="16,0,0,0"/>
+      </WrapPanel>
+      <DockPanel Margin="0,14,0,0"><Button Content="Choose output folder…" Click="OnChooseOutput" DockPanel.Dock="Right" Style="{StaticResource Btn.Standard}" Margin="10,0,0,0" AutomationProperties.AutomationId="image-choose-output"/>
+       <StackPanel><TextBlock Text="ComfyUI output folder" Style="{StaticResource T.CardTitle}"/><TextBlock x:Name="OutputLabel" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/></StackPanel></DockPanel>
+      <TextBlock Text="Deletion and expiry also remove Aqua's tracked copies from this folder. Other ComfyUI images and exported copies are kept." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+      <TextBlock Text="Aqua gives image generation exclusive use of its GPU queue, then releases image-model memory before chat resumes. Other applications manage their own GPU usage." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+     </StackPanel>
+    </Border>
+   </Expander>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>

@@ -195,7 +195,7 @@ public sealed class QuoteVM
     {
         Symbol = q.Symbol;
         Name = q.Name;
-        PriceText = Fmt.Price(q.Price, q.Kind is InstrumentKind.Index or InstrumentKind.Fx ? "" : q.Currency);
+        PriceText = Fmt.QuotePrice(q);
         ChangeText = Fmt.Pct(q.ChangePercent);
         AbsChangeText = Fmt.Signed(q.Change, q.Price >= 1000 ? 0 : 2);
         ChangeBrush = Fmt.UpDown(q.ChangePercent);
@@ -214,7 +214,7 @@ public sealed class QuoteVM
         StanceBrush = Fmt.StanceBrush(insight?.Stance ?? "");
         StanceSoft = Fmt.StanceSoft(insight?.Stance ?? "");
         Kind = q.Kind;
-        if (shares is > 0) HoldingText = Fmt.Price(q.Price * shares.Value, q.Currency);
+        if (shares is > 0) HoldingText = Fmt.PriceWithCurrencyStatus(q.Price * shares.Value, q.Currency);
         OpenCommand = new RelayCommand(() => Hub.Windows.ShowMain("markets", Symbol));
     }
 

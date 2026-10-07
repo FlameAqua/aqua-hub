@@ -594,8 +594,8 @@ public sealed class A11_SettingsTests : E2ETestBase
     {
         Section("AI & models");
         Flip("Settings AI", "Use local AI", "ai.enabled");
-        Combo("Settings AI", Field("Model server", ControlType.ComboBox), "OpenAI-compatible", "ai.provider", "openai");
-        Combo("Settings AI", Field("Model server", ControlType.ComboBox), "Ollama", "ai.provider", "ollama");
+        Combo("Settings AI", Field("AI provider", ControlType.ComboBox), "OpenAI-compatible server", "ai.provider", "openai");
+        Combo("Settings AI", Field("AI provider", ControlType.ComboBox), "Ollama", "ai.provider", "ollama");
         Check("Settings AI", "Model combo lists installed models → ai.model", () =>
         {
             var combo = Ui.WaitFind(Page, Ui.Id("ModelCombo"), "model combo");

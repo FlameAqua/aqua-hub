@@ -1,0 +1,119 @@
+<UserControl x:Class="AquaHub.UI.Pages.ModelsPage"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:AquaHub.UI.Controls" xmlns:ui="clr-namespace:AquaHub.UI">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.AutomationId="models-page">
+  <StackPanel Margin="32,26,32,36" MaxWidth="1560">
+   <DockPanel Margin="0,0,0,22">
+    <Button DockPanel.Dock="Right" Content="AI settings" Style="{StaticResource Btn.Standard}" Click="OnSettings" VerticalAlignment="Top" Margin="16,0,0,0"/>
+    <StackPanel><TextBlock Text="Models" Style="{StaticResource T.Title}"/>
+     <TextBlock Text="Your intelligence, on your PC." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
+    </StackPanel>
+   </DockPanel>
+   <c:GroupBorder Style="{StaticResource Card}" Background="{DynamicResource B.AccentSoft}" Margin="0,0,0,22" AutomationProperties.Name="Local AI hardware">
+    <StackPanel>
+     <TextBlock Text="LOCAL AI" Style="{StaticResource T.Overline}" Foreground="{DynamicResource B.AccentText}"/>
+     <TextBlock x:Name="HardwareText" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,6,0,4"/>
+     <TextBlock x:Name="ProviderText" Style="{StaticResource T.Body2}" TextWrapping="Wrap"/>
+    </StackPanel>
+   </c:GroupBorder>
+   <TextBlock Text="A model for each job" Style="{StaticResource T.Subtitle}" Margin="0,0,0,10"/>
+   <ItemsControl x:Name="Roles" Margin="0,0,0,24">
+    <ItemsControl.ItemsPanel><ItemsPanelTemplate><c:FlowGrid MaxColumns="4" MinColumnWidth="225" Gap="12"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate><DataTemplate>
+     <Border Style="{StaticResource Card}" Padding="16">
+      <StackPanel><TextBlock Text="{Binding Title}" Style="{StaticResource T.CardTitle}"/>
+       <TextBlock Text="{Binding Hint}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" MinHeight="38" Margin="0,6,0,10"/>
+       <ComboBox ItemsSource="{Binding Choices}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SelectedId, Mode=OneWay}" SelectionChanged="OnRoleChanged"
+        AutomationProperties.AutomationId="{Binding AutomationId}" AutomationProperties.Name="{Binding Title}"/>
+      </StackPanel>
+     </Border>
+    </DataTemplate></ItemsControl.ItemTemplate>
+   </ItemsControl>
+   <DockPanel Margin="0,0,0,10">
+    <Button x:Name="RefreshButton" DockPanel.Dock="Right" Content="Refresh library" Click="OnRefresh" Style="{StaticResource Btn.Standard}" AutomationProperties.AutomationId="models-refresh"/>
+    <StackPanel><TextBlock Text="Your library" Style="{StaticResource T.Subtitle}"/><TextBlock x:Name="LibraryCount" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis" Margin="0,3,12,0"/></StackPanel>
+   </DockPanel>
+   <TextBlock x:Name="LibraryError" Foreground="{DynamicResource B.Down}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+   <Border x:Name="EmptyLibrary" Style="{StaticResource Card}" Margin="0,0,0,10">
+    <StackPanel><TextBlock Text="Make room for a little intelligence." Style="{StaticResource T.CardTitle}"/>
+     <TextBlock Text="Download a suggestion below, or include the models you already have in Ollama from AI settings." Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+    </StackPanel>
+   </Border>
+   <ItemsControl x:Name="Library" AutomationProperties.AutomationId="models-list">
+    <ItemsControl.ItemTemplate><DataTemplate>
+     <Border Style="{StaticResource Card}" Margin="0,0,0,10">
+      <StackPanel>
+       <WrapPanel><TextBlock Text="{Binding Model.Name}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,12,6"/>
+        <Border Style="{StaticResource Pill}" Margin="0,0,0,6"><TextBlock Text="{Binding Model.Source}" FontSize="11"/></Border>
+       </WrapPanel>
+       <TextBlock Text="{Binding Detail}" Style="{StaticResource T.Caption}"/>
+       <ItemsControl ItemsSource="{Binding Capabilities}" Margin="0,10,0,0">
+        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate><DataTemplate><c:GroupBorder Style="{StaticResource Pill}" Margin="0,0,6,6" Background="{DynamicResource B.Subtle}" AutomationProperties.Name="{Binding}"><TextBlock Text="{Binding}" FontSize="11"/></c:GroupBorder></DataTemplate></ItemsControl.ItemTemplate>
+       </ItemsControl>
+       <TextBlock Text="{Binding Fit}" Foreground="{Binding FitBrush}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" ToolTip="{Binding FitDetail}"/>
+       <TextBlock Text="{Binding State}" Style="{StaticResource T.Body2}" Margin="0,5,0,0" TextWrapping="Wrap" Visibility="{Binding State, Converter={StaticResource Vis}}"/>
+       <TextBlock Text="{Binding Speed}" Style="{StaticResource T.Caption}" Margin="0,5,0,0" Visibility="{Binding Speed, Converter={StaticResource Vis}}"/>
+       <WrapPanel Margin="0,12,0,0" IsEnabled="{Binding Available}">
+        <Button Content="Use for Ask" Style="{StaticResource Btn.Standard}" Click="OnUse" IsEnabled="{Binding CanChat}" Margin="0,0,8,4" AutomationProperties.Name="{Binding Model.Name, StringFormat=Use {0} for Ask}"/>
+        <Button Content="Stop" Style="{StaticResource Btn.Standard}" Click="OnStop" Margin="0,0,8,4" Visibility="{Binding CanStop, Converter={StaticResource Vis}}" AutomationProperties.Name="{Binding Model.Name, StringFormat=Stop {0}}"/>
+        <Button Content="Clear failure" Style="{StaticResource Btn.Standard}" Click="OnStop" Margin="0,0,8,4" Visibility="{Binding Failed, Converter={StaticResource Vis}}" AutomationProperties.Name="{Binding Model.Name, StringFormat=Clear failure for {0}}" ToolTip="Allow a fresh load on your next request. An incompatible model still needs a compatible GGUF or runtime."/>
+        <Button Content="Remove" Style="{StaticResource Btn.Standard}" Click="OnRemove" Margin="0,0,8,4" Visibility="{Binding Removable, Converter={StaticResource Vis}}" AutomationProperties.Name="{Binding Model.Name, StringFormat=Remove {0}}"/>
+        <TextBlock Text="Managed by Ollama" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="{Binding ManagedByOllama, Converter={StaticResource Vis}}"/>
+       </WrapPanel>
+       <TextBlock Text="{Binding Error}" Foreground="{DynamicResource B.Down}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+      </StackPanel>
+     </Border>
+    </DataTemplate></ItemsControl.ItemTemplate>
+   </ItemsControl>
+   <Expander x:Name="Problems" Margin="0,4,0,16" Foreground="{DynamicResource B.Text}"><TextBlock x:Name="ProblemText" TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="20,8"/></Expander>
+   <c:GroupBorder x:Name="DownloadPanel" Style="{StaticResource Card}" Margin="0,6,0,20" AutomationProperties.AutomationId="models-download" AutomationProperties.Name="Model download">
+    <StackPanel><DockPanel><Button x:Name="CancelDownload" DockPanel.Dock="Right" Content="Cancel" Style="{StaticResource Btn.Standard}" Click="OnCancel" Margin="12,0,0,0"/>
+     <TextBlock x:Name="DownloadStep" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
+    </DockPanel><ProgressBar x:Name="DownloadProgress" Height="5" Margin="0,10,0,8" Maximum="100" AutomationProperties.Name="Model download progress"/>
+     <TextBlock x:Name="DownloadDetail" Style="{StaticResource T.Caption}"/>
+    </StackPanel>
+   </c:GroupBorder>
+   <TextBlock Text="Suggested for your card" Style="{StaticResource T.Subtitle}" Margin="0,4,0,4"/>
+   <TextBlock Text="Selected for this PC. Downloads are checked before joining your library." Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+   <ItemsControl x:Name="Suggestions" AutomationProperties.AutomationId="models-suggested">
+    <ItemsControl.ItemsPanel><ItemsPanelTemplate><c:FlowGrid MaxColumns="3" MinColumnWidth="265" Gap="12"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}"><StackPanel>
+     <TextBlock Text="{Binding Recommendation.Role}" Style="{StaticResource T.Overline}" Foreground="{DynamicResource B.AccentText}"/>
+     <TextBlock Text="{Binding Recommendation.Name}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,6,0,8"/>
+     <TextBlock Text="{Binding Recommendation.Why}" Style="{StaticResource T.Body2}" TextWrapping="Wrap"/>
+     <TextBlock Text="{Binding Size}" Style="{StaticResource T.Caption}" Margin="0,10,0,10"/>
+     <Button Content="{Binding ButtonText}" IsEnabled="{Binding CanDownload}" Click="OnSuggestion" Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" AutomationProperties.Name="{Binding Recommendation.Name, StringFormat=Download {0}}"/>
+     <TextBlock Text="{Binding Error}" Foreground="{DynamicResource B.Down}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+    </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate>
+   </ItemsControl>
+   <TextBlock Text="Find more" Style="{StaticResource T.Subtitle}" Margin="0,26,0,4"/>
+   <TextBlock Text="Browse public GGUF models on Hugging Face. No account needed." Style="{StaticResource T.Caption}" Margin="0,0,0,12"/>
+   <DockPanel><Button x:Name="SearchButton" DockPanel.Dock="Right" Content="Search" Style="{StaticResource Btn.Standard}" Click="OnSearch" Margin="8,0,0,0"/>
+    <TextBox x:Name="SearchBox" ui:UiProps.Placeholder="Search models, e.g. Qwen" MaxLength="100" KeyDown="OnSearchKey" AutomationProperties.AutomationId="models-search" AutomationProperties.Name="Find models on Hugging Face"/>
+   </DockPanel>
+   <TextBlock x:Name="SearchStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,8,0,8" AutomationProperties.LiveSetting="Polite"/>
+   <ItemsControl x:Name="Repos"><ItemsControl.ItemTemplate><DataTemplate>
+    <Button Click="OnRepo" Style="{StaticResource Btn.Row}" HorizontalContentAlignment="Stretch" Margin="0,0,0,4"><StackPanel>
+     <TextBlock Text="{Binding Id}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource T.Caption}" Margin="0,4,0,0"/>
+    </StackPanel></Button>
+   </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+   <Border x:Name="RepoPanel" Style="{StaticResource Card}" Margin="0,8,0,0" Visibility="Collapsed"><StackPanel>
+    <TextBlock x:Name="RepoTitle" Style="{StaticResource T.CardTitle}" TextWrapping="Wrap"/>
+    <TextBlock x:Name="RepoStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,6,0,12" AutomationProperties.LiveSetting="Polite"/>
+    <CheckBox x:Name="VisionOption" Margin="0,0,0,12" Checked="OnVisionChanged" Unchecked="OnVisionChanged"/>
+    <ItemsControl x:Name="Files"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,6,0,12">
+     <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+     <TextBlock Text="{Binding Detail}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,4,0,8"/>
+     <Button Content="Download" Click="OnFileDownload" IsEnabled="{Binding CanDownload}" Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" AutomationProperties.Name="{Binding File.Name, StringFormat=Download {0}}"/>
+     <TextBlock Text="{Binding Error}" Foreground="{DynamicResource B.Down}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+    </StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+   </StackPanel></Border>
+   <Expander Header="Download options" Margin="0,18,0,0" Foreground="{DynamicResource B.Text}"><StackPanel Margin="20,10,0,0">
+    <TextBlock Text="Cancelled downloads keep their progress so you can resume them later." Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
+    <Button x:Name="DiscardButton" Content="Discard unfinished downloads" Click="OnDiscard" Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" Margin="0,10,0,0" AutomationProperties.AutomationId="models-discard"/>
+   </StackPanel></Expander>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>

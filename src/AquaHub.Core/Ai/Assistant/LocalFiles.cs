@@ -109,7 +109,12 @@ public sealed partial class LocalFiles
         SensitiveExtensions.Contains(Path.GetExtension(path)) || SensitiveName().IsMatch(Path.GetFileName(path));
 
     /// <summary>Folders that hold app data or credentials (.ssh, AppData, Windows…) — never searched or offered as a root.</summary>
-    public static bool IsSensitiveFolder(string path) => SensitiveFolder().IsMatch(path);
+    public static bool IsSensitiveFolder(string path)
+    {
+        try { path = CanonicalPath(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+        return SensitiveFolder().IsMatch(path);
+    }
 
     /// <summary>
     /// A folder offered as a root (attached to a chat, or added in Settings) that holds app data or credentials, judged by
@@ -120,7 +125,7 @@ public sealed partial class LocalFiles
     {
         try
         {
-            var full = Path.GetFullPath(folder);
+            var full = CanonicalPath(folder);
             return IsSensitiveFolder(full) || IsSensitiveFolder(RealPath(full));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return true; }
@@ -159,8 +164,8 @@ public sealed partial class LocalFiles
     {
         reason = "";
         fullPath = "";
-        // GetFullPath also spells out 8.3 short names of folders that exist ("SSH~1" → ".ssh"), so the rules see real names.
-        try { fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'))); }
+        // Resolve existing 8.3 path components before checking the sensitive-folder rules.
+        try { fullPath = CanonicalPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'))); }
         catch { reason = "That isn't a valid path"; return false; }
         const string never = "Aqua never reads passwords, keys or app data";
         if (IsSensitiveName(fullPath)) { reason = never; return false; }
@@ -173,6 +178,7 @@ public sealed partial class LocalFiles
             reason = "That's outside the folders Ask may read (Settings › Ask Aqua › Folders)";
             return false;
         }
+        root = CanonicalPath(root);
         if (IsSensitive(fullPath, root)) { reason = never; return false; }
         // A junction or link inside your folders could lead anywhere (app data, another drive): searches never follow one, nor does this.
         if (ThroughLink(fullPath, root)) { reason = "Aqua doesn't follow links out of the folders it may read"; return false; }
@@ -193,9 +199,82 @@ public sealed partial class LocalFiles
         return false;
     }
 
-    public static bool IsUnder(string path, string root) =>
-        path.Equals(root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    public static bool IsUnder(string path, string root)
+    {
+        try
+        {
+            path = CanonicalPath(path);
+            root = CanonicalPath(root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
+        return path.Equals(root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CanonicalPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (!OperatingSystem.IsWindows()) return full;
+        var root = Path.GetPathRoot(full);
+        if (string.IsNullOrEmpty(root)) return full;
+        var current = root;
+        foreach (var segment in full[root.Length..].Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment.Contains('~'))
+            {
+                var candidate = Path.Combine(current, segment);
+                if (!TryLongFileName(candidate, out var longName))
+                    throw new IOException("A short path component couldn't be resolved.");
+                current = Path.Combine(current, longName);
+            }
+            else current = Path.Combine(current, segment);
+        }
+        return Path.GetFullPath(current);
+    }
+
+    private static bool TryLongFileName(string path, out string name)
+    {
+        name = "";
+        try
+        {
+            using var find = FindFirstFile(path, out var data);
+            if (find.IsInvalid) return false;
+            name = data.FileName;
+            return name.Length > 0;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or ArgumentException) { return false; }
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private struct FindData
+    {
+        public uint Attributes;
+        public uint CreationTimeLow;
+        public uint CreationTimeHigh;
+        public uint LastAccessTimeLow;
+        public uint LastAccessTimeHigh;
+        public uint LastWriteTimeLow;
+        public uint LastWriteTimeHigh;
+        public uint SizeHigh;
+        public uint SizeLow;
+        public uint Reserved0;
+        public uint Reserved1;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 260)] public string FileName;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 14)] public string AlternateFileName;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "FindFirstFileW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFindHandle FindFirstFile(string path, out FindData data);
+
+    private sealed class SafeFindHandle : Microsoft.Win32.SafeHandles.SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public SafeFindHandle() : base(ownsHandle: true) { }
+        protected override bool ReleaseHandle() => FindClose(handle);
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool FindClose(IntPtr handle);
 
     /// <summary>Folders a search never walks into: system, programs, app data, caches, build output and game libraries.</summary>
     private static readonly HashSet<string> SkipDirs = new(StringComparer.OrdinalIgnoreCase)

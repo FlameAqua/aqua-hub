@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        UI.Controls.PopupToggle.Attach(AlertsPopup, BellButton);
         _status = new UiThrottle(UpdateStatus, 250);
         _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _clock.Tick += (_, _) => UpdateStatus();
@@ -110,7 +111,7 @@ public partial class MainWindow : Window
         var compact = ActualWidth > 0 && ActualWidth < 1080;
         Nav.Width = compact ? 64 : 228;
         BrandText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        CommandBox.Width = Math.Clamp(ActualWidth - (compact ? 64 : 228) - 330, 240, 520);
+        CommandBox.Width = Math.Clamp(ActualWidth - (compact ? 64 : 228) - 362, 180, 480);
     }
 
     // ───────────────────────── Navigation ─────────────────────────
@@ -159,6 +160,7 @@ public partial class MainWindow : Window
         "ask" => new AskPage(),
         "workbench" => new WorkbenchPage(),
         "agents" => new AgentsPage(),
+        "models" => new ModelsPage(),
         "settings" => new SettingsPage(),
         _ => new TodayPage(),
     };
@@ -218,8 +220,9 @@ public partial class MainWindow : Window
         BellCount.Text = unread > 9 ? "9+" : unread.ToString();
 
         var dnd = Hub.S.Notifications.DoNotDisturb;
-        DndButton.Background = dnd ? Fmt.Res("B.AccentSoft") : System.Windows.Media.Brushes.Transparent;
-        DndIcon.Foreground = dnd ? Fmt.Res("B.AccentText") : Fmt.Res("B.Text3");
+        if (dnd) DndButton.SetResourceReference(Control.BackgroundProperty, "B.AccentSoft");
+        else DndButton.Background = System.Windows.Media.Brushes.Transparent;
+        DndIcon.SetResourceReference(Control.ForegroundProperty, dnd ? "B.AccentText" : "B.Text3");
         DndButton.ToolTip = dnd ? "Do not disturb is on — click to turn off" : "Turn on do not disturb";
         System.Windows.Automation.AutomationProperties.SetName(DndButton, dnd ? "Do not disturb: on" : "Do not disturb: off");
 
@@ -379,7 +382,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnBellClick(object sender, RoutedEventArgs e) => ShowAlerts();
+    private void OnBellClick(object sender, RoutedEventArgs e)
+    {
+        if (AlertsPopup.IsOpen) CloseAlerts(); else ShowAlerts();
+    }
 
     /// <summary>Opens the alerts list under the bell (also used by the tray menu's "Show N new alerts").</summary>
     public void ShowAlerts()

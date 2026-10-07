@@ -14,16 +14,16 @@
         <!-- Header and filters share the story column's width (max 1100, centred like the cards; the 24 px on the right
              match the list's padding plus its scrollbar), so on wide screens they line up with the cards. -->
         <Grid Margin="0,0,24,14" MaxWidth="1100">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <StackPanel>
                 <TextBlock Text="News" Style="{StaticResource T.Title}"/>
                 <TextBlock x:Name="Subtitle" Style="{StaticResource T.Body2}" Margin="0,4,0,0" TextWrapping="Wrap"/>
             </StackPanel>
-            <TextBox x:Name="Search" Grid.Column="1" Width="280" Margin="16,0,0,0" VerticalAlignment="Center" ui:UiProps.Placeholder="Filter stories or outlets…"
-                     TextChanged="OnFilterChanged" AutomationProperties.Name="Filter stories"/>
+            <DockPanel Grid.Row="1" Margin="0,14,0,0">
+                <c:FeedRefresh DockPanel.Dock="Right" AgentId="news-scout" AfterId="curator" Label="news" Margin="16,0,0,0"/>
+                <TextBox x:Name="Search" MaxWidth="460" VerticalAlignment="Top" ui:UiProps.Placeholder="Filter stories or outlets…"
+                         TextChanged="OnFilterChanged" AutomationProperties.Name="Filter stories"/>
+            </DockPanel>
         </Grid>
 
         <WrapPanel x:Name="Filters" Grid.Row="1" Margin="0,0,24,8" MaxWidth="1100"/>

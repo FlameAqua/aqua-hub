@@ -83,6 +83,17 @@ public sealed class OllamaManager
 
     public static bool Installed => Executable is not null;
 
+    /// <summary>
+    /// The llama-server that comes with Ollama (lib\ollama\llama-server.exe beside ollama.exe), which reads Ollama's own
+    /// model conversions; Aqua's runtime uses it for those when its llama.cpp build can't (null: not there).
+    /// </summary>
+    public static string? EngineServer()
+    {
+        if (Executable is not { } exe || Path.GetDirectoryName(exe) is not { } dir) return null;
+        var server = Path.Combine(dir, "lib", "ollama", "llama-server.exe");
+        return File.Exists(server) ? server : null;
+    }
+
     private static int Port => Uri.TryCreate(Hub.S.Ai.Endpoint, UriKind.Absolute, out var u) ? u.Port : 11434;
 
     /// <summary>One line for the UI: "Running", "Stopped after 15 minutes unused", "Not installed"…</summary>

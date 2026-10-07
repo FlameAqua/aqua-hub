@@ -259,7 +259,7 @@
 
                 <StackPanel Grid.Column="2">
                     <!-- Windows' own maintenance tools, grouped -->
-                    <c:Card Title="Doctor's toolkit" Icon="wrench" Subtitle="Windows' own maintenance tools" AutomationProperties.AutomationId="system-toolkit">
+                    <c:Card Title="Doctor's toolkit" Icon="wrench" Subtitle="Windows' own maintenance tools · hold Shift when opening to run as administrator" AutomationProperties.AutomationId="system-toolkit">
                         <ItemsControl ItemsSource="{Binding ToolGroups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -336,9 +336,9 @@
                             <TextBlock Text="No model loaded — VRAM is free for games and apps." Style="{StaticResource T.Body2}" Visibility="{Binding Loaded, Converter={StaticResource VisNot}}"/>
                             <Border Style="{StaticResource CardInner}" Margin="0,12,0,0" Visibility="{Binding ShowSetupHint, Converter={StaticResource Vis}}">
                                 <StackPanel>
-                                    <TextBlock Text="Install or start Ollama, then pull a model such as qwen3.5:9b."
+                                    <TextBlock Text="Choose a provider and set up a model in AI settings."
                                                Style="{StaticResource T.Body2}" TextWrapping="Wrap"/>
-                                    <Button Style="{StaticResource Btn.Link}" Click="OnGetOllama" HorizontalAlignment="Left" Margin="-6,4,0,0" Content="Get Ollama (ollama.com)"/>
+                                    <Button Style="{StaticResource Btn.Link}" Click="OnAiSettings" HorizontalAlignment="Left" Margin="-6,4,0,0" Content="Open AI settings"/>
                                 </StackPanel>
                             </Border>
                             <TextBlock Text="Installed models" Style="{StaticResource T.Overline}" FontSize="12" Margin="0,14,0,6" Visibility="{Binding Installed, Converter={StaticResource Vis}}"/>

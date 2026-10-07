@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using AquaHub.Core.Ai.Local;
+using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
 using AquaHub.Platform;
 
@@ -20,9 +21,12 @@ public sealed class LocalAi : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private GpuFacts _gpu = GpuFacts.None;
     private string _folder = "";
+    private bool _useOllamaModels;
 
     public LocalAi()
     {
+        _useOllamaModels = Hub.S.Ai.Llama.UseOllamaModels;
+        Hub.Core.Settings.Changed += OnSettingsChanged;
         Hub.Core.Models.Changed += OnLibraryChanged;
         Hub.Core.LlamaSetup.Changed += Raise;
         Hub.Core.LlamaSetup.Progress += p => Hub.OnUi(() => { InstallProgress = p; InstallProgressChanged?.Invoke(p); });
@@ -38,11 +42,17 @@ public sealed class LocalAi : IDisposable
 
     /// <summary>Ask Aqua runs on Aqua's runtime (Settings' provider is "llamacpp").</summary>
     public bool InUse => Hub.S.Ai.Provider == "llamacpp";
-    /// <summary>The runtime Aqua installed (null: none). <see cref="RuntimeReady"/> also counts a custom server path in Settings.</summary>
+    /// <summary>The runtime Aqua installed (null: none). <see cref="RuntimeReady"/> also counts a custom server path in Settings and Ollama's engine.</summary>
     public LlamaInstall? Installed => Hub.Core.LlamaSetup.Installed();
     /// <summary>"b11387", "custom" (Settings' own server) or "" (not installed).</summary>
     public string Build => Hub.Llama.Build;
-    public bool RuntimeReady => Hub.Llama.ServerPath is not null;
+    /// <summary>
+    /// Models can run: Aqua's build is installed, Settings name a server, or Ollama's engine is there for Ollama's models
+    /// (so switching to the runtime works without installing anything when Ollama is installed).
+    /// </summary>
+    public bool RuntimeReady => Hub.Llama.Ready;
+    /// <summary>The llama-server that comes with Ollama, which runs Ollama's own conversions (null: switched off or not there).</summary>
+    public string? OllamaEngine => Hub.Llama.OllamaEngine;
     public bool Installing => Hub.Core.LlamaSetup.Busy;
     public LlamaProgress? InstallProgress { get; private set; }
     /// <summary>The graphics card, as last read (every 15 seconds).</summary>
@@ -61,10 +71,44 @@ public sealed class LocalAi : IDisposable
     public bool Downloading => Hub.Core.ModelDownloads.Busy;
     public ModelDownloadProgress? DownloadProgress => Hub.Core.ModelDownloads.Current;
 
-    /// <summary>The model servers running now (one on the card, background ones on the processor).</summary>
+    /// <summary>The model servers running now (one generation model on the card; processor models may run beside it).</summary>
     public IReadOnlyList<LlamaInstanceInfo> Running => Hub.Llama.Instances;
     /// <summary>Measured writing speeds and MTP's choice for a model, if any.</summary>
     public SpeedBook Speed => Hub.Llama.Speed;
+
+    /// <summary>
+    /// The program that would run <paramref name="model"/> — Aqua's build, Settings' own server, or Ollama's engine for an
+    /// Ollama conversion llama.cpp can't read — with a Label and, when it isn't Aqua's build, a Note saying why (null:
+    /// nothing on this PC can run it).
+    /// </summary>
+    public LlamaServerChoice? Engine(LocalModel model) => Hub.Llama.ServerFor(model);
+    /// <summary>Why <paramref name="model"/> can't run here, in plain words, before trying (null: nothing known stops it).</summary>
+    public string? Problem(LocalModel model) => Hub.Llama.Problem(model);
+    /// <summary>Each start of <paramref name="model"/> on this PC, newest first: loaded or not, context, memory on the card, speeds.</summary>
+    public IReadOnlyList<CompatEntry> Compatibility(LocalModel model) => Hub.Llama.Compat.For(model.Id);
+    /// <summary>This PC's compatibility record as a Markdown table (for a report, or to paste into an issue).</summary>
+    public string CompatibilityMatrix() => Hub.Llama.Compat.Markdown();
+
+    /// <summary>
+    /// A file a search found, as the library will see it once downloaded: its header is read from Hugging Face (a few MB at
+    /// most, no download), so <see cref="Fit"/>, <see cref="Problem"/> and the ability chips are exact before downloading.
+    /// </summary>
+    public Task<LocalModel> PreviewAsync(HfRepoFiles repo, HfFile file, HfFile? projector = null, CancellationToken ct = default) =>
+        PreviewAsync(repo.Repo, repo.Revision, file, projector, System.IO.Path.GetFileNameWithoutExtension(file.Name), ct);
+
+    /// <summary>A suggestion, as the library will see it once downloaded (its header read from Hugging Face).</summary>
+    public Task<LocalModel> PreviewAsync(ModelRecommendation r, CancellationToken ct = default) =>
+        PreviewAsync(r.Repo, r.Revision, r.File, r.Projector, r.Name, ct);
+
+    private static async Task<LocalModel> PreviewAsync(string repo, string revision, HfFile file, HfFile? projector, string name, CancellationToken ct)
+    {
+        var info = await Hub.Core.ModelDownloads.HeaderAsync(repo, revision, file, ct).ConfigureAwait(false);
+        return new LocalModel
+        {
+            Id = "hf:" + repo + "/" + file.Name, Name = name, Source = ModelSource.Aqua, Path = file.Name, Info = info, Size = file.Size,
+            ProjectorPath = projector?.Name, ProjectorSize = projector?.Size ?? 0, Sha256 = file.Sha256, Repo = repo,
+        };
+    }
 
     /// <summary>How <paramref name="model"/> fits the card at <paramref name="context"/> tokens (0: the context Aqua would give it).</summary>
     public FitEstimate Fit(LocalModel model, int context = 0)
@@ -77,14 +121,24 @@ public sealed class LocalAi : IDisposable
     /// <summary>The model holding <paramref name="role"/> (main is Ask Aqua's model), or null.</summary>
     public LocalModel? ForRole(string role) => Hub.Core.Models.Find(role switch
     {
-        "main" => Hub.S.Ai.Model,
+        "main" => MainModel(Hub.S),
         "creative" => Hub.S.Ai.Llama.CreativeModel,
         "background" => Hub.S.Ai.Llama.BackgroundModel,
         "search" => Hub.S.Ai.Llama.SearchModel,
         _ => null,
     });
 
-    /// <summary>Gives <paramref name="role"/> to a model (null: none — main then picks the largest that fits).</summary>
+    /// <summary>
+    /// Main on Aqua's runtime: Ask's model while the runtime is in use, else the one stored for it (Settings keeps a choice
+    /// per provider), else Ollama's choice, which the runtime reads from Ollama's store.
+    /// </summary>
+    private static string MainModel(HubSettings s) =>
+        s.Ai.Provider == "llamacpp" ? s.Ai.Model : s.Ai.ProviderModels.TryGetValue("llamacpp", out var saved) ? saved.Model : s.Ai.Model;
+
+    /// <summary>
+    /// Gives <paramref name="role"/> to a model (null: none — main then picks the largest that fits). Main is the runtime's
+    /// own choice: set while another provider is in use, it waits for the switch instead of changing that provider's model.
+    /// </summary>
     public void SetRole(string role, LocalModel? model)
     {
         if (!Roles.Contains(role)) throw new ArgumentException("Unknown role: " + role, nameof(role));
@@ -94,7 +148,14 @@ public sealed class LocalAi : IDisposable
         {
             switch (role)
             {
-                case "main": s.Ai.Model = value; break;
+                case "main" when s.Ai.Provider == "llamacpp": s.Ai.Model = value.Length > 0 ? value : "auto"; break;
+                case "main":
+                    s.Ai.ProviderModels["llamacpp"] = new ProviderModelChoice
+                    {
+                        Model = value.Length > 0 ? value : "auto",
+                        DeepModel = s.Ai.ProviderModels.TryGetValue("llamacpp", out var saved) ? saved.DeepModel : "",
+                    };
+                    break;
                 case "creative": s.Ai.Llama.CreativeModel = value; break;
                 case "background": s.Ai.Llama.BackgroundModel = value; break;
                 default: s.Ai.Llama.SearchModel = value; break;
@@ -143,8 +204,14 @@ public sealed class LocalAi : IDisposable
         var lines = new List<string>();
         using var process = Hub.LlamaHost.Start(server, ["--list-devices"], new Dictionary<string, string>(), Path.GetDirectoryName(server)!,
             line => { lock (lines) lines.Add(line); });
-        for (var i = 0; i < 100 && !process.HasExited; i++) await Task.Delay(200, ct).ConfigureAwait(false);
-        if (!process.HasExited) process.Kill();
+        try
+        {
+            for (var i = 0; i < 100 && !process.HasExited; i++) await Task.Delay(200, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill();
+        }
         lock (lines)
             return lines.SkipWhile(l => !l.StartsWith("Available devices", StringComparison.OrdinalIgnoreCase)).Skip(1)
                 .Select(l => l.Trim()).Where(l => l.Contains(':')).ToList();
@@ -183,7 +250,7 @@ public sealed class LocalAi : IDisposable
         return Hub.Core.Models.Remove(model.Id);
     }
 
-    /// <summary>Stops a running model's server now (null: all of them).</summary>
+    /// <summary>Stops a running model's server now (null: all of them); naming a model also clears its failures (Clear failure).</summary>
     public Task StopAsync(string? modelId) => Hub.Llama.UnloadAsync(modelId, "you stopped it");
 
     /// <summary>Reads the models folders again (after the folder or the Ollama switch changes, or on request).</summary>
@@ -192,6 +259,19 @@ public sealed class LocalAi : IDisposable
         _folder = Hub.Core.Models.Folder;
         Hub.Core.Models.Refresh();
     });
+
+    private void OnSettingsChanged(Core.Settings.HubSettings settings)
+    {
+        if (Hub.Core.Models.Folder == _folder && settings.Ai.Llama.UseOllamaModels == _useOllamaModels) { Raise(); return; }
+        _useOllamaModels = settings.Ai.Llama.UseOllamaModels;
+        _ = RefreshAfterSettingsAsync();
+    }
+
+    private async Task RefreshAfterSettingsAsync()
+    {
+        try { await RefreshAsync().ConfigureAwait(false); }
+        catch (Exception ex) { Log.Warn("models", "Couldn't refresh the model folders", ex); }
+    }
 
     public void Start() => _ = Task.Run(() => LoopAsync(_stop.Token));
 
@@ -213,6 +293,8 @@ public sealed class LocalAi : IDisposable
                     if (InUse && Hub.S.Ai.StopOllamaForGpu && Hub.Llama.OnGpu is not null && !Hub.Core.Llm.IsBusy
                         && Hub.Platform.GpuContention(serverHasModelLoaded: true) is { } why)
                         await Hub.Llama.UnloadGpuAsync("to free the graphics card for " + why, ct).ConfigureAwait(false);
+                    // Ollama's engine stops after the idle time (its files stay free for Ollama's own updates).
+                    if (!Hub.Core.Llm.IsBusy) await Hub.Llama.StopIdleAsync(TimeSpan.FromMinutes(Hub.S.Ai.Llama.IdleUnloadMinutes)).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -244,6 +326,7 @@ public sealed class LocalAi : IDisposable
 
     public void Dispose()
     {
+        Hub.Core.Settings.Changed -= OnSettingsChanged;
         _stop.Cancel();
         _stop.Dispose();
     }

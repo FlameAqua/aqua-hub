@@ -23,6 +23,9 @@ public static class SnapshotRunner
         try
         {
             Directory.CreateDirectory(outDir);
+            // Focused Phase 4 QA needs no feeds or inference. Read the library and render the real controls only.
+            if (only == "models") { await ModelsAsync(outDir); return; }
+            if (only == "studio") { await StudioAsync(outDir); return; }
             if (scratchProfile) Hub.Core.Chats.DeleteAll();
             // QA mode renders AI content even if a game is running (normal mode pauses AI then).
             Hub.Core.Llm.PauseReason = () => null;
@@ -42,7 +45,7 @@ public static class SnapshotRunner
             }
             await Task.Delay(1500);
 
-            var pages = (only ?? "today,news,social,markets,upcoming,system,launchpad,ask,agents,settings").Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var pages = (only ?? "today,news,social,markets,upcoming,system,launchpad,ask,agents,models,settings").Split(',', StringSplitOptions.RemoveEmptyEntries);
             var win = new MainWindow
             {
                 Width = 1440, Height = 940, WindowStartupLocation = WindowStartupLocation.Manual,
@@ -56,7 +59,7 @@ public static class SnapshotRunner
                 win.Navigate(page);
                 await Settle(page is "news" or "social" or "today" ? 3500 : 1500);
                 Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"{n++:00}-{page}.png"));
-                if (page is "today" or "markets" or "system" or "launchpad" or "upcoming" or "settings" or "agents")
+                if (page is "today" or "markets" or "system" or "launchpad" or "upcoming" or "settings" or "agents" or "models")
                     CaptureFullPage(win, Path.Combine(outDir, $"{n - 1:00}-{page}-full.png"));
             }
 
@@ -166,6 +169,68 @@ public static class SnapshotRunner
             await Task.Delay(300);
             Application.Current.Shutdown();
         }
+    }
+
+    private static async Task StudioAsync(string outDir)
+    {
+        var win = new MainWindow { Width = 1440, Height = 940, Left = -32000, Top = -32000,
+            WindowStartupLocation = WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false };
+        win.Show();
+        foreach (var theme in new[] { "dark", "light" })
+        {
+            var settings = Hub.Core.Settings.Clone(); settings.General.Theme = theme; Hub.Theme.Apply(settings.General);
+            foreach (var width in new[] { 1440, 820 })
+            {
+                win.Width = width;
+                foreach (var mode in new[] { "images", "roleplay", "chat" })
+                {
+                    win.Navigate("ask");
+                    if (win.PageHost.Content is UI.Pages.AskPage page) page.SelectTab(mode);
+                    await Settle(400);
+                    Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"studio-{mode}-{theme}-{width}.png"));
+                    if (mode == "images") CaptureFullPage(win, Path.Combine(outDir, $"studio-{mode}-{theme}-{width}-full.png"));
+                }
+            }
+        }
+        win.Close();
+    }
+
+    private static async Task ModelsAsync(string outDir)
+    {
+        await Hub.LocalAi.RefreshAsync();
+        var win = new MainWindow { Width = 1440, Height = 940, Left = -32000, Top = -32000,
+            WindowStartupLocation = WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false };
+        win.Show();
+        foreach (var theme in new[] { "dark", "light" })
+        {
+            var settings = Hub.Core.Settings.Clone(); settings.General.Theme = theme; Hub.Theme.Apply(settings.General);
+            foreach (var width in new[] { 1440, 820 })
+            {
+                win.Width = width;
+                win.Navigate("models"); await Settle(600);
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"models-{theme}-{width}.png"));
+                CaptureFullPage(win, Path.Combine(outDir, $"models-{theme}-{width}-full.png"));
+                win.Navigate("settings", "ai"); await Settle(600);
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"ai-settings-{theme}-{width}.png"));
+                if (win.PageHost.Content is UI.Pages.SettingsPage page)
+                {
+                    var advanced = FindVisual<System.Windows.Controls.Expander>(page, e => (string?)e.Header == "Advanced runtime settings");
+                    if (advanced is not null) advanced.IsExpanded = true;
+                    await Settle(300);
+                    CaptureFullPage(win, Path.Combine(outDir, $"ai-settings-{theme}-{width}-full.png"));
+                    if (advanced is not null) advanced.IsExpanded = false;
+                }
+            }
+        }
+        win.Close();
+    }
+
+    private static T? FindVisual<T>(DependencyObject root, Func<T, bool> match) where T : DependencyObject
+    {
+        if (root is T item && match(item)) return item;
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            if (FindVisual(VisualTreeHelper.GetChild(root, i), match) is { } found) return found;
+        return null;
     }
 
     private static async Task<int> ChatsAndWorkbenchAsync(MainWindow win, string outDir, int n)

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AquaHub.Core.Net;
@@ -50,6 +52,9 @@ public sealed partial class ModelDownloads
     private readonly ModelLibrary _library;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ConcurrentDictionary<string, GgufInfo> _headers = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The most of a file a header read takes: a big vocabulary makes a header ten or twenty MB.</summary>
+    internal const long HeaderLimit = 64L << 20;
     private CancellationTokenSource? _cts;
 
     /// <summary>Free bytes on the models folder's drive (tests replace it).</summary>
@@ -76,15 +81,15 @@ public sealed partial class ModelDownloads
     public event Action? Changed;
 
     /// <summary>
-    /// The models Aqua suggests (4 Oct 2026), for the card they suit. Main: Qwen3.8 27B with its MTP heads (IQ2_S on 12 GB,
-    /// IQ3_XXS on 16 GB, IQ3_S on 24 GB) or Qwen3.5 9B on smaller cards; creative: Gemma 4 12B; background, on the
-    /// processor: Qwen3.5 4B; search by meaning: EmbeddingGemma 300M.
+    /// The models Aqua suggests for the card they suit. Main (also the editor by default): Qwen3.5 9B Q5_K_M for 12 GB
+    /// cards; Qwen3.8 27B with its MTP heads (IQ3_XXS on 16 GB, IQ3_S on 24 GB) for larger cards; creative: Gemma 4 12B;
+    /// search by meaning: EmbeddingGemma 300M.
     /// </summary>
     public static readonly IReadOnlyList<ModelRecommendation> Recommendations = new[]
     {
         Qwen38("IQ3_S", 12_120_016_960, "58fd826723939933dc86f45b7fe04545cbc2de1c70f6fe2cdd3858c87a98c12f", 22L << 30, long.MaxValue, "The best Qwen3.8 27B that fits a 24 GB card."),
         Qwen38("IQ3_XXS", 10_442_827_840, "63f29a2189a6b4cc31f81e093d3856ad293a5583114439f41ae1ed7af4093262", 15L << 30, 22L << 30, "Qwen3.8 27B for a 16 GB card: 1 point behind the full model on hard science questions."),
-        Qwen38("IQ2_S", 9_607_981_120, "e6406238a5cc0043775cd1963b6f9e5b8707400276e38d9fde742304906b1330", 11L << 30, 15L << 30, "Qwen3.8 27B for a 12 GB card, with a 32K context."),
+        Qwen35Q5("main", "A 9B Q5 model that fits a 12 GB card with room for its vision projector and context."),
         new ModelRecommendation("main", "Qwen3.5 9B · Q4_K_M", "A strong, fast all-rounder for cards of 6–10 GB.", "unsloth/Qwen3.5-9B-GGUF",
             "3885219b6810b007914f3a7950a8d1b469d598a5",
             new HfFile("Qwen3.5-9B-Q4_K_M.gguf", 5_680_522_464, "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"),
@@ -93,9 +98,6 @@ public sealed partial class ModelDownloads
             "google/gemma-4-12B-it-qat-q4_0-gguf", "29d097773436b69ff9feafd636ab4cf873786537",
             new HfFile("gemma-4-12b-it-qat-q4_0.gguf", 6_975_879_296, "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b"),
             new HfFile("mmproj-gemma-4-12b-it-qat-q4_0.gguf", 175_115_616, "cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7"), 10L << 30),
-        new ModelRecommendation("background", "Qwen3.5 4B · Q4_K_M", "Runs on the processor, so the agents never wait for the graphics card.",
-            "unsloth/Qwen3.5-4B-GGUF", "e87f176479d0855a907a41277aca2f8ee7a09523",
-            new HfFile("Qwen3.5-4B-Q4_K_M.gguf", 2_740_937_888, "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4"), null, 0),
         new ModelRecommendation("search", "EmbeddingGemma 300M · Q8_0", "Turns text into meaning for search (Phase 8); small enough for the processor.",
             "ggml-org/embeddinggemma-300m-qat-q8_0-GGUF", "66f974f8cd48cc3b9c41c516b95508e75b4bee64",
             new HfFile("embeddinggemma-300m-qat-Q8_0.gguf", 328_577_056, "6fa0c02a9c302be6f977521d399b4de3a46310a4f2621ee0063747881b673f67"), null, 0),
@@ -106,7 +108,12 @@ public sealed partial class ModelDownloads
             new HfFile($"Qwen3.8-27B-GSQ-RCO-{quant}-mtp.gguf", size, sha),
             new HfFile("mmproj-Qwen3.8-27B-BF16.gguf", 931_146_528, "13cb7bebccbd04afc8f4090cb949ecf8937cdf7377c5799b1a0c594e7c0d3e16"), min, max);
 
-    /// <summary>The suggestions for this PC's card: one main model for its size, and the creative, background and search ones that suit it.</summary>
+    private static ModelRecommendation Qwen35Q5(string role, string why) =>
+        new(role, "Qwen3.5 9B · Q5_K_M", why, "unsloth/Qwen3.5-9B-GGUF", "725b4640b3d92a9d36037c79ac04a4378d9e08bd",
+            new HfFile("Qwen3.5-9B-Q5_K_M.gguf", 6_577_841_312, "e90fa097659415cfdd6240ed1e620f4062473cb7a9ddc9d9b75abeef8094c2e0"),
+            new HfFile("mmproj-F16.gguf", 918_166_080, "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"), 11L << 30, 15L << 30);
+
+    /// <summary>The suggestions for this PC's card: one main model for its size, and the creative and search ones that suit it.</summary>
     public static IReadOnlyList<ModelRecommendation> RecommendedFor(GpuFacts gpu) =>
         Recommendations.Where(r => r.Role != "main" ? gpu.TotalBytes >= r.MinVramBytes || r.MinVramBytes == 0
                                                     : gpu.TotalBytes >= r.MinVramBytes && gpu.TotalBytes < r.MaxVramBytes).ToList();
@@ -185,7 +192,7 @@ public sealed partial class ModelDownloads
             Log.Info("models", $"Downloading {file.Name} from {repo}");
             var modelPath = Path.Combine(folder, file.Name);
             long done = 0;
-            if (!AlreadyThere(modelPath, file))
+            if (!await AlreadyThereAsync(modelPath, file, cts.Token).ConfigureAwait(false))
                 await VerifiedDownload.DownloadAsync(_http, new DownloadSpec($"{Hub}{repo}/resolve/{revision}/{Escape(file.Path)}", file.Size, file.Sha256), modelPath,
                     n => Report("Downloading " + file.Name, n, total), StallAfter, resume: true, cts.Token).ConfigureAwait(false);
             done = file.Size;
@@ -193,7 +200,7 @@ public sealed partial class ModelDownloads
             if (projector is not null)
             {
                 var projectorPath = Path.Combine(folder, projector.Name);
-                if (!AlreadyThere(projectorPath, projector))
+                if (!await AlreadyThereAsync(projectorPath, projector, cts.Token).ConfigureAwait(false))
                     await VerifiedDownload.DownloadAsync(_http, new DownloadSpec($"{Hub}{repo}/resolve/{revision}/{Escape(projector.Path)}", projector.Size, projector.Sha256), projectorPath,
                         n => Report("Downloading the vision projector", done + n, total), StallAfter, resume: true, cts.Token).ConfigureAwait(false);
                 kept = (projector.Name, projectorPath, projector.Size, projector.Sha256);
@@ -228,6 +235,67 @@ public sealed partial class ModelDownloads
         }
     }
 
+    /// <summary>
+    /// Reads a file's GGUF header from Hugging Face without downloading the model — an HTTP range of its first bytes, at
+    /// most 64 MB, stopped as soon as the header has been read — so its layers, context cache and abilities are known
+    /// before a download (and its fit is exact, not a guess from the file size). Kept in memory per file.
+    /// </summary>
+    public async Task<GgufInfo> HeaderAsync(string repo, string revision, HfFile file, CancellationToken ct = default)
+    {
+        if (!RepoRx().IsMatch(repo) || !ShaRx().IsMatch(revision) || !SafePath(file.Path) || file.Size <= 0)
+            throw new DownloadException("That isn't a model Aqua can look at.");
+        if (_headers.TryGetValue(file.Sha256, out var known)) return known;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(60));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{Hub}{repo}/resolve/{revision}/{Escape(file.Path)}");
+        request.Headers.Range = new RangeHeaderValue(0, Math.Min(file.Size, HeaderLimit) - 1);
+        try
+        {
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+            if ((int)response.StatusCode is 401 or 403) throw new DownloadException("That file needs a Hugging Face account — Aqua uses only public models.");
+            if (!response.IsSuccessStatusCode) throw new DownloadException($"Hugging Face said {(int)response.StatusCode} {response.ReasonPhrase} — try again later.");
+            if (response.RequestMessage?.RequestUri is { Scheme: not "https" }) throw new DownloadException("The file was offered over an insecure connection, so Aqua didn't read it.");
+            await using var body = await response.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
+            await using var capped = new CappedStream(body, HeaderLimit);
+            await using var buffered = new BufferedStream(capped, 1 << 20);
+            var info = await Task.Run(() => Gguf.Read(buffered), cts.Token).ConfigureAwait(false);
+            if (info.Type is "mmproj" or "adapter") throw new DownloadException("That file is a " + (info.Type == "mmproj" ? "vision projector" : "adapter") + ", not a model.");
+            _headers[file.Sha256] = info;
+            return info;
+        }
+        catch (GgufFormatException ex)
+        {
+            throw new DownloadException("Its header couldn't be read: " + ex.Message);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            throw new DownloadException("Couldn't read the model's header from Hugging Face — check the connection and try again.");
+        }
+    }
+
+    /// <summary>A read-only stream that ends with an error after <c>limit</c> bytes (a header that never ends can't run on).</summary>
+    private sealed class CappedStream(Stream inner, long limit) : Stream
+    {
+        private long _read;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _read; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_read >= limit) throw new GgufFormatException("its header is larger than Aqua reads before downloading");
+            var n = inner.Read(buffer, offset, (int)Math.Min(count, limit - _read));
+            _read += n;
+            return n;
+        }
+    }
+
     /// <summary>Stops the download that is running; what it got so far is kept to carry on from.</summary>
     public void Cancel()
     {
@@ -259,8 +327,15 @@ public sealed partial class ModelDownloads
         Progress?.Invoke(p);
     }
 
-    /// <summary>A file already in place with the right size (it was checked when it arrived; the library record says which).</summary>
-    private static bool AlreadyThere(string path, HfFile file) => File.Exists(path) && new FileInfo(path).Length == file.Size;
+    /// <summary>A file already in place is reusable only when its bytes still match the pinned size and fingerprint.</summary>
+    private static async Task<bool> AlreadyThereAsync(string path, HfFile file, CancellationToken ct)
+    {
+        if (!File.Exists(path) || new FileInfo(path).Length != file.Size) return false;
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var hash = await System.Security.Cryptography.SHA256.HashDataAsync(input, ct).ConfigureAwait(false);
+        return Convert.ToHexString(hash).Equals(file.Sha256, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static long PartBytes(string folder, HfFile file, HfFile? projector)
     {

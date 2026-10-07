@@ -103,6 +103,9 @@ public sealed class ChatMessageVM : ObservableObject
 
     public ICommand? CopyCommand { get; set; }
     public ICommand? RetryCommand { get; set; }
+    public ICommand? RetryWithGuidanceCommand { get; set; }
+    public ICommand? SubmitGuidedRetryCommand { get; set; }
+    public ICommand? CancelGuidedRetryCommand { get; set; }
     public ICommand? DeeperCommand { get; set; }
     public ICommand? EditCommand { get; set; }
     public ICommand? ReadAloudCommand { get; set; }
@@ -116,6 +119,12 @@ public sealed class ChatMessageVM : ObservableObject
     public string EditText { get => _editText; set => Set(ref _editText, value); }
     public ICommand? SaveEditCommand { get; set; }
     public ICommand? CancelEditCommand { get; set; }
+
+    private bool _guidanceEditing;
+    private string _retryGuidance = "";
+    /// <summary>Extra user-provided direction for regenerating this answer.</summary>
+    public bool IsGuidanceEditing { get => _guidanceEditing; set => Set(ref _guidanceEditing, value); }
+    public string RetryGuidance { get => _retryGuidance; set => Set(ref _retryGuidance, value); }
 
     /// <summary>This answer is being read aloud (the button then stops it).</summary>
     public bool IsSpeaking { get => _speaking; set { if (Set(ref _speaking, value)) Raise(nameof(ReadAloudTip)); } }

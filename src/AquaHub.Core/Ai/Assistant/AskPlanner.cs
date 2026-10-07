@@ -47,7 +47,7 @@ public sealed record AskPlan
     /// <summary>The notes the message changes or overturns, as the model quoted them.</summary>
     public List<string> NotesOutdated { get; init; } = new();
 
-    /// <summary>One line for the activity list and logs.</summary>
+    /// <summary>Concrete preparation for the answer; empty for a direct conversation.</summary>
     public string Describe()
     {
         var parts = new List<string>();
@@ -60,7 +60,9 @@ public sealed record AskPlan
                       (Looks.Length > 0 ? " showing " + Looks : ""));
         if (Screen) parts.Add("look at the screen");
         if (Skill.Length > 0) parts.Add("use the skill “" + Skill + "”");
-        return parts.Count == 0 ? "answer from what Aqua already knows" : string.Join("; ", parts);
+        if (AboutAttachments) parts.Add("use your attachments");
+        if (Intent == "feeds") parts.Add("check your collected feeds");
+        return string.Join("; ", parts);
     }
 }
 

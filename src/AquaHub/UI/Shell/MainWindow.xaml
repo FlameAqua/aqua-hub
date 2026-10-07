@@ -9,7 +9,7 @@
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         Icon="/Assets/AquaHub.ico">
     <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="48" GlassFrameThickness="-1" ResizeBorderThickness="6" UseAeroCaptionButtons="True" CornerRadius="0"/>
+        <WindowChrome CaptionHeight="32" GlassFrameThickness="-1" ResizeBorderThickness="6" UseAeroCaptionButtons="True" CornerRadius="0"/>
     </WindowChrome.WindowChrome>
 
     <Grid x:Name="Root">
@@ -23,7 +23,7 @@
         <!-- ══════════ Navigation ══════════ -->
         <Grid x:Name="Nav" Width="228" ClipToBounds="True">
             <Grid.RowDefinitions>
-                <RowDefinition Height="48"/>
+                <RowDefinition Height="32"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -32,7 +32,8 @@
                 <TextBlock x:Name="BrandText" Text="Aqua Hub" FontSize="13" FontWeight="SemiBold" Margin="12,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
 
-            <StackPanel Grid.Row="1" Margin="0,6,0,0" x:Name="NavItems">
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,6,0,0" x:Name="NavItems">
                 <RadioButton Style="{StaticResource NavItem}" Tag="today" ui:UiProps.Icon="home" Content="Today" IsChecked="True" ToolTip="Today (Ctrl+1)"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="news" ui:UiProps.Icon="news" Content="News" ToolTip="News (Ctrl+2)"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="social" ui:UiProps.Icon="social" Content="Social pulse" ToolTip="Social pulse (Ctrl+3)"/>
@@ -44,7 +45,9 @@
                 <RadioButton Style="{StaticResource NavItem}" Tag="ask" ui:UiProps.Icon="ask" Content="Ask Aqua" ToolTip="Ask Aqua (Ctrl+8)"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="workbench" ui:UiProps.Icon="wand" Content="Workbench" ToolTip="Teach Aqua skills and things to remember"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="agents" ui:UiProps.Icon="agents" Content="Agents" ToolTip="Agents (Ctrl+9)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="models" ui:UiProps.Icon="cube" Content="Models" ToolTip="Your local model library" AutomationProperties.AutomationId="nav-models"/>
             </StackPanel>
+            </ScrollViewer>
 
             <StackPanel Grid.Row="2" Margin="0,0,0,10">
                 <!-- AI status -->
@@ -72,7 +75,7 @@
         <!-- ══════════ Content ══════════ -->
         <Grid Grid.Column="1">
             <Grid.RowDefinitions>
-                <RowDefinition Height="48"/>
+                <RowDefinition Height="32"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -82,8 +85,8 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Button x:Name="CommandBox" Style="{StaticResource Btn.Standard}" WindowChrome.IsHitTestVisibleInChrome="True" HorizontalAlignment="Stretch"
-                        MaxWidth="480" MinWidth="150" Height="34" Margin="4,0,12,0" Padding="12,0" HorizontalContentAlignment="Stretch" Click="OnCommandBoxClick"
+                <Button x:Name="CommandBox" Style="{StaticResource Btn.Standard}" WindowChrome.IsHitTestVisibleInChrome="True" HorizontalAlignment="Left" VerticalAlignment="Center"
+                        MaxWidth="480" MinWidth="150" Height="24" Margin="32,4,12,4" Padding="10,0" HorizontalContentAlignment="Stretch" Click="OnCommandBoxClick"
                         ToolTip="Ask anything or run a command (Ctrl+K)">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -112,7 +115,8 @@
                             <c:Icon Kind="bell" Width="17" Height="17"/>
                             <Border x:Name="BellBadge" MinWidth="14" Height="14" CornerRadius="7" Background="{DynamicResource B.Down}" HorizontalAlignment="Right"
                                     VerticalAlignment="Top" Margin="0,-6,-8,0" Padding="3,0" Visibility="Collapsed">
-                                <TextBlock x:Name="BellCount" FontSize="9" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="BellCount" FontFamily="Segoe UI" FontSize="9" FontWeight="SemiBold" Foreground="White" TextAlignment="Center"
+                                           LineHeight="12" LineStackingStrategy="BlockLineHeight" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="0"/>
                             </Border>
                         </Grid>
                     </Button>

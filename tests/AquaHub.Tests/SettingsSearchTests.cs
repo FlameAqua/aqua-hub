@@ -86,7 +86,7 @@ public class SettingsSearchTests
     [InlineData("Ctrl+H+J")]     // two keys
     [InlineData("Ctrl+Space+Enter")]
     [InlineData("Ctrl+F25")]
-    [InlineData("Ctrl+Tab")]
+    [InlineData("Ctrl+Mouse1")]
     public void NotAShortcut(string typed) => Assert.False(Shortcuts.TryNormalize(typed, out _, out _));
 
     [Fact]

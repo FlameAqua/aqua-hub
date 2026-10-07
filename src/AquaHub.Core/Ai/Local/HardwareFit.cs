@@ -96,6 +96,7 @@ public static class HardwareFit
         foreach (var step in ContextSteps)
         {
             if (step > cap || step > trained) break;
+            if (step < 8192) continue;
             if (Estimate(model, step, cacheType, gpu).Verdict == FitVerdict.Fits) best = step;
         }
         return best;

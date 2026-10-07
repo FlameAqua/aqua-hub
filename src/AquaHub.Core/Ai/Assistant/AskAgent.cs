@@ -452,13 +452,13 @@ public sealed partial class AskAgent
                 }, run.Now);
                 var (doc, _) = await _llm.CompleteJsonAsync(request with { Model = o.Model }, timeout.Token).ConfigureAwait(false);
                 using (doc) plan = AskPlanner.Merge(doc.RootElement, rules, question, o, run.Skills.Select(k => k.Name).ToList(), history);
-                run.Host.StepFinished(step, "Plan: " + plan.Describe());
+                run.Host.StepFinished(step, plan.Describe() is { Length: > 0 } description ? "Plan: " + description : "");
             }
             catch (Exception ex) when (ex is FormatException or JsonException or HttpRequestException or LlmUnavailableException or InvalidOperationException ||
                                        ex is OperationCanceledException && !ct.IsCancellationRequested)
             {
                 Log.Info("ask", "The model couldn't plan; using the rules: " + ex.Message);
-                run.Host.StepFinished(step, "Plan: " + rules.Describe());
+                run.Host.StepFinished(step, rules.Describe() is { Length: > 0 } description ? "Plan: " + description : "");
             }
         }
         if (o.SkillId is { } id && run.Skills.FirstOrDefault(k => k.Id == id) is { } forced) plan = plan with { Skill = forced.Name };

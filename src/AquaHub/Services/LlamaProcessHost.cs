@@ -37,9 +37,21 @@ public sealed class LlamaProcessHost : ILlamaProcessHost, IDisposable
             WorkingDirectory = workingDirectory,
         };
         foreach (var a in arguments) info.ArgumentList.Add(a);
-        foreach (var key in info.Environment.Keys.Where(k => k.StartsWith("LLAMA_", StringComparison.OrdinalIgnoreCase)
-                                                             || k.StartsWith("GGML_", StringComparison.OrdinalIgnoreCase)).ToList())
-            info.Environment.Remove(key);
+        // ProcessStartInfo starts with the full parent environment. Keep only the Windows variables the native process
+        // loader and temp-file APIs need; model/server configuration must come from this host, not the user's shell.
+        var inherited = info.Environment;
+        var systemRoot = inherited.TryGetValue("SystemRoot", out var root) ? root : Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var temp = inherited.TryGetValue("TEMP", out var inheritedTemp) ? inheritedTemp : Path.GetTempPath();
+        info.Environment.Clear();
+        if (!string.IsNullOrWhiteSpace(systemRoot))
+        {
+            info.Environment["SystemRoot"] = systemRoot;
+            info.Environment["WINDIR"] = systemRoot;
+        }
+        info.Environment["TEMP"] = temp;
+        info.Environment["TMP"] = temp;
+        if (!string.IsNullOrWhiteSpace(systemRoot))
+            info.Environment["PATH"] = Path.Combine(systemRoot, "System32") + Path.PathSeparator + systemRoot;
         foreach (var (key, value) in environment) info.Environment[key] = value;
         var dir = Path.GetDirectoryName(program)!;
         if (!File.Exists(Path.Combine(dir, "ggml-cuda.dll")) && new[] { "cuda_v12", "cuda_v13" }.Select(v => Path.Combine(dir, v)).FirstOrDefault(Directory.Exists) is { } cuda)

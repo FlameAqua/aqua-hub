@@ -218,7 +218,8 @@ public sealed class HotkeyManager : IDisposable
     {
         modifiers = 0;
         vk = 0;
-        foreach (var raw in gesture.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        if (!AquaHub.Core.Settings.Shortcuts.TryNormalize(gesture, out var normalized, out _)) return false;
+        foreach (var raw in normalized.Split('+'))
         {
             switch (raw.ToLowerInvariant())
             {
@@ -226,11 +227,9 @@ public sealed class HotkeyManager : IDisposable
                 case "alt": modifiers |= Native.MOD_ALT; break;
                 case "shift": modifiers |= Native.MOD_SHIFT; break;
                 case "win" or "windows": modifiers |= Native.MOD_WIN; break;
-                case "space": vk = 0x20; break;
-                case "enter": vk = 0x0D; break;
-                case var k when k.Length == 1 && char.IsLetterOrDigit(k[0]): vk = char.ToUpperInvariant(k[0]); break;
-                case var f when f.StartsWith('f') && int.TryParse(f[1..], out var n) && n is >= 1 and <= 24: vk = 0x70 + n - 1; break;
-                default: return false;
+                default:
+                    if (vk != 0 || !AquaHub.Core.Settings.Shortcuts.TryGetVirtualKey(raw, out vk)) return false;
+                    break;
             }
         }
         return vk != 0 && modifiers != 0;

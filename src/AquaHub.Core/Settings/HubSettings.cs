@@ -19,6 +19,7 @@ public sealed class HubSettings
     public PredictionSettings Predictions { get; set; } = new();
     public AiSettings Ai { get; set; } = new();
     public AskSettings Ask { get; set; } = new();
+    public ImageStudioSettings ImageGeneration { get; set; } = new();
     public List<AppEntry> Apps { get; set; } = new();
     public List<Scene> Scenes { get; set; } = new();
     public NotificationSettings Notifications { get; set; } = new();
@@ -287,6 +288,12 @@ public sealed class AiSettings
     public string Model { get; set; } = "auto";
     /// <summary>Optional larger model for the daily brief and market analysis ("" = same as Model).</summary>
     public string DeepModel { get; set; } = "";
+    /// <summary>
+    /// Each provider's own <see cref="Model"/> and <see cref="DeepModel"/>: stored when you switch provider and restored
+    /// when you switch back (an Ollama name means nothing to an OpenAI-style server, and a Hugging Face download nothing to
+    /// Ollama). Settings keeps it up to date; keys are "ollama", "llamacpp" and "openai".
+    /// </summary>
+    public Dictionary<string, ProviderModelChoice> ProviderModels { get; set; } = new();
     public List<string> PreferredModels { get; set; } = new()
     {
         "qwen3.5:9b", "qwen3.5:4b", "qwen3:8b", "qwen3:14b", "gemma3:12b", "qwen3:4b", "gemma3:4b",
@@ -321,6 +328,13 @@ public sealed class AiSettings
 /// from Hugging Face, checked the same way) or from Ollama's store, read where they are. The main model is
 /// <see cref="AiSettings.Model"/> ("auto" or a library id such as "ollama:qwen3.5:9b").
 /// </summary>
+/// <summary>The models one provider was set to use.</summary>
+public sealed class ProviderModelChoice
+{
+    public string Model { get; set; } = "auto";
+    public string DeepModel { get; set; } = "";
+}
+
 public sealed class LlamaSettings
 {
     /// <summary>auto | cuda12 | cuda13 | vulkan | cpu — which llama.cpp build to install (auto picks the one for this PC).</summary>
@@ -331,11 +345,15 @@ public sealed class LlamaSettings
     public string ModelsFolder { get; set; } = "";
     /// <summary>Offer the models already in Ollama's store too (read where they are, never changed or moved).</summary>
     public bool UseOllamaModels { get; set; } = true;
-    /// <summary>A library id for writing that needs a different voice (Roleplay, later phases); empty = the main model.</summary>
+    /// <summary>
+    /// Run Ollama's own conversions on the llama-server that comes with Ollama when Aqua's llama.cpp build can't read them
+    /// (or isn't installed). Its servers stop after <see cref="IdleUnloadMinutes"/>, so Ollama's files are free when it updates.
+    /// </summary>
+    public bool UseOllamaEngine { get; set; } = true;
+    /// <summary>A library id for Roleplay's creative voice; empty = the main model.</summary>
     public string CreativeModel { get; set; } = "";
     /// <summary>
-    /// A library id for background work, run on the processor so the agents never wait for (or swap out) the graphics
-    /// card's model; empty = background work uses the model that's loaded, or the main one.
+    /// A library id for the news, social and foresight editor, run on the graphics card; empty = use the main model.
     /// </summary>
     public string BackgroundModel { get; set; } = "";
     /// <summary>An embedding model's library id, for search by meaning (Phase 8); empty = none.</summary>

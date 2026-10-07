@@ -82,7 +82,7 @@
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.CloseToTray}"/>
                         </c:SettingRow>
                         <c:SettingRow Icon="moon" Title="Theme" Keywords="dark mode light mode appearance">
-                            <ComboBox SelectedValue="{Binding General.Theme}" SelectedValuePath="Tag" Width="200">
+                            <ComboBox SelectedValue="{Binding General.Theme}" SelectedValuePath="Tag" Width="200" SelectionChanged="OnThemeChanged" AutomationProperties.AutomationId="settings-theme">
                                 <ComboBoxItem Content="Use Windows setting" Tag="system"/>
                                 <ComboBoxItem Content="Dark" Tag="dark"/>
                                 <ComboBoxItem Content="Light" Tag="light"/>
@@ -115,6 +115,8 @@
                     <!-- ═══ Shortcuts ═══ -->
                     <StackPanel x:Name="P_shortcuts" Visibility="Collapsed">
                         <TextBlock Text="Shortcuts" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <TextBlock Text="Global shortcuts support keyboard keys only; Windows does not register mouse buttons as system-wide hotkeys."
+                                   Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,0,0,12"/>
                         <c:SettingRow Icon="keyboard" Title="Quick panel hotkey" Description="Opens the quick panel from any app." Keywords="shortcut keyboard flyout widget">
                             <StackPanel Orientation="Horizontal">
                                 <c:HotkeyBox x:Name="FlyoutHotkey" Text="{Binding General.HotkeyFlyout, UpdateSourceTrigger=PropertyChanged}" DefaultGesture="Ctrl+Alt+H" Width="200"/>
@@ -625,29 +627,34 @@
                     <StackPanel x:Name="P_ai" Visibility="Collapsed">
                         <TextBlock Text="AI &amp; models" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
                         <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
-                                   Text="AI runs on this PC through Ollama or another local server (LM Studio, llama.cpp). Without a model, Aqua uses simpler summaries."/>
+                                   Text="Choose how Aqua runs your models. Your own runtime gives you control over memory, context and speed."/>
                         <c:SettingRow Icon="sparkle" Title="Use local AI">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.Enabled}"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="cube" Title="Model server">
-                            <StackPanel Orientation="Horizontal">
-                                <ComboBox SelectedValue="{Binding Ai.Provider}" SelectedValuePath="Tag" Width="170" Margin="0,0,6,0">
+                        <c:SettingRow Icon="cube" Title="Provider" Keywords="llama cpp runtime model server">
+                            <c:SettingRow.Below>
+                                <ComboBox x:Name="AiProvider" SelectedValuePath="Tag" SelectionChanged="OnAiProvider" AutomationProperties.AutomationId="settings-ai-provider" AutomationProperties.Name="AI provider">
                                     <ComboBoxItem Content="Ollama" Tag="ollama"/>
-                                    <ComboBoxItem Content="OpenAI-compatible" Tag="openai"/>
+                                    <ComboBoxItem Content="Aqua's own runtime (faster, more control)" Tag="llamacpp"/>
+                                    <ComboBoxItem Content="OpenAI-compatible server" Tag="openai"/>
                                 </ComboBox>
-                                <TextBox Text="{Binding Ai.Endpoint, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
-                            </StackPanel>
+                            </c:SettingRow.Below>
                         </c:SettingRow>
-                        <c:SettingRow Icon="shield" Title="API key (OpenAI-compatible servers only)" Description="For servers that need a key (LM Studio, llama.cpp, vLLM). Kept in Windows Credential Manager.">
+                        <TextBlock x:Name="ProviderNotice" Foreground="{DynamicResource B.Warn}" TextWrapping="Wrap" Margin="4,6,4,0" AutomationProperties.LiveSetting="Polite"/>
+                        <c:RuntimeSettings x:Name="RuntimeCard"/>
+                        <c:SettingRow x:Name="EndpointRow" Icon="cube" Title="Server address">
+                            <TextBox Text="{Binding Ai.Endpoint, UpdateSourceTrigger=PropertyChanged}" Width="260"/>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="ApiKeyRow" Icon="shield" Title="API key (OpenAI-compatible servers only)" Description="For servers that need a key (LM Studio, llama.cpp, vLLM). Kept in Windows Credential Manager.">
                             <StackPanel Orientation="Horizontal">
                                 <PasswordBox x:Name="AiKey" Width="220" AutomationProperties.Name="AI server API key"/>
                                 <Button Style="{StaticResource Btn.Standard}" Content="Save key" Margin="6,0,0,0" Click="OnSaveAiKey"/>
                             </StackPanel>
                         </c:SettingRow>
-                        <c:SettingRow Icon="cube" Title="Model" Description="'Automatic' picks the best installed model (qwen3.5:9b → qwen3:8b → gemma3…).">
+                        <c:SettingRow x:Name="LegacyModelRow" Icon="cube" Title="Model" Description="'Automatic' picks the best installed model (qwen3.5:9b → qwen3:8b → gemma3…).">
                             <ComboBox x:Name="ModelCombo" Width="240" SelectionChanged="OnModelChanged"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="book" Title="Model for briefs &amp; market analysis" Description="A larger model for long write-ups. One model for everything avoids reloading.">
+                        <c:SettingRow x:Name="DeepModelRow" Icon="book" Title="Model for briefs &amp; market analysis" Description="A larger model for long write-ups. One model for everything avoids reloading.">
                             <ComboBox x:Name="DeepModelCombo" Width="240" SelectionChanged="OnDeepModelChanged"/>
                         </c:SettingRow>
                         <c:SettingRow Icon="check" Title="Connection">
@@ -660,6 +667,10 @@
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.PauseWhenFullscreen}"/>
                         </c:SettingRow>
 
+                        <c:SettingRow x:Name="RuntimeGamingRow" Icon="game" Title="Free the graphics card for games" Description="Unload Aqua's model when another app needs the card. Your next question loads it again.">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.StopOllamaForGpu}"/>
+                        </c:SettingRow>
+                        <StackPanel x:Name="OllamaSettings">
                         <TextBlock Text="LOCAL AI SERVER (OLLAMA)" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
                         <c:SettingRow Icon="cube" Title="Ollama" Description="Off frees its memory; AI features use simpler fallbacks meanwhile.">
                             <StackPanel Orientation="Horizontal">
@@ -684,6 +695,7 @@
                         <c:SettingRow Icon="disk" Title="Ollama location" Description="Leave empty to use the standard install (%LOCALAPPDATA%\Programs\Ollama) or PATH.">
                             <TextBox Text="{Binding Ai.OllamaPath, UpdateSourceTrigger=PropertyChanged}" Width="260" ui:UiProps.Placeholder="Auto-detected"/>
                         </c:SettingRow>
+                        </StackPanel>
                         <c:SettingRow Icon="sunrise" Title="Brief times" Description="When your Chief of Staff writes a fresh brief (HH:mm).">
                             <c:SettingRow.Below><c:ChipEditor x:Name="BriefTimes"/></c:SettingRow.Below>
                         </c:SettingRow>

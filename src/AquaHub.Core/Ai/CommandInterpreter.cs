@@ -18,7 +18,7 @@ public sealed record HubCommand(string Action, string Target = "", string Value 
 /// </summary>
 public sealed partial class CommandInterpreter
 {
-    public static readonly string[] Pages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "settings" };
+    public static readonly string[] Pages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "models", "settings" };
 
     private static readonly Dictionary<string, string> PageAliases = new(StringComparer.OrdinalIgnoreCase)
     {

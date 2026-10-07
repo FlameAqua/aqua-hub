@@ -9,6 +9,7 @@ namespace AquaHub.Services;
 public sealed class ThemeService
 {
     private ResourceDictionary? _colors;
+    private (bool Dark, Color? Accent)? _applied;
     private static readonly string[] AccentKeys = { "B.Accent", "B.AccentHover", "B.AccentText", "B.AccentSoft", "B.OnAccent" };
 
     public bool IsDark { get; private set; } = true;
@@ -17,6 +18,15 @@ public sealed class ThemeService
     public void Apply(GeneralSettings g)
     {
         IsDark = g.Theme switch { "dark" => true, "light" => false, _ => OsSignals.IsDarkTheme() };
+        var accent = g.Accent switch
+        {
+            "system" => SystemAccent(),
+            var hex when hex.StartsWith('#') => TryParse(hex),
+            _ => null,
+        };
+        var desired = (IsDark, accent);
+        if (_applied == desired) return;
+        _applied = desired;
         var app = Application.Current;
         var dict = new ResourceDictionary { Source = new Uri($"pack://application:,,,/UI/Theme/Colors.{(IsDark ? "Dark" : "Light")}.xaml") };
         var merged = app.Resources.MergedDictionaries;
@@ -26,12 +36,6 @@ public sealed class ThemeService
         _colors = dict;
 
         foreach (var key in AccentKeys) app.Resources.Remove(key);
-        var accent = g.Accent switch
-        {
-            "system" => SystemAccent(),
-            var hex when hex.StartsWith('#') => TryParse(hex),
-            _ => null,
-        };
         if (accent is { } c) ApplyAccent(app.Resources, c);
 
         foreach (Window w in app.Windows) WindowEffects.SetDark(w, IsDark);

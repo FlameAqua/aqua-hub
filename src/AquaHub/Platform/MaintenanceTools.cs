@@ -35,14 +35,14 @@ public static class MaintenanceTools
     public static Tool? Find(string id) => All.FirstOrDefault(t => t.Id == id);
 
     /// <summary>Opens a tool (the fixed command above; never anything passed in).</summary>
-    public static bool Open(string id, string? arguments = null)
+    public static bool Open(string id, string? arguments = null, bool runAsAdmin = false)
     {
         if (Find(id) is not { } tool) return false;
         var args = arguments ?? tool.Arguments;
-        if (Sandbox.Intercept("maintenance-tool", tool.Name + (args.Length > 0 ? " " + args : ""))) return true;
+        if (Sandbox.Intercept("maintenance-tool", tool.Name + (args.Length > 0 ? " " + args : "") + (runAsAdmin ? " · administrator" : ""))) return true;
         try
         {
-            Process.Start(new ProcessStartInfo(tool.Command, args) { UseShellExecute = true });
+            Process.Start(StartInfo(tool, args, runAsAdmin));
             return true;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
@@ -51,6 +51,14 @@ public static class MaintenanceTools
             Log.Info("system", $"{tool.Name} didn't open: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>Creates the fixed shell launch request; tests may inspect elevation without starting a process.</summary>
+    internal static ProcessStartInfo StartInfo(Tool tool, string arguments, bool runAsAdmin)
+    {
+        var info = new ProcessStartInfo(tool.Command, arguments) { UseShellExecute = true };
+        if (runAsAdmin) info.Verb = "runas";
+        return info;
     }
 
     /// <summary>A drive in File Explorer.</summary>

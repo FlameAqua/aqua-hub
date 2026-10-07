@@ -326,6 +326,8 @@ public sealed class AskSession
         if (title.Length == 0) return;
         if (_open.TryGetValue(id, out var t) && t.Summary is { } ts) { ts.Title = title; ts.Named = true; }
         Hub.Core.Chats.Update(id, c => { c.Title = title; c.Named = true; });
+        // Update both the history row and the page heading immediately; the store persists the user name.
+        RefreshChats();
     }
 
     public void Delete(string id)
@@ -929,6 +931,24 @@ public sealed class AskSession
                 _ = ResendAsync(thread, thread.Messages[at - 1], vm.Question, vm.Options);
             else _ = SendAsync(vm.Question, vm.Options ?? CurrentOptions(null));
         });
+        vm.RetryWithGuidanceCommand = new RelayCommand(() =>
+        {
+            if (thread.IsBusy || vm.Question.Length == 0) return;
+            vm.RetryGuidance = "";
+            vm.IsGuidanceEditing = true;
+        });
+        vm.CancelGuidedRetryCommand = new RelayCommand(() => vm.IsGuidanceEditing = false);
+        vm.SubmitGuidedRetryCommand = new RelayCommand(() =>
+        {
+            var guidance = vm.RetryGuidance.Trim();
+            vm.IsGuidanceEditing = false;
+            if (thread.IsBusy || guidance.Length == 0) return;
+            var question = vm.Question + "\n\nAdditional guidance: " + guidance;
+            var at = thread.Messages.IndexOf(vm);
+            if (at == thread.Messages.Count - 1 && at >= 1 && thread.Messages[at - 1].IsUser)
+                _ = ResendAsync(thread, thread.Messages[at - 1], question, vm.Options);
+            else _ = SendAsync(question, vm.Options ?? CurrentOptions(null));
+        });
         vm.DeeperCommand = new RelayCommand(() =>
         {
             if (thread.IsBusy || vm.Question.Length == 0) return;
@@ -1376,6 +1396,7 @@ public sealed class AskSession
         {
             var step = _answer.Steps.FirstOrDefault(s => s.Id == id);
             if (step is null) return;
+            if (text.Length == 0) { _answer.Steps.Remove(step); return; }
             step.Text = text;
             step.State = ok ? "ok" : "failed";
             if (url is not null && (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
