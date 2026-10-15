@@ -17,7 +17,7 @@
     <PackageVersion Include="WpfMath" Version="2.1.0" />
     <PackageVersion Include="XamlMath.Shared" Version="2.1.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
   </ItemGroup>
 </Project>
