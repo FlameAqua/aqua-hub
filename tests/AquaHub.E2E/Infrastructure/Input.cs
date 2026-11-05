@@ -25,6 +25,7 @@ public static class Input
     /// <summary>Brings a window of the app to the foreground (AttachThreadInput dance, same as the app itself does).</summary>
     public static bool TryActivate(IntPtr hwnd)
     {
+        if (E2EConfig.PatternsOnly) throw new InvalidOperationException("Component runs use UI Automation patterns; foreground/input injection is disabled.");
         if (hwnd == IntPtr.Zero || !Win32.IsWindow(hwnd)) return false;
         var pid = Win32.PidOf(hwnd);
         if (AppWindows.ForegroundPid() == pid) return true;
@@ -48,6 +49,7 @@ public static class Input
     /// <summary>Throws unless the foreground window belongs to <paramref name="pid"/>.</summary>
     public static void Guard(int pid)
     {
+        if (E2EConfig.PatternsOnly) throw new InvalidOperationException("Keyboard/mouse injection is disabled in offline component runs.");
         var fg = AppWindows.ForegroundPid();
         if (fg != pid)
             throw new InputRefusedException($"Refusing to send input: the foreground window belongs to process {fg}, not the app under test ({pid}).");

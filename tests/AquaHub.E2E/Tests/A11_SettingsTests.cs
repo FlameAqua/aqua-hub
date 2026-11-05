@@ -7,6 +7,8 @@ namespace AquaHub.E2E.Tests;
 /// Settings: every section, every switch / combo / text box / chip editor, news sources, calendars, holdings,
 /// scenes editor, data actions — each change verified in settings.json (or the journal).
 /// </summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Settings")]
 public sealed class A11_SettingsTests : E2ETestBase
 {
     public A11_SettingsTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Upcoming (calendar shortcuts, prediction cards) and This PC (processes, Pause/Resume AI, Free VRAM).</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Feeds")]
 public sealed class A07_UpcomingSystemTests : E2ETestBase
 {
     public A07_UpcomingSystemTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

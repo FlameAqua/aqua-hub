@@ -4,6 +4,8 @@ using System.Text.Json.Nodes;
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Ask page interactions that do not need a local model or external services.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Ask")]
 public sealed class A20_AskUiTests : E2ETestBase
 {
     public A20_AskUiTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

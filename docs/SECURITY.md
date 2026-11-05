@@ -1,74 +1,200 @@
-# Aqua Hub — Security & privacy model
+# Aqua Hub security and privacy
 
-Aqua Hub runs as the signed-in user, never needs administrator rights, opens **no listening ports**,
-and has **no account, cloud backend or telemetry**. Its network traffic is HTTPS requests to the sources you
-enable, loopback requests to your local model server and — only when you switch on Ask's **Web** or
-**Research** — web searches (DuckDuckGo by default) and the public pages Ask reads. Whisper (optional speech
-recognition) is downloaded only when you click *Install* in Settings › Ask Aqua › Voice. *Use my location* asks
-Windows where the PC roughly is and looks the town up with OpenStreetMap, only when you click it. A copy installed with
-Setup asks the project's GitHub releases for a newer version about once a day (Settings › About can switch that
-off), and downloads one only when you click *Download*.
+Reviewed 5 November 2026 against `86f5ec6`. This is the implemented policy and its known limits, not a claim of a complete
+security audit. See [Architecture](ARCHITECTURE.md), [development checks](DEVELOPMENT.md) and the
+[remaining work](ROADMAP.md). Report vulnerabilities privately using the repository's Security tab when available;
+do not put credentials or private captures in public issues.
 
-## Threat model
+## 1. Trust boundaries
 
-| Asset | Threat | Mitigation |
+Aqua runs as the signed-in user. Its normal features do not require elevation. The optional .NET Desktop Runtime
+installer can request elevation, and explicitly chosen Windows maintenance tools can have their own prompts.
+There is no Aqua account/backend or telemetry. Local AI is the default; a remote AI endpoint is an explicit opt-in.
+Model subprocesses Aqua starts listen on loopback, not a network interface accessible to other computers.
+
+| Boundary | Allowed data/effects | Enforcement |
 |---|---|---|
-| Your PC | Malicious feed content (XML attacks) | `XmlReader` with DTDs ignored, no external resolution, entity/document size caps → no XXE, no billion-laughs; Office files with a DTD aren't read at all. Unit-tested: a DTD's external entities (a listener on the test PC, a file) are never fetched, and a feed or Word file that uses one is refused rather than filled in. |
-| Your PC | Malicious links in feeds/model output (`file:`, `ms-msdt:`, `javascript:`, UNC paths) | Links open only if they are absolute `http(s)` URLs without credentials (`AppLauncher.OpenUrl`). App-protocols are allowed only for apps *you* configured. |
-| Your PC | Prompt injection making the AI “do” something | The background agents that read web content have **no tools** — worst case is a skewed summary. Ask's tools are classed by what they touch: anything that acts on the PC (opening a file, link or app, running a scene, media, reading the clipboard, and with *Let Ask operate apps* clicking, typing, pressing shortcuts or closing a window) shows **Allow / Allow for this chat / Don't allow** in the chat first, with exactly what would be typed, pressed, opened or sent. Typing that presses Enter and key presses are never "allowed for this chat" — each needs its own OK — and once an answer has read anything that isn't your own words (web pages, feeds, files, the screen, app windows, the clipboard or attachments), typing, clicking, key presses and closing windows ask every time, even with *Ask before acting* off. App control works through UI Automation on other apps' windows only, and keystrokes go only to the approved window: Aqua checks it's really in front (it or its own dialog) before every chunk and stops if focus moves. Never Aqua's own windows (so it can't approve its own requests), never anything that runs typed commands — terminals and shells, File Explorer (its address bar) and the Run dialog, code editors with a built-in terminal, script hosts — nor registry or system tools, sign-in, UAC or security prompts, password managers or password fields. *launch_app* won't start shells, terminals, the Run dialog, installers, script files or admin tools; there's no Windows key or Alt+F4, and programs, scripts and shortcuts are never opened. Taught skills are recipes of these same tools with the same rules; no code runs. Ask's *run_agent* can only run Aqua's own agents from a fixed list of jobs, each at most once per answer — they fetch what they fetch on their schedule anyway. The command agent never sees web content, and its output is an **enum-constrained action** validated against your configured apps/scenes/pages (it cannot name executables, paths, URLs or shell commands). All untrusted text — tool results and pages, and a chat's notes, summary and earlier turns — is fenced in `<<<DATA … DATA>>>` blocks with explicit instructions to ignore embedded instructions, and a fence mark inside the text is defused, so it can't close the block early. |
-| Your data | A web page steering Ask into leaking private data | Once an answer has seen your files, screen, attachments, clipboard or holdings, every search, page request or link opened in your browser needs your OK in the chat, and the card shows the whole query or address. The chat remembers that it has (saved with it), so its later answers ask too: its messages, notes and summary carry what was read. A search or link that would carry details from your calendar, from what Aqua remembers or from the chat's notes (names, places you didn't ask about yourself, numbers such as an order or account number) needs an OK too. Ask only opens links you gave (in this message or earlier in the chat) — an address the model makes up is never fetched on its own; its searches find pages. Tool results are fenced as untrusted data. |
-| Your files | Ask reading more than you intended | Only folders you list in Settings › Ask Aqua (Documents, Desktop, Downloads and Pictures by default), a folder you attach to a chat (for that chat only, and never saved with it: the × on its chip above the box takes it back at once, for *Retry*, *Dig deeper* and *Edit* too; app-data, system and key folders can't be attached, nor a linked folder that leads to one) or files you attach; paths are resolved before checking, short 8.3 names included (`SSH~1` is judged as `.ssh`), so `..`, short names or look-alike folders can't escape; a linked folder or file inside them (a junction or symbolic link) is never followed: searches don't walk into one and Ask won't read through one, as it could lead anywhere; and Windows Search index results are checked against the same rules. Password stores, keys, certificates, `.env`, `.ssh`, AppData and similar are never read or listed; searches never walk into Windows, program, app-data or cache folders, and cloud-only OneDrive files are never downloaded to be read. Pictures Ask looks at to find one you described go to the local model only (and show in the answer — kept with the chat as thumbnails, below). |
-| Your privacy | Screenshots and pictures kept with chats | Settings › Privacy › *Keep pictures with chats* is **on by default**. With it on, the screenshots Ask takes and the pictures you paste are kept whole with the chat in `%LOCALAPPDATA%\AquaHub\chat-media\<chat>` — so a screenshot keeps whatever was on screen at that moment (messages, documents, account pages) for as long as the chat is kept, and the Allow card for a screenshot says so. Pictures on the PC that Ask reads or looks at, and pictures you attach from a file, are only linked: the chat keeps their path and a 320-pixel thumbnail, never a copy. They're shown in the chat and go nowhere else. The folder is deleted with its chat (by you, by *Delete chats after*, or by turning off *Keep Ask chats*, which also means nothing is kept to begin with), and switching *Keep pictures with chats* off deletes every chat's pictures at once — the files and the chats' record of them (paths and what each showed) — and keeps none from then on; Settings shows how much space they take. Files are named from a hash of their content, and a name read back from the database must have that form, so a tampered database can't point Aqua at another file in that folder; a linked picture's path opens only from a drive (never a network path) and, as with a file link in an answer, only documents, pictures and media open — anything else is shown in File Explorer, never run. |
-| Your voice | Dictation leaving the PC | Voice input uses Windows' offline desktop recognizer by default, or Whisper once you install it — both on this PC; Windows online speech recognition (Microsoft's service) only if you choose it in Settings › Ask Aqua and have allowed it in Windows privacy settings. The microphone is recorded only while you dictate (the microphone button or Settings' test), straight into memory — never saved: Whisper gets the recording through a pipe to its own process, never as a file, and sends nothing anywhere. The tidy-up sends the words (not the audio) to the local model only. |
-| Your PC | Whisper: a program Aqua downloads | Only when you click *Install*: whisper.cpp's own Windows build from its GitHub release (one fixed build, b5130 = v1.9.4) and one model from the whisper.cpp project's Hugging Face repository (one fixed commit), over HTTPS. Each file streams to a `.part` file and must match the size and SHA-256 pinned in Aqua (the digests GitHub and Hugging Face publish), or it is deleted; from the archive only `whisper-cli.exe` and the libraries beside it are kept — no other programs. It lives in `%LOCALAPPDATA%\AquaHub\whisper`, runs as you with fixed arguments and writes no files, is ended if a dictation is cancelled or runs too long, and *Remove Whisper* deletes all of it. The install record can only point inside that folder, and only at `whisper-cli.exe`. |
-| Your PC | The health check | Read-only and without administrator rights: drive, update, event-log, antivirus, device, battery, startup and folder-size readings that Windows already keeps; nothing is changed, installed, searched for online or sent anywhere. The report is kept in the local database and summarised by the local model. Its buttons open Windows' own tools from a fixed list. |
-| Your network | Ask fetching internal addresses (SSRF) | `WebReader` checks every connection, redirects included, at connect time and refuses loopback, private, link-local (cloud metadata), CGNAT and IPv6 unique-local addresses; it doesn't use a proxy (the check must see the real host), accepts only http(s) without credentials, caps responses at 5 MB and never runs page scripts. |
-| Your PC | Rendering remote HTML | Never rendered. All remote HTML is reduced to plain text (scripts/styles/iframes stripped, entities decoded). Images are decoded by Windows' WIC after HTTPS download with a 4 MB cap, and can be turned off entirely. |
-| Your PC | Resource exhaustion by a hostile/broken source | Response size caps (4–12 MB), request timeouts, bounded parallelism, per-host cool-down after 429/503, capped agent run time. |
-| Your data | Data leaving the machine | AI endpoints must be loopback unless you explicitly allow a remote one; the LLM HTTP client bypasses system proxies. No telemetry. Remote images can be disabled (they reveal your IP to publishers). Your holdings reach the model only for a question about your portfolio. |
-| Your secrets | API keys in plain text | Keys (Finnhub, optional OpenAI-compatible key) are stored in **Windows Credential Manager** (DPAPI, per user) — never in `settings.json` or logs. URLs are redacted (`?…`) before logging. |
-| Your accounts | Reading your own timelines | Optional and read-only. Bluesky uses an **app password** (revocable, not your main password) and Mastodon an access token you create with only the `read:statuses` scope; both live in Credential Manager. The Bluesky session token is kept in memory only, sign-in goes to `bsky.social` over HTTPS, and after a failed sign-in Aqua waits 30 minutes before trying again (no lock-out storms). *Disconnect* deletes the stored secret. |
-| Your settings | Corrupted/hostile `settings.json` | Strict validation on every load/save: HTTPS-only feed URLs, symbol/subreddit/time patterns, clamped numbers; a broken file is preserved as `.broken` and defaults are used. Atomic writes. |
-| The database | SQL injection | Parameterised statements only; FTS queries are rebuilt from tokenised, quoted terms (unit-tested with hostile input). |
-| Your PC | A malicious or broken update | Updates come only from the GitHub repository the release was built from: the release workflow writes its address into the build, and Aqua accepts only an `https://github.com/owner/repo` address (anything else turns updates off); source builds have none and never check. Everything travels over HTTPS; nothing is downloaded until you click *Download*, and nothing installs until Aqua Hub restarts (*Restart now*, or the next start). Velopack checks each package against the SHA-256 in the release's feed before using it, installs the new version beside the old one in `%LOCALAPPDATA%\AquaHub.App` and switches over in one step, and never touches the profile in `%LOCALAPPDATA%\AquaHub`. The remaining trust is in whoever can publish releases on that repository: protect the account with two-factor sign-in and limit who can push `v*` tags. The packages aren't code-signed, so Windows SmartScreen warns the first time Setup runs. The pretend release behind `--demo-update` exists only in Debug builds and E2E dry runs, never downloads or installs anything, and raises no alert (it shows in the banner and Settings only). |
-| Your privacy | Your location | There's no default place: until you choose one, nothing local is fetched (no weather, no local news search). Searching for a town sends what you typed to Open-Meteo's geocoding API. *Use my location* runs only when you click it: Windows decides whether desktop apps may know the position (it may ask you first; Settings › Privacy & security › Location turns it off, and Aqua then links there instead). Aqua asks for town-level accuracy (about 3 km, Wi-Fi or network positioning rather than GPS), rounds the position to two decimals (about 1 km) and sends that once to OpenStreetMap's Nominatim to name the town (as its usage policy asks: one request per click, an identifying user agent, attribution shown), then the town's name to Open-Meteo for its time zone. Only the town and its rounded coordinates are saved, in `settings.json`; weather requests carry them to Open-Meteo, as any chosen place's do. In the E2E sandbox (`--e2e`) the position is simulated, so nothing is asked or sent. |
-| Your privacy | The update check | About once a day, unauthenticated HTTPS: one request to GitHub's API listing the recent releases, then each listed release's small feed file (`releases.win.json`, up to ten) from GitHub's file servers, which also serve the package when you download one. It carries nothing about you beyond what any web request does (your IP address, and Velopack's user agent). Off with Settings › About › *Check for updates automatically*; *Check now* still works. |
-| Supply chain | Malicious/compromised packages | Four runtime dependencies: Microsoft's Microsoft.Data.Sqlite and System.Speech (offline dictation), Velopack (MIT-licensed, open source, no dependencies of its own on .NET 8+) for Setup and updates, and XAML-Math (WpfMath and its XamlMath.Shared; MIT-licensed, open source, its fonts under the SIL Open Font License) to draw formulae in Ask's answers — it only parses and draws LaTeX text from the answer; its parser is recursive and a stack overflow can't be caught, so a formula over 1,500 characters, nested more than 24 groups deep or with more than 100 line breaks is shown as text instead, and formulae are drawn on a thread with a 32 MB stack (the limits are tested on 512 KB); microphone choice, the health check and WMI use only Windows' own APIs. `nuget.config` clears all sources and maps every package to nuget.org (anti dependency-confusion) and sets `signatureValidationMode=require` with nuget.org's repository certificates as the only trusted signers, so an unsigned, tampered or re-hosted package fails the restore. Central pinned versions; lock files enforced with `--locked-mode` in CI, the release workflow and `scripts/build.ps1`; NuGet vulnerability audit on every restore, and a known-vulnerable package fails CI and `scripts/build.ps1`. The workflows pin GitHub Actions to full commit SHAs (Dependabot proposes updates), keep the checkout token out of the working copy, pass the tag name and token to scripts through the environment, and release only tags on `main`. Whisper and the llama.cpp runtime aren't packages: they're optional downloads pinned by SHA-256 (above). |
-| Automation | Unwanted actions | Scenes and commands only run what you configured. Closing apps uses a graceful close request (never a kill). Apart from its own Whisper helper (ended when a dictation is cancelled or runs too long), the one place Aqua ends a process is This PC › an app › *End task* / *Close app*: only after you confirm, only your own processes (never another account's or a Windows service's), and checked again at that moment. Windowed apps are asked to close as if you clicked ×; *Force end* is offered only when that didn't work, and never for Windows' own apps (Notepad and the like are only asked). Windows' background processes, background programs Aqua can't identify, Aqua itself and its local AI (anything in Ollama's folder, model runners included) are refused. No trading, purchasing or messaging capabilities exist. |
-| Local processes | Aqua's own model runtime (llama.cpp) | Off unless chosen. The runtime is one pinned llama.cpp release from GitHub, checked against its published size and SHA-256 before anything is unpacked (only `llama-server.exe` and DLLs, into Aqua's profile). Each server listens on 127.0.0.1 only, on a free port, and needs a random key made for each start, which travels in its environment (never on the command line, where other programs could read it); `/health` is the only open path. Servers run hidden inside a Windows job that ends them when Aqua quits or crashes, without any LLAMA_* or GGML_* variables from the PC, with the web UI off, `--offline`, and logs that hold no prompt text. Models come from public Hugging Face repositories at a fixed commit, each file checked against its listed SHA-256 (written as `.part` until it checks out); Ollama's store is only read, and Aqua deletes only its own downloads. Model headers are parsed with capped reads (string, array and tensor counts). NVIDIA's driver library (nvml.dll) is used read-only for the card's memory and CUDA version. Installs, downloads and removals are only journalled in E2E dry runs. |
-| Finance | Over-trusting AI | Market ideas are labelled as educational analysis, grounded in computed indicators shown next to them, and carry a clear “not financial advice” notice. Market digests tell the model whether exchanges are open, so a weekend brief describes Friday's close rather than "today". |
-| Local processes | Stopping the wrong program, or someone else's work | Aqua stops only the process serving the configured *local* Ollama port (found through the OS TCP table and checked to be Ollama) with its model runners, plus Ollama's own tray app when it runs from the same folder as that ollama.exe (checked by path) and Aqua is using Ollama's own port — a server on another port never touches it. An automatic idle stop never happens while a model is loaded, while any other program has a connection open to the server (a terminal `ollama run`/`pull`, a chat app) or while the server is downloading a model. Remote endpoints are never managed, your manual Turn off/on is never overridden, and it can all be switched off (Settings → AI & models → Let Aqua start and stop Ollama). |
-| Accuracy | A small model misquoting data | Deterministic checks after generation: odds quoted in the Foresight outlook must exist in the prediction-market data, and a "favourite" it names must be the leading outcome; failing sentences are replaced with a plain statement of the data. Repeated JSON keys are merged instead of silently dropping content. |
+| Internet → collected/Ask content | Bounded text/images, treated as untrusted | Source parsers, `HttpFetcher`, public-only `WebReader`, rendering limits |
+| Ask → local files/Windows | Only configured/attached access and approved actions | `LocalFiles`, tool policy, `DesktopRules`, Windows adapters |
+| Private context → internet | Explicit approval where the private-data policy applies | Per-answer/chat privacy state and visible query/address approval |
+| App → model engine | Explicit local/opted-in endpoint, constrained subprocess start | `LlmClient`, `LlamaArgs`, `LlamaProcessHost` |
+| App → filesystem | Profile-owned artifacts or explicit user-selected locations | Validated paths, identifiers, ownership rules and bounded parsers |
+| Download → executable/model | Verified artifacts before installation/use | Fixed release/commit, expected size/SHA-256, restricted extraction |
 
-## Privileges & persistence
+This does not sandbox trusted user-installed executables, defend against a compromised Windows account, or prevent
+other applications from using the GPU. A malicious program running as the same user can inspect or alter local data;
+an environment-carried API key avoids command-line disclosure but is not isolation from such a program.
 
-* Autostart uses the per-user `HKCU\…\Run` key and is opt-in (asked during onboarding). An installed copy points the
-  entry at itself when it starts (taking over from a build run from source); a source build never takes it back.
-* Setup installs per user, without administrator rights, into `%LOCALAPPDATA%\AquaHub.App` (the program only; updates
-  replace it) with Start menu and desktop shortcuts. The one exception is the .NET 10 Desktop Runtime: if it's
-  missing, Setup (or the first update that needs it) installs Microsoft's runtime installer, which Windows asks you to
-  approve.
-* Data lives in `%LOCALAPPDATA%\AquaHub` (settings, SQLite database, logs, image cache, the pictures kept with Ask
-  chats, and Whisper if you install it).
-* Uninstall: Windows Settings › Apps › Aqua Hub removes the program, its shortcuts and the Start with Windows entries
-  that start it, and keeps your data. To remove everything, also delete `%LOCALAPPDATA%\AquaHub` and the `AquaHub/*`
-  entries in Credential Manager. (A source build: quit from the tray and delete the same folder and entries.)
-* Ask chats are kept in the local database, unstarred ones for 30 days after their last use (Settings › Ask Aqua ›
-  Delete chats after); turning off Settings → Privacy → *Keep Ask chats* deletes them all. A chat deleted while an
-  answer is still coming in stays deleted: the answer stops and nothing more of it is saved. So that a follow-up can
-  use them, a chat also keeps short excerpts (up to 6,000 characters each) of what its last six answers read — web
-  pages, articles and files you let Ask read, never the screen or the clipboard — and they go when the chat does.
-  They come back only for a question that names what they mention or plainly refers back ("the article", "what else
-  did it say"). A chat also keeps its notes (facts, decisions and open questions, written by Ask or by you) and, once
-  compressed, the summary that stands in for its first messages; both go into its answers' context fenced as data,
-  and notes or a summary Aqua wrote mark the answer as having read untrusted text (so acting asks every time, as
-  after reading a page). With *Keep pictures with chats* on (the default), its screenshots and pictures are kept as
-  described above. All of it goes when the chat does. Folders you attach are never saved with a chat (paths an earlier
-  version saved are removed once). Skills and memories you teach Aqua are kept there too, and
-  nothing of them leaves the PC.
+## 2. AI authority and approvals
 
-## Reporting
+Background editorial agents have no PC tools. The command interpreter returns an allow-listed action validated against
+configured apps/scenes/pages; it cannot introduce arbitrary executables, paths or shell commands. Workbench skills are
+recipes of existing tools, not executable code.
 
-This is a personal project. Please report a vulnerability privately with GitHub's *Report a vulnerability*
-(the repository's Security tab) rather than in a public issue. Review `src/AquaHub/Platform/Native.cs` for the
-complete Win32 surface.
+Ask classifies tools by hub/web/private/action access. PC actions show their exact target/text/keys in the chat's approval
+flow according to settings. Some actions can be allowed for a chat; key presses and typing that submits with Enter need
+individual approval. After untrusted content has been read, clicking, typing, key presses and closing windows require a
+fresh approval even when the general acting preference is off. Unanswered approvals expire after three minutes.
+
+`Prompts.Fenced` fences tool/page/file content, prior turns, notes and summaries as data and defuses nested fence marks.
+Fencing is a prompt-injection mitigation; actual protection comes from deterministic tool validation and approvals.
+Neither model text nor a fetched document can approve an action or expand allowed folders.
+
+`DesktopRules` excludes Aqua's own windows, shells/terminals/Run, File Explorer, command-capable editors, script hosts,
+system/security/sign-in prompts, password managers and password fields. Keystrokes target the approved window and
+recheck foreground identity before each chunk. The key allow-list excludes Windows-key combinations and Alt+F4.
+`launch_app` does not start shells, installers, scripts or admin tools. User-configured Launchpad/scenes and manually
+selected maintenance tools are separate explicit features, not a way for model output to bypass this policy.
+
+After a chat has read private context (files, screen, attachments, clipboard or holdings), searches, page requests and
+browser links need approval showing the query/address. That private state persists with the chat so later turns cannot
+silently export it through notes/summary/history. Private names/numbers from calendar, memories or chat notes also enter
+the egress checks. Ask directly fetches only supplied/authorized chat links or links discovered through its search flow;
+invented model URLs are not automatic fetch authority. Remote AI opt-in is a separate disclosure choice: approved context
+sent to that endpoint leaves the PC. Local operation claims must not be shown for a remote endpoint.
+
+## 3. Files, parsing and output
+
+`LocalFiles` checks configured roots and per-chat folder grants, canonicalizes existing Windows short-name components
+using `FindFirstFileW`, rejects traversal/sensitive names and refuses links below an allowed root. Attached roots are also
+judged by their resolved target. Unresolvable aliases/root checks fail closed. Windows Search results are checked again;
+an index hit is not authorization. Searches skip system/app-data/cache locations and cloud-only placeholders.
+
+Files explicitly attached by the user are a separate grant: current `CanRead` applies the sensitive filename/extension
+guard but bypasses ordinary root/folder/link checks for that exact file. Do not document that exception as identical to
+root-based access. It needs its own path/identity review before Phase 8 reuses this policy. Checks on mutable filesystem
+paths are not a complete defence against a same-user process swapping a file between check and open.
+
+Remote HTML is reduced to text, never embedded as an executable page. XML readers restrict DTD/entity handling; Office
+documents are parsed without running macros. Response sizes, document/tensor/array counts, recursion and time are bounded.
+PDF OCR and image decoding use Windows components, not a claim that malformed native-decoder inputs are harmless.
+
+Links opened by the app are absolute HTTP(S) addresses without credentials; configured app protocols have their own
+explicit paths. Ask file links open documents/pictures/media, while program/script/shortcut and other unsupported types
+are revealed rather than executed. Credential/key/password-store filenames and extensions remain denied by file policy.
+
+Maths rendering has a recursion guard: oversized/deep/line-heavy formulae stay text; XAML-Math rendering uses a dedicated
+large-stack thread. Markdown does not execute code. Total formula/table complexity and table accessibility remain open
+limits to verify; a per-formula guard alone does not bound an entire long chat.
+
+## 4. Network access and secrets
+
+`WebReader` is the public-page path: it bypasses proxies and checks resolved addresses at connection time, including
+redirected hosts. It rejects loopback, private, link-local/metadata, CGNAT and IPv6 unique-local addresses; it limits
+redirects and page bodies (5 MiB). Do not replace it with the general feed HTTP client for model-selected URLs.
+
+`HttpFetcher` handles configured sources with size/time limits, HTTP validators and host cooldowns. It supports HTTPS
+(and loopback HTTP) and uses system proxies. Its policy is not WebReader's public-address policy. AI clients bypass
+system proxies; remote endpoints require explicit opt-in. ComfyUI endpoints are configured loopback endpoints only.
+
+API keys, Bluesky app passwords and Mastodon read tokens live in Windows Credential Manager, not settings or logs.
+Bluesky session state stays in memory; failed sign-in backs off and disconnect removes the stored secret. Feed/social
+connections are read-only. Logs redact query strings, but error text and diagnostic exports can still contain paths,
+model names or other private content; inspect them before sharing. Remote publisher images disclose the user's IP and
+can be disabled. No claim of anonymous network access is made.
+
+Location is unset until chosen. Town search uses Open-Meteo; **Use my location** explicitly requests Windows location,
+rounds it and sends it to Nominatim to resolve a town, then Open-Meteo for time zone. Only the selected town/rounded
+coordinates persist. Offline Windows dictation and Whisper keep audio local/in memory; online Windows speech is a
+separate opt-in. Recording occurs only when the user initiates dictation/test, never as background monitoring.
+
+## 5. Local model engines and downloads
+
+Runtime/Whisper archives are fixed vendor releases with expected size/SHA-256. Extraction restricts retained executables
+and libraries and caps unpacking. Public model files are fixed Hugging Face revisions with expected size/SHA-256;
+corrupt same-size files must not be trusted. Partial downloads resume only through the verified-download path, and a
+complete hash mismatch discards the partial file. A bounded remote GGUF-header preview is metadata inspection, not
+whole-file verification or a guarantee of fit.
+
+The custom engine path takes priority. Otherwise Aqua may use Ollama's installed `lib/ollama/llama-server.exe` when
+upstream cannot read an Ollama conversion or Aqua's build is absent (`useOllamaEngine`, default on). User-installed
+Ollama/custom engines are trusted local software, not binaries verified against Aqua's catalog. Ollama's model store
+remains read-only. Format blocks/backoff prevent repeated doomed loads; Clear failure never rewrites GGUF metadata.
+
+`LlamaArgs` binds to 127.0.0.1 with a random per-start key via `LLAMA_API_KEY`, disables the web UI/slots, requests offline
+operation, and uses constrained argument lists. `LlamaProcessHost` starts hidden with a minimal loader/temp environment.
+It requires a kill-on-close Windows job before returning a managed process. Job creation failure rejects starts;
+assignment failure kills the just-started Aqua-owned process and raises a visible error. Launch and host disposal are
+serialized. Model handoff confirms process termination before forgetting ownership; failed termination blocks another
+load. A containment failure disables host starts until restart. If failed-start cleanup cannot confirm exit, the host
+retains that exact process and blocks image handoff too. Creation still precedes assignment briefly, and forced-exit/failure-path verification remains open. A job object
+manages lifetime; it is not an OS security sandbox or an atomic suspended-process launch.
+
+Reasoning control is armed only for the pinned b11387 engine and thinking-capable model. A bounded authenticated request
+uses the completion ID obtained from that same stream. Unknown engine versions use the direct-answer fallback; no
+global slot control is issued. The optional image-min-token flag remains disabled pending model/engine-specific evidence.
+
+Aqua manages only its own bundled-engine subprocesses. Its separately configurable Ollama-service management identifies
+the local listener and installation, checks busy/other-client/download state for automatic idle stop, and respects manual
+off. It must not be used by tests against the owner's service. Other local/remote servers remain independently managed.
+
+`llama/compat.json` records local model IDs/hashes, engine, GPU/driver, errors and performance. Model fallback keys/errors
+may include paths. Copy/export is explicit and never needs prompts, answers or API keys. Server kind/size/mtime is a
+compatibility-cache fingerprint, not cryptographic authenticity. Exact artifact provenance is incomplete in older records.
+
+## 6. Chat and image retention
+
+Chats, notes, summaries and brief retained source excerpts live in the local database. Unstarred chat retention defaults
+to 30 days; deleting a chat or disabling stored chats removes its associated data and cancels in-flight saving. Per-chat
+attached-folder grants are not stored. Screenshots/pasted chat pictures are kept whole when **Keep pictures with chats**
+is on (default); linked/attached file pictures keep a path and thumbnail. Disabling that setting deletes chat-media files
+and recorded pictures. Content-derived names prevent a stored image identifier from selecting arbitrary filenames.
+
+Image Gen is separate: generated PNGs/settings and prepared reference copies live in `generated-images`. References are
+metadata-free, content-named PNGs prepared from explicit picker/drop/paste or gallery actions, then uploaded to Comfy's
+temporary folder for editing. Native preparation enforces input byte/pixel and canvas limits, fixes orientation/colour,
+and flattens transparency. These references are copies, unlike linked chat pictures. They remain while an archived edit,
+draft or running job needs them; cleanup keeps all references if unreadable metadata makes ownership uncertain.
+
+The gallery's retention/deletion policy covers Aqua's files and, when configured, validated tracked Comfy output copies.
+Exported copies and unrelated server images remain. Comfy Desktop output discovery reads its settings without editing
+them. A user-selected Comfy launcher is trusted installed software; Aqua does not install/hash-pin Comfy/Python/custom
+nodes. Recognizable filename pairing guards are not tensor verification or approval of arbitrary workflows.
+
+The shared GPU lease is kept while Comfy job ownership/completion or memory release is uncertain. Cancellation targets
+Aqua's job; it does not send global interrupt. Allocator release checks are not a guarantee about all driver VRAM.
+Imported-reference preparation, upload and retention paths still need dedicated acceptance; successful older reference
+editing does not certify this later feature.
+
+Reference-file and gallery-import reads now bound allocation against the opened handle, including growth/read races;
+retained copies must match their content ID and PNG signature. Clipboard dimensions are bounded before background
+scaling/encoding. Decoder work cannot be interrupted mid-frame; normal exit joins it. This is bounded native decoding,
+not a sandbox for Windows image codecs.
+
+Before image submission, `generated-images/gpu-recovery.txt` records only the loopback endpoint, never prompts or image
+bytes. Its presence restores the GPU reservation before scheduling on restart. It is removed only after confirmed
+allocator release. Corrupt/unreadable metadata keeps the block and asks for the original server address explicitly;
+choosing a different server cannot establish release by the original one. Recovery waits for an idle queue and never
+sends a global interrupt. A crash can lose a result not yet archived; recovery does not retrieve it automatically.
+
+Normal Quit stops scheduling and cancels/joins owned work before client disposal, while the dispatcher still runs.
+After the 45-second bound or Windows session termination, still-used dependencies remain alive until process exit and
+the model job closes. An unresolved Comfy reservation/marker remains; external Comfy processes are not killed on exit.
+
+## 7. Persistence, updates and supply chain
+
+Profile data is under `%LOCALAPPDATA%/AquaHub` (or an explicit profile override); the versioned installation is separate
+under `%LOCALAPPDATA%/AquaHub.App`. User-selected model/output folders have their own ownership rules. No database,
+image archive or log is claimed encrypted at rest; Credential Manager protects stored secrets for the Windows user.
+Uninstall keeps the profile unless the user removes it. Start with Windows is opt-in, using the per-user Run entry.
+
+Installed updates use the GitHub repository embedded in the release; source builds without it do not check. Downloads
+and installation are explicit actions, with package SHA-256 checks and installation at restart. These checks do not
+replace publisher trust: a compromised release publisher can publish matching hashes. Packages are not code-signed.
+
+`nuget.config` restricts source mapping and requires trusted repository signatures; direct versions are centrally pinned.
+CI/release use locked restore, dependency audit and fully pinned action SHAs, with read-only job permissions and checkout
+credentials removed from the working copy. An actual install/update rehearsal and confirmation of private vulnerability
+reporting availability remain release work. Licence choice remains Adrian's decision.
+
+## 8. Review limits and next checks
+
+This pass inspected service ownership, scheduling, network/file boundaries, process launch and image-reference storage.
+The later authorized offline component run exercised the real WPF process using synthetic profiles, UIA patterns and
+owned loopback HTTP fixtures. Offline startup suppresses collectors/media/updates and service management; test settings
+disable AI, global hotkeys and PC access. Copying test profiles rejects linked entries. E2E pickers open scratch and avoid
+Recent files. These guards are not an OS/network sandbox. Intercepted effects and fixture idle/free responses do not
+establish live inference or physical GPU release. No penetration test, microphone recording or installed update was done.
+Known gaps are retained as acceptance tasks in [ROADMAP.md](ROADMAP.md), including containment/shutdown failure-path
+acceptance, explicit-file grants, imported references and end-to-end private-data policy. Documentation must not mark these
+closed without evidence from the relevant failure paths.

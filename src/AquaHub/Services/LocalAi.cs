@@ -14,7 +14,7 @@ namespace AquaHub.Services;
 /// applies to the runtime too) and keeps the model list current. <see cref="Changed"/> and the progress events are raised
 /// on the UI thread.
 /// </summary>
-public sealed class LocalAi : IDisposable
+public sealed class LocalAi : IDisposable, IAsyncDisposable
 {
     public static readonly string[] Roles = ["main", "creative", "background", "search"];
 
@@ -22,6 +22,12 @@ public sealed class LocalAi : IDisposable
     private GpuFacts _gpu = GpuFacts.None;
     private string _folder = "";
     private bool _useOllamaModels;
+    private readonly object _workersGate = new();
+    private readonly HashSet<Task> _workers = new();
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private Task? _loop;
+    private Task? _health;
+    private Task? _shutdown;
 
     public LocalAi()
     {
@@ -29,11 +35,14 @@ public sealed class LocalAi : IDisposable
         Hub.Core.Settings.Changed += OnSettingsChanged;
         Hub.Core.Models.Changed += OnLibraryChanged;
         Hub.Core.LlamaSetup.Changed += Raise;
-        Hub.Core.LlamaSetup.Progress += p => Hub.OnUi(() => { InstallProgress = p; InstallProgressChanged?.Invoke(p); });
+        Hub.Core.LlamaSetup.Progress += OnInstallProgress;
         Hub.Core.ModelDownloads.Changed += Raise;
-        Hub.Core.ModelDownloads.Progress += p => Hub.OnUi(() => DownloadProgressChanged?.Invoke(p));
+        Hub.Core.ModelDownloads.Progress += OnDownloadProgress;
         Hub.Llama.Changed += Raise;
     }
+
+    private void OnInstallProgress(LlamaProgress p) => Hub.OnUi(() => { if (_stop.IsCancellationRequested) return; InstallProgress = p; InstallProgressChanged?.Invoke(p); });
+    private void OnDownloadProgress(ModelDownloadProgress p) => Hub.OnUi(() => { if (!_stop.IsCancellationRequested) DownloadProgressChanged?.Invoke(p); });
 
     /// <summary>Something here changed: the runtime, the models, a download, a server starting or stopping.</summary>
     public event Action? Changed;
@@ -91,7 +100,7 @@ public sealed class LocalAi : IDisposable
 
     /// <summary>
     /// A file a search found, as the library will see it once downloaded: its header is read from Hugging Face (a few MB at
-    /// most, no download), so <see cref="Fit"/>, <see cref="Problem"/> and the ability chips are exact before downloading.
+    /// most, no full-file download), providing estimates and known preflight checks rather than a load guarantee.
     /// </summary>
     public Task<LocalModel> PreviewAsync(HfRepoFiles repo, HfFile file, HfFile? projector = null, CancellationToken ct = default) =>
         PreviewAsync(repo.Repo, repo.Revision, file, projector, System.IO.Path.GetFileNameWithoutExtension(file.Name), ct);
@@ -100,13 +109,25 @@ public sealed class LocalAi : IDisposable
     public Task<LocalModel> PreviewAsync(ModelRecommendation r, CancellationToken ct = default) =>
         PreviewAsync(r.Repo, r.Revision, r.File, r.Projector, r.Name, ct);
 
-    private static async Task<LocalModel> PreviewAsync(string repo, string revision, HfFile file, HfFile? projector, string name, CancellationToken ct)
+    private async Task<LocalModel> PreviewAsync(string repo, string revision, HfFile file, HfFile? projector, string name, CancellationToken ct)
     {
+        using var operation = OwnOperation();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        ct = cancellation.Token;
         var info = await Hub.Core.ModelDownloads.HeaderAsync(repo, revision, file, ct).ConfigureAwait(false);
+        if (projector is not null) await Hub.Core.ModelDownloads.HeaderAsync(repo, revision, projector, ct, projector: true).ConfigureAwait(false);
         return new LocalModel
         {
-            Id = "hf:" + repo + "/" + file.Name, Name = name, Source = ModelSource.Aqua, Path = file.Name, Info = info, Size = file.Size,
-            ProjectorPath = projector?.Name, ProjectorSize = projector?.Size ?? 0, Sha256 = file.Sha256, Repo = repo,
+            Id = "hf:" + repo + "/" + file.Name,
+            Name = name,
+            Source = ModelSource.Aqua,
+            Path = file.Name,
+            Info = info,
+            Size = file.Size,
+            ProjectorPath = projector?.Name,
+            ProjectorSize = projector?.Size ?? 0,
+            Sha256 = file.Sha256,
+            Repo = repo,
         };
     }
 
@@ -119,21 +140,24 @@ public sealed class LocalAi : IDisposable
     }
 
     /// <summary>The model holding <paramref name="role"/> (main is Ask Aqua's model), or null.</summary>
-    public LocalModel? ForRole(string role) => Hub.Core.Models.Find(role switch
+    public LocalModel? ForRole(string role) => Hub.Core.Models.Find(RoleValue(role));
+
+    public string RoleValue(string role) => role switch
     {
         "main" => MainModel(Hub.S),
         "creative" => Hub.S.Ai.Llama.CreativeModel,
         "background" => Hub.S.Ai.Llama.BackgroundModel,
         "search" => Hub.S.Ai.Llama.SearchModel,
-        _ => null,
-    });
+        _ => "",
+    };
 
     /// <summary>
     /// Main on Aqua's runtime: Ask's model while the runtime is in use, else the one stored for it (Settings keeps a choice
     /// per provider), else Ollama's choice, which the runtime reads from Ollama's store.
     /// </summary>
     private static string MainModel(HubSettings s) =>
-        s.Ai.Provider == "llamacpp" ? s.Ai.Model : s.Ai.ProviderModels.TryGetValue("llamacpp", out var saved) ? saved.Model : s.Ai.Model;
+        s.Ai.Provider == "llamacpp" ? s.Ai.Model : s.Ai.ProviderModels.TryGetValue("llamacpp", out var saved) ? saved.Model
+        : s.Ai.Provider == "ollama" && !s.Ai.Model.StartsWith("hf:", StringComparison.OrdinalIgnoreCase) ? s.Ai.Model : "auto";
 
     /// <summary>
     /// Gives <paramref name="role"/> to a model (null: none — main then picks the largest that fits). Main is the runtime's
@@ -167,6 +191,7 @@ public sealed class LocalAi : IDisposable
     /// <summary>Switches Ask Aqua (and the agents) to Aqua's runtime, or back to Ollama; the graphics card's model is stopped when leaving.</summary>
     public async Task UseRuntimeAsync(bool on)
     {
+        using var operation = OwnOperation();
         Hub.Core.Settings.Update(s => s.Ai.Provider = on ? "llamacpp" : "ollama");
         if (!on) await Hub.Llama.UnloadAsync(null, "Ask Aqua uses Ollama again").ConfigureAwait(false);
         Recheck();
@@ -176,6 +201,9 @@ public sealed class LocalAi : IDisposable
     /// <summary>Downloads and installs <paramref name="build"/> (default: the recommended one). Null in an E2E dry run.</summary>
     public async Task<LlamaInstall?> InstallRuntimeAsync(LlamaBuild? build = null, CancellationToken ct = default)
     {
+        using var operation = OwnOperation();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        ct = cancellation.Token;
         build ??= RecommendedBuild;
         if (Sandbox.Intercept("llama-install", build.Backend)) return null;
         var install = await Hub.Core.LlamaSetup.InstallAsync(build, ct).ConfigureAwait(false);
@@ -188,6 +216,7 @@ public sealed class LocalAi : IDisposable
     /// <summary>Stops the model servers and deletes the runtime (models are kept).</summary>
     public async Task RemoveRuntimeAsync()
     {
+        using var operation = OwnOperation();
         if (Sandbox.Intercept("llama-remove")) return;
         await Hub.Llama.UnloadAsync(null, "the runtime is being removed").ConfigureAwait(false);
         Hub.Core.LlamaSetup.Remove();
@@ -198,9 +227,14 @@ public sealed class LocalAi : IDisposable
     /// The devices the runtime sees ("CUDA0: NVIDIA GeForce RTX 4070 SUPER (12281 MiB, 11069 MiB free)"), from
     /// <c>llama-server --list-devices</c>: an empty list means it would run on the processor only.
     /// </summary>
-    public async Task<IReadOnlyList<string>> DevicesAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<string>> DevicesAsync(CancellationToken ct = default) => Task.Run(() => ReadDevicesAsync(ct));
+
+    private async Task<IReadOnlyList<string>> ReadDevicesAsync(CancellationToken ct)
     {
-        if (Hub.Llama.ServerPath is not { } server) throw new LlamaRuntimeException("Aqua's runtime isn't installed.");
+        using var operation = OwnOperation();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        ct = cancellation.Token;
+        if ((Hub.Llama.ServerPath ?? OllamaEngine) is not { } server) throw new LlamaRuntimeException("No model engine is available. Install Aqua's runtime or enable Ollama's engine.");
         var lines = new List<string>();
         using var process = Hub.LlamaHost.Start(server, ["--list-devices"], new Dictionary<string, string>(), Path.GetDirectoryName(server)!,
             line => { lock (lines) lines.Add(line); });
@@ -217,12 +251,25 @@ public sealed class LocalAi : IDisposable
                 .Select(l => l.Trim()).Where(l => l.Contains(':')).ToList();
     }
 
-    public Task<IReadOnlyList<HfRepo>> SearchAsync(string query, CancellationToken ct = default) => Hub.Core.ModelDownloads.SearchAsync(query, ct);
-    public Task<HfRepoFiles> FilesAsync(string repo, CancellationToken ct = default) => Hub.Core.ModelDownloads.FilesAsync(repo, ct);
+    public async Task<IReadOnlyList<HfRepo>> SearchAsync(string query, CancellationToken ct = default)
+    {
+        using var operation = OwnOperation();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        return await Hub.Core.ModelDownloads.SearchAsync(query, cancellation.Token).ConfigureAwait(false);
+    }
+    public async Task<HfRepoFiles> FilesAsync(string repo, CancellationToken ct = default)
+    {
+        using var operation = OwnOperation();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        return await Hub.Core.ModelDownloads.FilesAsync(repo, cancellation.Token).ConfigureAwait(false);
+    }
 
     /// <summary>Downloads a suggested model. Null in an E2E dry run.</summary>
     public async Task<LocalModel?> DownloadAsync(ModelRecommendation r, CancellationToken ct = default)
     {
+        using var operation = OwnOperation();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        ct = cancellation.Token;
         if (Sandbox.Intercept("model-download", r.Id)) return null;
         return await Hub.Core.ModelDownloads.DownloadAsync(r, ct).ConfigureAwait(false);
     }
@@ -230,6 +277,9 @@ public sealed class LocalAi : IDisposable
     /// <summary>Downloads a file a search found (and its projector, for pictures). Null in an E2E dry run.</summary>
     public async Task<LocalModel?> DownloadAsync(HfRepoFiles repo, HfFile file, HfFile? projector, CancellationToken ct = default)
     {
+        using var operation = OwnOperation();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        ct = cancellation.Token;
         if (Sandbox.Intercept("model-download", "hf:" + repo.Repo + "/" + file.Name)) return null;
         return await Hub.Core.ModelDownloads.DownloadAsync(repo.Repo, repo.Revision, file, projector, ct).ConfigureAwait(false);
     }
@@ -242,6 +292,7 @@ public sealed class LocalAi : IDisposable
     /// <summary>Deletes one of Aqua's own downloads (Ollama's models are Ollama's to remove); its roles are cleared.</summary>
     public async Task<bool> RemoveModelAsync(LocalModel model)
     {
+        using var operation = OwnOperation();
         if (model.Source != ModelSource.Aqua) return false;
         if (Sandbox.Intercept("model-remove", model.Id)) return false;
         await Hub.Llama.UnloadAsync(model.Id, "it's being removed").ConfigureAwait(false);
@@ -251,13 +302,21 @@ public sealed class LocalAi : IDisposable
     }
 
     /// <summary>Stops a running model's server now (null: all of them); naming a model also clears its failures (Clear failure).</summary>
-    public Task StopAsync(string? modelId) => Hub.Llama.UnloadAsync(modelId, "you stopped it");
+    public async Task StopAsync(string? modelId)
+    {
+        using var operation = OwnOperation();
+        await Hub.Llama.UnloadAsync(modelId, "you stopped it", _stop.Token).ConfigureAwait(false);
+    }
 
     /// <summary>Reads the models folders again (after the folder or the Ollama switch changes, or on request).</summary>
-    public Task RefreshAsync() => Task.Run(() =>
+    public Task RefreshAsync() => Track(async () =>
     {
-        _folder = Hub.Core.Models.Folder;
-        Hub.Core.Models.Refresh();
+        await _refreshGate.WaitAsync(_stop.Token).ConfigureAwait(false);
+        try
+        {
+            await Task.Run(() => { _folder = Hub.Core.Models.Folder; Hub.Core.Models.Refresh(); }, _stop.Token).ConfigureAwait(false);
+        }
+        finally { _refreshGate.Release(); }
     });
 
     private void OnSettingsChanged(Core.Settings.HubSettings settings)
@@ -270,19 +329,20 @@ public sealed class LocalAi : IDisposable
     private async Task RefreshAfterSettingsAsync()
     {
         try { await RefreshAsync().ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         catch (Exception ex) { Log.Warn("models", "Couldn't refresh the model folders", ex); }
     }
 
-    public void Start() => _ = Task.Run(() => LoopAsync(_stop.Token));
+    public void Start() { lock (_workersGate) _loop ??= Track(() => LoopAsync(_stop.Token)); }
 
     private async Task LoopAsync(CancellationToken ct)
     {
-        await RefreshAsync().ConfigureAwait(false);
-        if (InUse) Recheck();
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
         var tick = 0;
         try
         {
+            await RefreshAsync().ConfigureAwait(false);
+            if (InUse) Recheck();
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
             {
                 try
@@ -312,22 +372,71 @@ public sealed class LocalAi : IDisposable
     }
 
     /// <summary>Ask Aqua's status (which model, ready or not) follows the runtime and the library.</summary>
-    private static void Recheck()
+    private void Recheck()
     {
         if (Hub.S.Ai.Provider != "llamacpp" && Hub.S.Ai.Provider != "ollama") return;
-        _ = Task.Run(async () =>
+        lock (_workersGate)
         {
-            try { await Hub.Core.Llm.CheckAsync().ConfigureAwait(false); }
-            catch (Exception ex) { Log.Debug("llama", "health check: " + ex.Message); }
-        });
+            if (_health is { IsCompleted: false } || _stop.IsCancellationRequested) return;
+            _health = Track(async () =>
+            {
+                try { await Hub.Core.Llm.CheckAsync(_stop.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+                catch (Exception ex) { Log.Debug("llama", "health check: " + ex.Message); }
+            });
+        }
     }
 
-    private void Raise() => Hub.OnUi(() => Changed?.Invoke());
+    private void Raise() => Hub.OnUi(() => { if (!_stop.IsCancellationRequested) Changed?.Invoke(); });
 
-    public void Dispose()
+    private Task Track(Func<Task> work)
+    {
+        lock (_workersGate)
+        {
+            if (_stop.IsCancellationRequested) return Task.FromCanceled(_stop.Token);
+            var task = Task.Run(work);
+            _workers.Add(task);
+            _ = task.ContinueWith(t => { lock (_workersGate) _workers.Remove(t); if (t.IsFaulted) Log.Warn("llama", "Local AI worker failed", t.Exception); }, TaskScheduler.Default);
+            return task;
+        }
+    }
+
+    private IDisposable OwnOperation()
+    {
+        lock (_workersGate)
+        {
+            _stop.Token.ThrowIfCancellationRequested();
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _workers.Add(completion.Task);
+            return new Operation(() => { lock (_workersGate) _workers.Remove(completion.Task); completion.TrySetResult(); });
+        }
+    }
+    private sealed class Operation(Action finish) : IDisposable { public void Dispose() => finish(); }
+
+    public Task StopAsync()
+    {
+        lock (_workersGate) return _shutdown ??= StopWorkersAsync();
+    }
+
+    private async Task StopWorkersAsync()
     {
         Hub.Core.Settings.Changed -= OnSettingsChanged;
+        Hub.Core.Models.Changed -= OnLibraryChanged;
+        Hub.Core.LlamaSetup.Changed -= Raise;
+        Hub.Core.LlamaSetup.Progress -= OnInstallProgress;
+        Hub.Core.ModelDownloads.Changed -= Raise;
+        Hub.Core.ModelDownloads.Progress -= OnDownloadProgress;
+        Hub.Llama.Changed -= Raise;
         _stop.Cancel();
-        _stop.Dispose();
+        CancelInstall();
+        CancelDownload();
+        Task[] tasks;
+        lock (_workersGate) tasks = _workers.ToArray();
+        try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        // Keep the cancelled source readable by UI notifications already queued on the dispatcher.
     }
+
+    public void Dispose() => StopAsync().GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => new(StopAsync());
 }

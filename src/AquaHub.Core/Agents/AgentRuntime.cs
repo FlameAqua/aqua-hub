@@ -96,7 +96,7 @@ public abstract class Agent
 /// exponential back-off on failure, eco-mode stretching, run-now, and status/telemetry reporting.
 /// Collectors run concurrently (bounded); AI agents share the single model slot via the LLM gate.
 /// </summary>
-public sealed class AgentRuntime : IDisposable
+public sealed class AgentRuntime : IDisposable, IAsyncDisposable
 {
     private sealed class Slot
     {
@@ -106,6 +106,7 @@ public sealed class AgentRuntime : IDisposable
         public int ConsecutiveErrors;
         public volatile bool Running;
         public bool Forced;
+        public TaskCompletionSource<AgentRunReport>? Completion;
     }
 
     private readonly HubContext _ctx;
@@ -113,8 +114,11 @@ public sealed class AgentRuntime : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _collectors = new(3);
     private readonly SemaphoreSlim _ai = new(1);
-    private readonly ConcurrentDictionary<string, Task> _inflight = new();
+    private readonly ConcurrentDictionary<long, Task> _inflight = new();
+    private long _nextWorker;
     private Task? _loop;
+    private Task? _shutdown;
+    private bool _stopping;
 
     public AgentRuntime(HubContext ctx) => _ctx = ctx;
 
@@ -125,7 +129,24 @@ public sealed class AgentRuntime : IDisposable
     internal TimeSpan FollowUpDelay { get; init; } = TimeSpan.FromSeconds(2);
 
     public event Action<AgentStatus>? StatusChanged;
-    public bool Paused { get; set; }
+    private volatile bool _paused;
+    public bool Paused
+    {
+        get => _paused;
+        set
+        {
+            lock (_slots)
+            {
+                _paused = value;
+                if (value)
+                    foreach (var slot in _slots.Where(s => !s.Running))
+                    {
+                        slot.Completion?.TrySetResult(new(AgentRunEnd.Paused, slot.Status));
+                        slot.Completion = null;
+                    }
+            }
+        }
+    }
 
     public IReadOnlyList<AgentStatus> Statuses
     {
@@ -142,8 +163,13 @@ public sealed class AgentRuntime : IDisposable
                 NextRun = DateTimeOffset.Now + agent.InitialDelay,
                 Status = new AgentStatus
                 {
-                    Id = agent.Id, Name = agent.Name, Description = agent.Description, Role = agent.Role, UsesAi = agent.UsesAi,
-                    State = AgentState.Idle, NextRun = DateTimeOffset.Now + agent.InitialDelay,
+                    Id = agent.Id,
+                    Name = agent.Name,
+                    Description = agent.Description,
+                    Role = agent.Role,
+                    UsesAi = agent.UsesAi,
+                    State = AgentState.Idle,
+                    NextRun = DateTimeOffset.Now + agent.InitialDelay,
                 },
             });
         }
@@ -151,19 +177,23 @@ public sealed class AgentRuntime : IDisposable
 
     public void Start()
     {
-        _loop ??= Task.Run(() => LoopAsync(_cts.Token));
+        lock (_slots)
+        {
+            ObjectDisposedException.ThrowIf(_stopping, this);
+            _loop ??= Task.Run(() => LoopAsync(_cts.Token));
+        }
     }
 
     public void RunNow(string id)
     {
         lock (_slots)
-            foreach (var s in _slots.Where(s => s.Agent.Id == id)) { s.NextRun = DateTimeOffset.Now; s.Forced = true; }
+            foreach (var s in _slots.Where(s => !_stopping && !s.Running && s.Agent.Id == id)) { s.NextRun = DateTimeOffset.Now; s.Forced = true; }
     }
 
     public void RunAll(Func<Agent, bool>? filter = null)
     {
         lock (_slots)
-            foreach (var s in _slots.Where(s => filter?.Invoke(s.Agent) ?? true)) { s.NextRun = DateTimeOffset.Now; s.Forced = true; }
+            foreach (var s in _slots.Where(s => !_stopping && !s.Running && (filter?.Invoke(s.Agent) ?? true))) { s.NextRun = DateTimeOffset.Now; s.Forced = true; }
     }
 
     public bool IsForced(string id)
@@ -179,25 +209,22 @@ public sealed class AgentRuntime : IDisposable
     public async Task<AgentRunReport?> RunAndWaitAsync(string id, TimeSpan timeout, CancellationToken ct)
     {
         Slot? slot;
-        int runs;
+        Task<AgentRunReport> completion;
         lock (_slots)
         {
             slot = _slots.FirstOrDefault(s => s.Agent.Id == id);
             if (slot is null) return null;
-            runs = slot.Status.Runs;
+            if (!slot.Agent.IsEnabled(_ctx)) return new(AgentRunEnd.Disabled, slot.Status);
+            if (_stopping || (Paused && !slot.Running)) return new(AgentRunEnd.Paused, slot.Status);
+            slot.Completion ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+            completion = slot.Completion.Task;
+            if (!slot.Running) { slot.NextRun = DateTimeOffset.Now; slot.Forced = true; }
         }
-        if (!slot.Agent.IsEnabled(_ctx)) return new(AgentRunEnd.Disabled, slot.Status);
-        if (Paused && !slot.Running) return new(AgentRunEnd.Paused, slot.Status);
-        if (!slot.Running) RunNow(id);
-        var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < timeout)
+        try { return await completion.WaitAsync(timeout, ct).ConfigureAwait(false); }
+        catch (TimeoutException)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(Math.Min(250, Tick.TotalMilliseconds), Math.Max(1, (timeout - sw.Elapsed).TotalMilliseconds))), ct).ConfigureAwait(false);
-            // The run counts once its status is recorded (the slot lets go of it a moment later).
-            if (slot.Status.Runs > runs) return new(AgentRunEnd.Finished, slot.Status);
-            if (Paused && !slot.Running) return new(AgentRunEnd.Paused, slot.Status);
+            lock (_slots) return new(Paused && !slot.Running ? AgentRunEnd.Paused : AgentRunEnd.StillRunning, slot.Status);
         }
-        return new(AgentRunEnd.StillRunning, slot.Status);
     }
 
     /// <summary>Waits until all agents have completed at least one run (used by snapshot mode).</summary>
@@ -229,12 +256,29 @@ public sealed class AgentRuntime : IDisposable
                     {
                         if (!slot.Agent.IsEnabled(_ctx))
                         {
-                            slot.NextRun = now + TimeSpan.FromMinutes(1);
                             Update(slot, slot.Status with { State = AgentState.Disabled, NextRun = null, LastMessage = "Disabled in settings" });
+                            lock (_slots)
+                            {
+                                slot.NextRun = now + TimeSpan.FromMinutes(1);
+                                slot.Completion?.TrySetResult(new(AgentRunEnd.Disabled, slot.Status));
+                                slot.Completion = null;
+                            }
                             continue;
                         }
-                        slot.Running = true;
-                        _inflight[slot.Agent.Id] = Task.Run(() => RunSlotAsync(slot, ct), ct);
+                        lock (_slots)
+                        {
+                            if (_stopping || Paused || slot.Running) continue;
+                            slot.Running = true;
+                            slot.Completion ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+                            var workerId = ++_nextWorker;
+                            var worker = Task.Run(() => RunSlotAsync(slot, ct));
+                            _inflight[workerId] = worker;
+                            _ = worker.ContinueWith(finished =>
+                            {
+                                _inflight.TryRemove(workerId, out _);
+                                if (finished.IsFaulted) Log.Error("agents", "Agent worker failed", finished.Exception);
+                            }, TaskScheduler.Default);
+                        }
                     }
                 }
                 await Task.Delay(Tick, ct).ConfigureAwait(false);
@@ -260,6 +304,7 @@ public sealed class AgentRuntime : IDisposable
         var agent = slot.Agent;
         var gate = agent.UsesAi ? _ai : _collectors;
         var started = DateTimeOffset.Now;
+        AgentStatus? terminal = null;
         try
         {
             Update(slot, slot.Status with { State = AgentState.Waiting, LastMessage = "Queued" });
@@ -306,11 +351,14 @@ public sealed class AgentRuntime : IDisposable
                 slot.ConsecutiveErrors = 0;
                 next = result.RetryIn ?? EffectiveInterval(agent);
             }
-            slot.NextRun = now + next;
-            slot.Forced = false;
+            lock (_slots)
+            {
+                slot.NextRun = now + next;
+                slot.Forced = false;
+            }
 
             var state = !result.Ok ? AgentState.Error : result.Waiting ? AgentState.Paused : AgentState.Idle;
-            Update(slot, slot.Status with
+            terminal = slot.Status with
             {
                 State = state,
                 LastRun = started,
@@ -320,7 +368,7 @@ public sealed class AgentRuntime : IDisposable
                 NothingNew = result.Ok && !result.Changed,
                 Runs = slot.Status.Runs + 1,
                 Errors = slot.Status.Errors + (result.Ok ? 0 : 1),
-            });
+            };
 
             try { _ctx.Db.AddRun(new AgentRunRecord(agent.Id, started, sw.Elapsed, result.Ok, result.Message)); } catch { }
             Log.Info("agents", $"{agent.Id}: {(result.Ok ? "ok" : "FAIL")} in {sw.ElapsedMilliseconds} ms — {result.Message}");
@@ -337,25 +385,57 @@ public sealed class AgentRuntime : IDisposable
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { terminal = slot.Status with { State = AgentState.Paused, LastMessage = "Stopped", NextRun = null }; }
         finally
         {
-            slot.Running = false;
-            _inflight.TryRemove(agent.Id, out _);
+            lock (_slots)
+            {
+                if (terminal is not null) slot.Status = terminal;
+                slot.Running = false;
+                var completion = slot.Completion;
+                slot.Completion = null;
+                completion?.TrySetResult(new(ct.IsCancellationRequested ? AgentRunEnd.Paused : AgentRunEnd.Finished, slot.Status));
+            }
+            // Terminal status must never become observable while RunNow would still join the completed run.
+            if (terminal is not null) Publish(terminal);
         }
     }
 
     private void Update(Slot slot, AgentStatus status)
     {
-        slot.Status = status;
+        lock (_slots) slot.Status = status;
+        Publish(status);
+    }
+
+    private void Publish(AgentStatus status)
+    {
         try { StatusChanged?.Invoke(status); } catch { }
         _ctx.State.NotifyAgents();
     }
 
-    public void Dispose()
+    public Task StopAsync()
     {
-        _cts.Cancel();
-        try { _loop?.Wait(2000); } catch { }
+        lock (_slots)
+        {
+            if (_shutdown is not null) return _shutdown;
+            _stopping = true;
+            _cts.Cancel();
+            return _shutdown = JoinAsync();
+        }
+    }
+
+    private async Task JoinAsync()
+    {
+        if (_loop is not null) await _loop.ConfigureAwait(false);
+        await Task.WhenAll(_inflight.Values.ToArray()).ConfigureAwait(false);
+        lock (_slots)
+            foreach (var slot in _slots)
+                slot.Completion?.TrySetResult(new(AgentRunEnd.Paused, slot.Status));
+        _collectors.Dispose();
+        _ai.Dispose();
         _cts.Dispose();
     }
+
+    public void Dispose() => StopAsync().GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => new(StopAsync());
 }

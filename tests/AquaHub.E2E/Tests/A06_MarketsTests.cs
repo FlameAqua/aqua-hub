@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Markets: index tiles, chart ranges, watchlist rows, add-to-watchlist search, remove via context menu.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Feeds")]
 public sealed class A06_MarketsTests : E2ETestBase
 {
     public A06_MarketsTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

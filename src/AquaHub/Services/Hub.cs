@@ -39,10 +39,13 @@ public static class Hub
     /// <summary>True once the app is exiting (windows closing now must not say "still running").</summary>
     public static bool Quitting { get; private set; }
 
-    public static void Quit()
+    public static async void Quit()
     {
+        if (Quitting) return;
         Quitting = true;
-        global::System.Windows.Application.Current.Shutdown();
+        try { if (global::System.Windows.Application.Current is App app) await app.PrepareShutdownAsync().WaitAsync(TimeSpan.FromSeconds(45)); }
+        catch (Exception ex) { AquaHub.Core.Util.Log.Error("app", "Shutdown could not join all owned work", ex); }
+        finally { global::System.Windows.Application.Current.Shutdown(); }
     }
 
     /// <summary>Windows is signing out or shutting down: the app will exit without an explicit Quit.</summary>

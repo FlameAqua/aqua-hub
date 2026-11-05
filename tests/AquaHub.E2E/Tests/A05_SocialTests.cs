@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Social pulse: platform chips, Sources → Settings, topic posts and feed rows.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Feeds")]
 public sealed class A05_SocialTests : E2ETestBase
 {
     public A05_SocialTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

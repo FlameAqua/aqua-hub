@@ -42,11 +42,12 @@ public partial class RuntimeSettings : UserControl
         var ai = Hub.LocalAi;
         var build = BuildChoice.SelectedItem as LlamaBuild ?? ai.RecommendedBuild;
         Status.Text = ai.Build == "custom" ? "Using your own llama-server: " + Hub.S.Ai.Llama.ServerPath
-            : ai.RuntimeReady ? $"llama.cpp {ai.Build} · {ai.Builds.FirstOrDefault(b => b.Backend == ai.Installed?.Backend)?.Label ?? ai.Installed?.Backend} · {ai.Gpu.Label}"
+            : ai.Installed is { } install ? $"llama.cpp {install.Build} · {ai.Builds.FirstOrDefault(b => b.Backend == install.Backend)?.Label ?? install.Backend} · {ai.Gpu.Label}"
+            : ai.OllamaEngine is not null ? "Ollama's installed engine is available. Aqua's pinned runtime is not installed; you can install it for other models."
             : $"Aqua's runtime isn't installed. Install downloads llama.cpp {LlamaCatalog.Build} for {build.Label}, {Fmt.Bytes(build.Size)}, from llama.cpp's GitHub releases. Each file is checked before it's used.";
-        InstallButton.Visibility = !ai.RuntimeReady ? Visibility.Visible : Visibility.Collapsed;
+        InstallButton.Visibility = ai.Installed is null && ai.Build != "custom" ? Visibility.Visible : Visibility.Collapsed;
         InstallButton.IsEnabled = !_busy && !ai.Installing;
-        OtherBuilds.Visibility = !ai.RuntimeReady ? Visibility.Visible : Visibility.Collapsed;
+        OtherBuilds.Visibility = InstallButton.Visibility;
         OtherBuilds.IsEnabled = !_busy && !ai.Installing;
         UseButton.Visibility = ai.RuntimeReady && !ai.InUse ? Visibility.Visible : Visibility.Collapsed;
         DevicesButton.Visibility = ai.RuntimeReady ? Visibility.Visible : Visibility.Collapsed;

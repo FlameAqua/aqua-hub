@@ -9,6 +9,9 @@ namespace AquaHub.Services;
 /// <summary>One local image job, surviving navigation away from Ask Aqua.</summary>
 public sealed class ImageGenerationSession
 {
+    private readonly CancellationTokenSource _stop = new();
+    private readonly HashSet<TaskCompletionSource> _operations = new();
+    private bool _stopping;
     private CancellationTokenSource? _cancellation;
     private readonly SemaphoreSlim _archiveGate = new(1, 1);
     private DispatcherTimer? _retentionTimer;
@@ -17,6 +20,7 @@ public sealed class ImageGenerationSession
     private string? _referenceImage;
     private string? _editingReferenceId;
     public bool RecoveryNeeded => _gpuLease is not null && !Busy;
+    public bool HasRecoveryAddress => _recoveryOptions is not null;
     public event Action? Changed;
     public bool Busy { get; private set; }
     public bool Checking { get; private set; }
@@ -53,6 +57,7 @@ public sealed class ImageGenerationSession
     public GeneratedImage? Selected { get; set; }
     public IReadOnlyList<GeneratedImage> Recent { get; private set; } = Array.Empty<GeneratedImage>();
     public ImageArchive Archive => new(Path.Combine(Hub.Core.Paths.Root, "generated-images"));
+    private string RecoveryPath => Path.Combine(Hub.Core.Paths.Root, "generated-images", "gpu-recovery.txt");
 
     private static HttpClient CreateHttp() => new(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false })
     { Timeout = TimeSpan.FromSeconds(30) };
@@ -66,6 +71,8 @@ public sealed class ImageGenerationSession
 
     public async Task LoadAsync()
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
         await _archiveGate.WaitAsync();
         try
         {
@@ -85,17 +92,58 @@ public sealed class ImageGenerationSession
     public void Start()
     {
         if (_retentionTimer is not null) return;
+        if (File.Exists(RecoveryPath))
+        {
+            _gpuLease = Hub.Core.Llm.ReserveImageRecovery();
+            try
+            {
+                using var stream = new FileStream(RecoveryPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                if (stream.Length > 2048) throw new InvalidDataException("Recovery address is too large.");
+                using var reader = new StreamReader(stream);
+                _recoveryOptions = new ImageGenerationOptions { Endpoint = new Uri(reader.ReadToEnd().Trim(), UriKind.Absolute) };
+                using var http = CreateHttp();
+                _ = new ComfyImageClient(http, _recoveryOptions);
+                Message("The previous image job's GPU release was not confirmed. Choose Check GPU release before chat or generation can continue.", true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or UriFormatException or ImageGenerationException)
+            {
+                _recoveryOptions = null;
+                Message("Image recovery information couldn't be read. Set the address of the same ComfyUI server below, then choose Check GPU release. " + ex.Message, true);
+            }
+        }
         _retentionTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
         _retentionTimer.Tick += async (_, _) => await ApplyRetentionAsync();
         _retentionTimer.Start();
         _ = ApplyRetentionAsync();
     }
 
-    public void Stop() { _retentionTimer?.Stop(); _cancellation?.Cancel(); }
+    public void Stop() { _stopping = true; _retentionTimer?.Stop(); _stop.Cancel(); _cancellation?.Cancel(); }
+
+    public async Task StopAsync()
+    {
+        Stop();
+        await Task.WhenAll(_operations.Select(o => o.Task).ToArray());
+        if (RecoveryNeeded) Log.Warn("images", "Exiting with unconfirmed ComfyUI work or memory release; the GPU reservation was retained until exit.");
+    }
+
+    private IDisposable OwnOperation()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _operations.Add(completion);
+        return new Operation(() => { _operations.Remove(completion); completion.TrySetResult(); });
+    }
+
+    private sealed class Operation(Action finish) : IDisposable { public void Dispose() => finish(); }
+
+    private static string InventoryProblems(ImageModelInventory inventory) => string.Join("; ",
+        inventory.MissingRequiredNodes.Select(n => "Missing ComfyUI node: " + n)
+            .Concat(inventory.MissingRequiredModels.Select(m => "Select or install model: " + m))
+            .Concat(inventory.Mismatches));
 
     public async Task ApplyRetentionAsync(bool report = false)
     {
-        if (Busy || ManagingImages) return;
+        if (_stopping || Busy || Attaching || ManagingImages) return;
+        using var operation = OwnOperation();
         ManagingImages = true;
         Changed?.Invoke();
         await _archiveGate.WaitAsync();
@@ -116,7 +164,8 @@ public sealed class ImageGenerationSession
 
     public async Task DeleteAsync(GeneratedImage image)
     {
-        if (Busy || ManagingImages) return;
+        if (_stopping || Busy || Attaching || ManagingImages) return;
+        using var operation = OwnOperation();
         ManagingImages = true;
         Changed?.Invoke();
         await _archiveGate.WaitAsync();
@@ -140,10 +189,7 @@ public sealed class ImageGenerationSession
         var name = Path.GetFileName(path);
         return AttachAsync(name, ImageReferenceSource.Photo, async () =>
         {
-            var file = new FileInfo(path);
-            if (!file.Exists) throw new InvalidDataException($"“{ImageReference.ShortName(name)}” isn't there any more.");
-            if (file.Length > ReferenceImages.MaxFileBytes) throw new InvalidDataException(ReferenceImages.TooLarge(name));
-            return await File.ReadAllBytesAsync(path);
+            return await ReadImageFileAsync(path, name, _stop.Token);
         });
     }
 
@@ -158,21 +204,49 @@ public sealed class ImageGenerationSession
     public Task<bool> EditGalleryImageAsync(GeneratedImage item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        return AttachAsync(item.Prompt, ImageReferenceSource.Gallery, () => File.ReadAllBytesAsync(Archive.ImagePath(item)));
+        return AttachAsync(item.Prompt, ImageReferenceSource.Gallery, () => ReadImageFileAsync(Archive.ImagePath(item), item.Prompt, _stop.Token));
     }
 
-    private async Task<bool> AttachAsync(string name, ImageReferenceSource source, Func<Task<byte[]>> read)
+    private static async Task<byte[]> ReadImageFileAsync(string path, string name, CancellationToken ct)
     {
-        if (Busy || Attaching) return false;
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+        var length = stream.Length;
+        if (length > ReferenceImages.MaxFileBytes) throw new InvalidDataException(ReferenceImages.TooLarge(name));
+        var bytes = new byte[checked((int)length)];
+        await stream.ReadExactlyAsync(bytes, ct);
+        if (stream.ReadByte() != -1) throw new InvalidDataException("The image changed while Aqua was reading it. Add it again.");
+        return bytes;
+    }
+
+    public Task<bool> AttachClipboardAsync() => AttachPreparedAsync("Pasted image", ImageReferenceSource.Photo, async () =>
+    {
+        var bitmap = System.Windows.Clipboard.GetImage() ?? throw new InvalidDataException("The clipboard no longer has an image. Copy it again.");
+        if ((long)bitmap.PixelWidth * bitmap.PixelHeight > ReferenceImages.MaxSourcePixels)
+            throw new InvalidDataException("That clipboard image is over 200 megapixels. Copy a smaller image.");
+        bitmap.Freeze();
+        return await Task.Run(() => ReferenceImages.Prepare(bitmap), _stop.Token);
+    });
+
+    private Task<bool> AttachAsync(string name, ImageReferenceSource source, Func<Task<byte[]>> read) =>
+        AttachPreparedAsync(name, source, async () =>
+        {
+            var bytes = await read();
+            return await Task.Run(() => ReferenceImages.Prepare(bytes, name), _stop.Token);
+        });
+
+    private async Task<bool> AttachPreparedAsync(string name, ImageReferenceSource source, Func<Task<ReferenceImages.Prepared>> prepare)
+    {
+        if (_stopping || Busy || Attaching || ManagingImages) return false;
+        using var operation = OwnOperation();
         Attaching = true;
         Message(source == ImageReferenceSource.Gallery ? "Preparing a copy of this image…" : "Preparing your image…");
         try
         {
-            var bytes = await read();
-            var prepared = await Task.Run(() => ReferenceImages.Prepare(bytes, name));
+            var prepared = await prepare();
+            _stop.Token.ThrowIfCancellationRequested();
             string id;
             await _archiveGate.WaitAsync();
-            try { id = await Archive.SaveReferenceAsync(prepared.Png); }
+            try { id = await Archive.SaveReferenceAsync(prepared.Png, _stop.Token); }
             finally { _archiveGate.Release(); }
             var replaced = Reference?.Id;
             _referenceImage = null;
@@ -183,7 +257,8 @@ public sealed class ImageGenerationSession
             if (replaced is not null && replaced != id) _ = TidyReferencesAsync();
             return true;
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException)
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { return false; }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException)
         {
             Message(ex is InvalidDataException ? ex.Message : $"Couldn't open “{ImageReference.ShortName(name)}”: {ex.Message}", true);
             return false;
@@ -230,6 +305,8 @@ public sealed class ImageGenerationSession
 
     private async Task TidyReferencesAsync()
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
         await _archiveGate.WaitAsync();
         try { await PruneReferencesAsync(); }
         finally { _archiveGate.Release(); }
@@ -255,7 +332,8 @@ public sealed class ImageGenerationSession
 
     public async Task StartServerAsync(ImageGenerationOptions options)
     {
-        if (Busy || Checking) return;
+        if (_stopping || Busy || Checking) return;
+        using var operation = OwnOperation();
         if (Sandbox.Intercept("comfy-start", Hub.S.ImageGeneration.LauncherPath))
         { Message("ComfyUI startup was intercepted in this test profile."); return; }
         Checking = true;
@@ -269,7 +347,8 @@ public sealed class ImageGenerationSession
             {
                 try
                 {
-                    using var probe = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    using var probe = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                    probe.CancelAfter(TimeSpan.FromSeconds(3));
                     using var response = await http.GetAsync(new Uri(options.Endpoint.AbsoluteUri.TrimEnd('/') + "/system_stats"), probe.Token);
                     return response.IsSuccessStatusCode;
                 }
@@ -277,40 +356,44 @@ public sealed class ImageGenerationSession
             }
             if (!await Ready())
             {
+                _stop.Token.ThrowIfCancellationRequested();
                 if (!ComfyServerLauncher.Launch(Hub.S.ImageGeneration.LauncherPath))
                 { Message("Couldn't launch ComfyUI. Choose its installed executable or NVIDIA startup script below.", true); return; }
                 Message("Starting ComfyUI… waiting for its local server.");
                 var started = System.Diagnostics.Stopwatch.StartNew();
                 while (!await Ready())
                 {
+                    _stop.Token.ThrowIfCancellationRequested();
                     if (started.Elapsed > TimeSpan.FromSeconds(60))
                     { Message("ComfyUI is still starting, or uses another port. Check its address, then choose Check connection.", true); return; }
-                    await Task.Delay(1500);
+                    await Task.Delay(1500, _stop.Token);
                 }
             }
-            Inventory = await client.DiscoverAsync();
+            Inventory = await client.DiscoverAsync(_stop.Token);
             Message(RecoveryNeeded ? "ComfyUI is running. Choose Check GPU release to resume Aqua's queue."
                 : Inventory.IsReady ? "ComfyUI is running · models ready."
-                : "ComfyUI is running. Still needed: " + string.Join(", ", Inventory.MissingRequiredNodes.Concat(Inventory.MissingRequiredModels)), !Inventory.IsReady);
+                : "ComfyUI is running. " + InventoryProblems(Inventory), !Inventory.IsReady);
         }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         catch (Exception ex) { Message("Couldn't start ComfyUI: " + Friendly(ex), true); }
         finally { Checking = false; Changed?.Invoke(); }
     }
 
     public async Task CheckAsync(ImageGenerationOptions options)
     {
-        if (Busy || Checking || ManagingImages || RecoveryNeeded) return;
+        if (_stopping || Busy || Checking || ManagingImages || RecoveryNeeded) return;
+        using var operation = OwnOperation();
         Checking = true;
         Message("Checking ComfyUI and the selected model files…");
         try
         {
             using var http = CreateHttp();
             var client = new ComfyImageClient(http, options);
-            Inventory = await client.DiscoverAsync();
-            var missing = Inventory.MissingRequiredNodes.Concat(Inventory.MissingRequiredModels).ToArray();
+            Inventory = await client.DiscoverAsync(_stop.Token);
             Message(Inventory.IsReady ? "Connected · models ready. You can generate an image."
-                : "Connected. Still needed: " + string.Join(", ", missing), !Inventory.IsReady);
+                : "Connected. " + InventoryProblems(Inventory), !Inventory.IsReady);
         }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         catch (Exception ex) { Inventory = null; Message(Friendly(ex), true); }
         finally { Checking = false; Changed?.Invoke(); }
     }
@@ -321,7 +404,8 @@ public sealed class ImageGenerationSession
     /// </summary>
     public async Task GenerateAsync(ImageGenerationOptions options, ImageGenerationRequest request)
     {
-        if (Busy || Checking || ManagingImages || RecoveryNeeded || Attaching) return;
+        if (_stopping || Busy || Checking || ManagingImages || RecoveryNeeded || Attaching) return;
+        using var operation = OwnOperation();
         if (Sandbox.Intercept("image-generate", options.SelectedDiffusionModel))
         { Message("Image generation is intercepted in this test profile."); return; }
         if (Hub.S.Ai.Enabled && Hub.S.Ai.Provider != "llamacpp")
@@ -332,7 +416,7 @@ public sealed class ImageGenerationSession
         var reference = request.ReferenceImage is null ? Reference : null;
         Busy = true;
         _editingReferenceId = reference?.Id;
-        using var cts = new CancellationTokenSource();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
         _cancellation = cts;
         Message("Checking local image models…");
         try
@@ -344,7 +428,7 @@ public sealed class ImageGenerationSession
                   ?? throw new ImageGenerationException("Aqua no longer has the image to edit. Add it again, or clear it to create from your description alone.");
             Inventory = await client.DiscoverAsync(request.ReferenceImage is not null || reference is not null, cts.Token);
             if (!Inventory.IsReady)
-                throw new ImageGenerationException("Still needed: " + string.Join(", ", Inventory.MissingRequiredNodes.Concat(Inventory.MissingRequiredModels)));
+                throw new ImageGenerationException(InventoryProblems(Inventory));
             if (referencePng is not null)
             {
                 Message("Sending your image to ComfyUI…");
@@ -360,6 +444,11 @@ public sealed class ImageGenerationSession
             var uncertain = false;
             try
             {
+                // Persist before submission: a crash after an ambiguous HTTP response must not allow another GPU owner on restart.
+                Directory.CreateDirectory(Path.GetDirectoryName(RecoveryPath)!);
+                var temporary = RecoveryPath + ".tmp";
+                await File.WriteAllTextAsync(temporary, options.Endpoint.AbsoluteUri, cts.Token);
+                File.Move(temporary, RecoveryPath, overwrite: true);
                 var progress = new Progress<string>(message => Message(message));
                 var result = await client.GenerateAsync(request, progress, cts.Token);
                 var item = new GeneratedImage(Guid.NewGuid().ToString("N"), request.Prompt, result.Seed,
@@ -367,9 +456,11 @@ public sealed class ImageGenerationSession
                 {
                     Steps = request.Steps ?? (options.Variant == ImageModelVariant.Base4B ? 20 : 4),
                     Variant = options.Variant == ImageModelVariant.Base4B ? "base" : "distilled",
-                    TextEncoder = options.TextEncoderModel, Vae = options.VaeModel,
+                    TextEncoder = options.TextEncoderModel,
+                    Vae = options.VaeModel,
                     ComfyOutputPath = result.ComfyOutputPath,
-                    ReferenceImage = reference is null ? request.ReferenceImage : null, EditedFrom = reference,
+                    ReferenceImage = reference is null ? request.ReferenceImage : null,
+                    EditedFrom = reference,
                 };
                 await Archive.SaveAsync(item, result.PngBytes, cts.Token);
                 Recent = new[] { item }.Concat(Recent).Take(30).ToArray();
@@ -401,15 +492,19 @@ public sealed class ImageGenerationSession
         }
     }
 
-    public async Task RecoverAsync()
+    public async Task RecoverAsync(ImageGenerationOptions? options = null)
     {
-        if (!RecoveryNeeded || Checking || _recoveryOptions is null) return;
+        if (_stopping || !RecoveryNeeded || Checking) return;
+        _recoveryOptions ??= options;
+        if (_recoveryOptions is null) { Message("Choose the original ComfyUI server address before checking GPU release.", true); return; }
+        using var operation = OwnOperation();
         Checking = true;
         Message("Checking ComfyUI's queue and GPU memory…");
         try
         {
             using var http = CreateHttp();
-            using var ct = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            using var ct = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+            ct.CancelAfter(TimeSpan.FromSeconds(45));
             var client = new ComfyImageClient(http, _recoveryOptions);
             await client.WaitUntilIdleAsync(new Progress<string>(message => Message(message)), ct.Token);
             if (await client.ReleaseModelsAsync(ct.Token))
@@ -425,6 +520,8 @@ public sealed class ImageGenerationSession
 
     private void ReleaseLease()
     {
+        // A failed marker removal keeps the reservation, so restart never silently loses unresolved state.
+        if (File.Exists(RecoveryPath)) File.Delete(RecoveryPath);
         _gpuLease?.Dispose();
         _gpuLease = null;
         _recoveryOptions = null;

@@ -207,10 +207,16 @@ public static class FileUtil
 
     public static void CopyDirectory(string source, string target)
     {
+        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Test profiles cannot traverse linked directories: " + source);
         Directory.CreateDirectory(target);
-        foreach (var dir in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
-            Directory.CreateDirectory(dir.Replace(source, target));
-        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-            File.Copy(file, file.Replace(source, target), overwrite: true);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(source))
+        {
+            var attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Test profiles cannot copy linked entries: " + entry);
+            var destination = Path.Combine(target, Path.GetFileName(entry));
+            if ((attributes & FileAttributes.Directory) != 0) CopyDirectory(entry, destination);
+            else File.Copy(entry, destination, overwrite: false);
+        }
     }
 }

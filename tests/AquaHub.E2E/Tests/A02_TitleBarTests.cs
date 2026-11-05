@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Title bar: command box, refresh, alerts bell (Mark all read / Clear / open), do-not-disturb.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Shell")]
 public sealed class A02_TitleBarTests : E2ETestBase
 {
     public A02_TitleBarTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

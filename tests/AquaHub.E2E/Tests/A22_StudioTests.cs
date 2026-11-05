@@ -2,10 +2,13 @@ using System.Text.Json.Nodes;
 
 namespace AquaHub.E2E.Tests;
 
+[Trait("Execution", "Offline")]
+[Trait("Component", "Images")]
 public sealed class A22_StudioTests(AppFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, output)
 {
     protected override SessionOptions Options => new()
     {
+        Offline = true,
         EditSettings = root =>
         {
             root["ai"] = new JsonObject { ["enabled"] = false, ["manageOllama"] = false };
@@ -67,6 +70,7 @@ public sealed class A22_StudioTests(AppFixture fixture, ITestOutputHelper output
             Tab("images");
             Ui.SetValue(Ui.WaitFind(PageRoot("ask"), Ui.Id("image-endpoint"), "local endpoint"), "http://127.0.0.1:8188");
             Ui.Invoke(Ui.WaitFind(PageRoot("ask"), Ui.Id("image-edit"), "edit image"));
+            Wait.For(() => Ui.NameOf(Ui.WaitFind(PageRoot("ask"), Ui.Id("image-status"), "image status")).Contains("Aqua edits a copy"), "gallery reference prepared");
             Assert.Equal("", Ui.ValueOf(Ui.WaitFind(PageRoot("ask"), Ui.Id("image-prompt"), "edit instructions")));
             Assert.Equal("Apply image edit", Ui.NameOf(Ui.WaitFind(PageRoot("ask"), Ui.Id("image-generate"), "apply edit")));
             Ui.SetValue(Ui.WaitFind(PageRoot("ask"), Ui.Id("image-prompt"), "edit instructions"), "Change the sky to sunset");
@@ -91,6 +95,7 @@ public sealed class A22_StudioTests(AppFixture fixture, ITestOutputHelper output
     }
 
     [Fact]
+    [Trait("Component", "Roleplay")]
     public void T02_ImageFormValidatesPromptAndRoleplayCanStartANewScene()
     {
         Run(() =>

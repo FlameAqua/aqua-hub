@@ -234,7 +234,7 @@ public sealed class CompatBook
             var result = e.Ok ? "Loads" : (e.Failure == LlamaFailureKind.Format ? "Can't read the file" : e.Failure == LlamaFailureKind.Memory ? "Out of memory" : "Failed")
                                           + (e.Error is { Length: > 0 } err ? ": " + err.Replace('|', '/') : "");
             var setup = e.Ok ? $"{e.Context / 1024}K · {e.Cache} · {(e.MtpDraft > 0 ? "MTP " + e.MtpDraft : "off")}" : "";
-            var layers = e.GpuLayers is int g && e.TotalLayers is int t ? $"{g}/{t}" : e.Ok ? "all" : "";
+            var layers = e.GpuLayers is int g && e.TotalLayers is int t ? $"{g}/{t}" : "not reported";
             var vram = e.ModelMiB > 0 ? $"{e.ModelMiB + e.CacheMiB + e.ComputeMiB:0} MiB ({e.ModelMiB:0} + {e.CacheMiB:0} + {e.ComputeMiB:0})" : "";
             sb.AppendLine(string.Join(" | ", "| " + e.ModelName, e.Server, result, setup, layers, vram,
                 e.Ok ? $"{e.LoadSeconds:0.0} s" : "", e.PromptPerSecond > 0 ? $"{e.PromptPerSecond:0}" : "", e.OutputPerSecond > 0 ? $"{e.OutputPerSecond:0.0}" : "",

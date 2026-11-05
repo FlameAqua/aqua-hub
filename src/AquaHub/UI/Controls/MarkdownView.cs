@@ -38,6 +38,7 @@ public sealed class MarkdownView : RichTextBox
     private readonly DispatcherTimer _timer;
     private string _rendered = "\u0001";
     private IReadOnlyList<Citation>? _renderedCitations;
+    internal static int PendingRenders { get; private set; }
 
     public MarkdownView()
     {
@@ -59,8 +60,10 @@ public sealed class MarkdownView : RichTextBox
         Document = new FlowDocument { PagePadding = new Thickness(0) };
         Document.SetResourceReference(FlowDocument.ForegroundProperty, "B.Text");
         _timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(80) };
-        _timer.Tick += (_, _) => { _timer.Stop(); Render(); };
-        Loaded += (_, _) => Render();
+        _timer.Tick += (_, _) => { StopTimer(); Render(); };
+        Loaded += (_, _) => Schedule();
+        IsVisibleChanged += (_, _) => { if (IsVisible) Schedule(); else StopTimer(); };
+        Unloaded += (_, _) => StopTimer();
         ContextMenu = BuildMenu();
         ContextMenuOpening += (_, _) => UpdateMenu();
         // Copying keeps the Markdown: tables and formulae come out as written, not as tab-separated text or nothing.
@@ -76,8 +79,15 @@ public sealed class MarkdownView : RichTextBox
 
     private void Schedule()
     {
-        if (!IsLoaded) return;
-        if (!_timer.IsEnabled) _timer.Start();
+        if (!IsLoaded || !IsVisible || (Markdown == _rendered && ReferenceEquals(Citations, _renderedCitations))) return;
+        if (!_timer.IsEnabled) { PendingRenders++; _timer.Start(); }
+    }
+
+    private void StopTimer()
+    {
+        if (!_timer.IsEnabled) return;
+        _timer.Stop();
+        PendingRenders--;
     }
 
     private void Render()
@@ -188,7 +198,12 @@ public sealed class MarkdownView : RichTextBox
     internal static void Build(FlowDocument doc, string text, IReadOnlyList<Citation>? citations)
     {
         var ctx = new Ctx(doc.FontSize, citations);
-        foreach (var block in AnswerMarkdown.Parse(text)) doc.Blocks.Add(BlockOf(block, ctx, 0));
+        const int maxCharacters = 32_000, maxBlocks = 200;
+        var shortened = text.Length > maxCharacters;
+        var blocks = AnswerMarkdown.Parse(shortened ? text[..maxCharacters] : text);
+        foreach (var block in blocks.Take(maxBlocks)) doc.Blocks.Add(BlockOf(block, ctx, 0));
+        if (shortened || blocks.Count > maxBlocks)
+            doc.Blocks.Add(new Paragraph(new Run("Long answer preview limited. Use Copy answer or export the chat for the full text.")));
         // No trailing gap under the last block.
         if (doc.Blocks.LastBlock is { } last) last.Margin = new Thickness(last.Margin.Left, last.Margin.Top, last.Margin.Right, 0);
     }
@@ -256,9 +271,13 @@ public sealed class MarkdownView : RichTextBox
         if (m.Closed && MathView.Create(m.Latex, true, ctx.FontSize) is { } view)
             return new BlockUIContainer(new Viewbox
             {
-                Child = view, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, HorizontalAlignment = HorizontalAlignment.Center,
+                Child = view,
+                Stretch = Stretch.Uniform,
+                StretchDirection = StretchDirection.DownOnly,
+                HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 2, 0, 0),
-            }) { Margin = new Thickness(0, 4, 0, 10) };
+            })
+            { Margin = new Thickness(0, 4, 0, 10) };
         var raw = CodeOf(m.Source.Split('\n'), ctx);
         if (m.Closed) raw.ToolTip = "This formula couldn't be drawn, so here is its LaTeX.";
         return raw;
@@ -392,24 +411,27 @@ public sealed class MarkdownView : RichTextBox
             case MdSpan.Strike:
                 return Spans(piece.Children ?? Array.Empty<MdInline>(), ctx, new Span { TextDecorations = TextDecorations.Strikethrough });
             case MdSpan.Code:
-            {
-                var code = new Run(piece.Text) { FontFamily = Mono };
-                code.SetResourceReference(TextElement.BackgroundProperty, "B.Subtle");
-                // A path in backticks is usually a file Aqua found: make it openable.
-                return LocalPath(piece.Text) is { } codePath ? FileLink(code, codePath) : code;
-            }
+                {
+                    var code = new Run(piece.Text) { FontFamily = Mono };
+                    code.SetResourceReference(TextElement.BackgroundProperty, "B.Subtle");
+                    // A path in backticks is usually a file Aqua found: make it openable.
+                    return LocalPath(piece.Text) is { } codePath ? FileLink(code, codePath) : code;
+                }
             case MdSpan.Math:
                 return InlineMath(piece, ctx);
             case MdSpan.Citation when ctx.Citations?.FirstOrDefault(c => c.Number == piece.Number) is { } cite:
-            {
-                var link = new Hyperlink(new Run($"[{piece.Number}]"))
                 {
-                    TextDecorations = null, Cursor = Cursors.Hand, ToolTip = $"{cite.Source}: {cite.Title}", Focusable = false,
-                };
-                link.SetResourceReference(TextElement.ForegroundProperty, "B.AccentText");
-                link.Click += (_, _) => OpenCitation(cite);
-                return link;
-            }
+                    var link = new Hyperlink(new Run($"[{piece.Number}]"))
+                    {
+                        TextDecorations = null,
+                        Cursor = Cursors.Hand,
+                        ToolTip = $"{cite.Source}: {cite.Title}",
+                        Focusable = false,
+                    };
+                    link.SetResourceReference(TextElement.ForegroundProperty, "B.AccentText");
+                    link.Click += (_, _) => OpenCitation(cite);
+                    return link;
+                }
             case MdSpan.Link when piece.Target is { } target:
                 if (target.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return WebLink(piece.Text, target);
                 return LocalPath(target) is { } linked ? FileLink(new Run(piece.Text), linked) : new Run(piece.Text);

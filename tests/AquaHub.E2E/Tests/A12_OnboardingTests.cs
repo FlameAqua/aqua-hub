@@ -3,6 +3,8 @@ using System.Text;
 namespace AquaHub.E2E.Tests;
 
 /// <summary>First run (empty profile): the five onboarding steps, their inputs, Back/Next and Finish.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Shell")]
 public sealed class A12_OnboardingTests : E2ETestBase
 {
     public A12_OnboardingTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

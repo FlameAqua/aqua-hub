@@ -5,6 +5,8 @@ namespace AquaHub.E2E.Infrastructure;
 
 public sealed class SessionOptions
 {
+    /// <summary>Keep this fixture offline even when it is included in an explicit legacy/full run.</summary>
+    public bool Offline { get; init; }
     /// <summary>Start from an empty folder (first run → onboarding) instead of the warm profile.</summary>
     public bool EmptyProfile { get; init; }
 
@@ -25,6 +27,8 @@ public sealed class SessionOptions
 
     /// <summary>Tweaks applied to the copied settings.json before launch.</summary>
     public Action<JsonObject>? EditSettings { get; init; }
+    /// <summary>Creates deterministic files/database content only in this session's newly created profile.</summary>
+    public Action<string>? SeedProfile { get; init; }
 
     /// <summary>More command-line arguments for the app (e.g. <c>--demo-update</c>, a pretend release).</summary>
     public IReadOnlyList<string> ExtraArgs { get; init; } = Array.Empty<string>();
@@ -39,7 +43,9 @@ public sealed class SessionOptions
 public sealed class AppSession : IDisposable
 {
     private static readonly object StartedGate = new();
-    private static readonly HashSet<int> StartedPids = new();
+    private static readonly Dictionary<int, Process> StartedProcesses = new();
+    private readonly int _pid;
+    private bool _disposed;
 
     static AppSession()
     {
@@ -50,7 +56,7 @@ public sealed class AppSession : IDisposable
     public string ProfileDir { get; }
     public SessionOptions Options { get; }
     public Process Process { get; private set; }
-    public int Pid => Process.Id;
+    public int Pid => _pid;
     public Journal Journal { get; }
     public SettingsFile Settings { get; }
     public AppLog Log { get; }
@@ -62,6 +68,7 @@ public sealed class AppSession : IDisposable
         ProfileDir = profileDir;
         Options = options;
         Process = process;
+        _pid = process.Id;
         Journal = new Journal(profileDir);
         Settings = new SettingsFile(profileDir);
         Log = new AppLog(profileDir);
@@ -70,13 +77,16 @@ public sealed class AppSession : IDisposable
 
     public static AppSession Start(string name, SessionOptions options)
     {
+        var offline = E2EConfig.OfflineComponents || options.Offline;
+        // A fixture included in -All must not inherit that legacy warm profile's paths or stored work.
+        var empty = options.EmptyProfile || (options.Offline && !E2EConfig.OfflineComponents);
         Win32.EnsureDpiAware();
         var exe = E2EConfig.ExePath;
         if (!File.Exists(exe)) throw new FileNotFoundException("App under test not found (set AQUAHUB_E2E_EXE)", exe);
 
         var profile = Path.Combine(E2EConfig.ProfilesDir, name);
         for (var n = 2; Directory.Exists(profile); n++) profile = Path.Combine(E2EConfig.ProfilesDir, $"{name}-{n}");
-        if (options.EmptyProfile)
+        if (empty)
         {
             Directory.CreateDirectory(profile);
         }
@@ -97,14 +107,46 @@ public sealed class AppSession : IDisposable
                 options.EditSettings?.Invoke(root);
             });
         }
+        // Empty profiles need their settings edits too. Offline runs never inherit the owner's profile or services.
+        if (empty && (options.EditSettings is not null || offline))
+        {
+            File.WriteAllText(Path.Combine(profile, "settings.json"), "{}");
+            SettingsFile.Edit(profile, root =>
+            {
+                if (offline && options.SeedPlace) SeedDublin(root);
+                options.EditSettings?.Invoke(root);
+            });
+        }
+        if (offline) SettingsFile.Edit(profile, root =>
+        {
+            JsonObject Section(string key)
+            {
+                if (root[key] is JsonObject found) return found;
+                var made = new JsonObject(); root[key] = made; return made;
+            }
+            root["onboardingComplete"] = true;
+            var general = Section("general");
+            general["hotkeyFlyout"] = ""; general["hotkeyPalette"] = ""; general["launchAtStartup"] = false;
+            var ai = Section("ai");
+            ai["enabled"] = false; ai["manageOllama"] = false; ai["startOllamaOnDemand"] = false;
+            var llama = ai["llama"] as JsonObject;
+            if (llama is null) { llama = new(); ai["llama"] = llama; }
+            llama["useOllamaModels"] = false; llama["useOllamaEngine"] = false; llama["serverPath"] = "";
+            var ask = Section("ask");
+            ask["web"] = false; ask["computer"] = false; ask["planWithModel"] = false;
+            var privacy = Section("privacy");
+            privacy["loadRemoteImages"] = false;
+        });
+        options.SeedProfile?.Invoke(profile);
 
         var args = new List<string> { "--e2e", "--data-dir", profile };
         if (options.Background) args.Add("--background");
         args.AddRange(options.ExtraArgs);
-        var process = Launch(exe, args);
+        var process = Launch(exe, args, offline);
         var session = new AppSession(name, profile, options, process);
         Results.Log($"[session] started {name} pid={process.Id} profile={profile}");
-        session.WaitUntilReady();
+        try { session.WaitUntilReady(); }
+        catch { session.Dispose(); throw; }
         return session;
     }
 
@@ -125,7 +167,7 @@ public sealed class AppSession : IDisposable
         Results.Log("[session] the warm profile has no place; seeded Dublin");
     }
 
-    private static Process Launch(string exe, IEnumerable<string> args)
+    private static Process Launch(string exe, IEnumerable<string> args, bool offline)
     {
         var psi = new ProcessStartInfo(exe)
         {
@@ -134,9 +176,10 @@ public sealed class AppSession : IDisposable
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["AQUAHUB_E2E"] = "1";
+        psi.Environment["AQUAHUB_E2E_OFFLINE"] = offline ? "1" : "";
         psi.Environment.Remove("AQUAHUB_HOME");
         var p = Process.Start(psi) ?? throw new InvalidOperationException("Could not start " + exe);
-        lock (StartedGate) StartedPids.Add(p.Id);
+        lock (StartedGate) StartedProcesses[p.Id] = p;
         return p;
     }
 
@@ -198,13 +241,17 @@ public sealed class AppSession : IDisposable
         var args = new List<string>();
         if (command != "activate") args.Add("--" + command);
         args.AddRange(new[] { "--e2e", "--data-dir", ProfileDir });
-        var p = Launch(E2EConfig.ExePath, args);
-        if (!p.WaitForExit(20000))
+        using var p = Launch(E2EConfig.ExePath, args, E2EConfig.OfflineComponents || Options.Offline);
+        try
         {
-            try { p.Kill(); } catch { }
-            throw new TimeoutException($"Command process for '{command}' did not exit (it may have become the primary instance)");
+            if (!p.WaitForExit(20000))
+            {
+                try { p.Kill(); } catch { }
+                throw new TimeoutException($"Command process for '{command}' did not exit (it may have become the primary instance)");
+            }
+            Results.Log($"[session] command {command} → exit {p.ExitCode}");
         }
-        Results.Log($"[session] command {command} → exit {p.ExitCode}");
+        finally { lock (StartedGate) StartedProcesses.Remove(p.Id); }
     }
 
     // ───────────── Diagnostics ─────────────
@@ -216,12 +263,14 @@ public sealed class AppSession : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         try
         {
             if (IsAlive)
             {
                 try { Command("quit"); } catch { }
-                if (!Process.WaitForExit(15000))
+                if (!Process.WaitForExit(50000))
                 {
                     Results.Log($"[session] {Name} did not quit in time — killing pid {Pid}");
                     Process.Kill();
@@ -235,22 +284,22 @@ public sealed class AppSession : IDisposable
         }
         finally
         {
-            lock (StartedGate) StartedPids.Remove(Pid);
+            lock (StartedGate) StartedProcesses.Remove(Pid);
             Results.Log($"[session] disposed {Name}");
+            Process.Dispose();
         }
     }
 
     /// <summary>Last-resort cleanup: kills only processes this harness started that are still running.</summary>
     public static void KillAllStarted()
     {
-        int[] pids;
-        lock (StartedGate) pids = StartedPids.ToArray();
-        foreach (var pid in pids)
+        Process[] processes;
+        lock (StartedGate) processes = StartedProcesses.Values.ToArray();
+        foreach (var p in processes)
         {
             try
             {
-                using var p = Process.GetProcessById(pid);
-                if (!p.HasExited && p.ProcessName.Equals("AquaHub", StringComparison.OrdinalIgnoreCase)) p.Kill();
+                if (!p.HasExited) p.Kill();
             }
             catch { }
         }

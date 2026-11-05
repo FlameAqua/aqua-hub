@@ -14,6 +14,7 @@ public static class Sandbox
     private static string? _journal;
 
     public static bool Enabled { get; private set; }
+    public static bool OfflineComponents => Enabled && Environment.GetEnvironmentVariable("AQUAHUB_E2E_OFFLINE") == "1";
 
     public const string ClipboardFixture =
         "Dublin City Council has approved a plan to pedestrianise College Green, creating a new civic plaza in the heart of the city. " +

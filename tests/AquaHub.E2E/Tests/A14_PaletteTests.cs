@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Command palette (opened with --palette and Ctrl+K): filtering, arrow keys + Enter, Tab to ask inline.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Desktop")]
 public sealed class A14_PaletteTests : E2ETestBase
 {
     public A14_PaletteTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

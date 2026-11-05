@@ -4,6 +4,8 @@ namespace AquaHub.E2E.Tests;
 /// The Workbench: writing a skill by hand (drafting needs the model), switching it off and on, trying it in Ask,
 /// deleting it; adding, editing and forgetting memories; the abilities list.
 /// </summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Workbench")]
 public sealed class A17_WorkbenchTests : E2ETestBase
 {
     public A17_WorkbenchTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 namespace AquaHub.E2E.Tests;
 
 /// <summary>The Today dashboard: brief actions, story rows, card links, market rows, media, apps, scenes, predictions.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Feeds")]
 public sealed class A03_TodayTests : E2ETestBase
 {
     public A03_TodayTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

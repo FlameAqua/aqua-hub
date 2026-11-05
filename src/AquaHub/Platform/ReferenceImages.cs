@@ -20,6 +20,20 @@ public static class ReferenceImages
 
     public sealed record Prepared(byte[] Png, int Width, int Height);
 
+    /// <summary>Clipboard bitmaps have already been decoded by Windows; bound dimensions before background scaling/encoding.</summary>
+    public static Prepared Prepare(System.Windows.Media.Imaging.BitmapSource bitmap)
+    {
+        var width = bitmap.PixelWidth; var height = bitmap.PixelHeight;
+        if (width < 16 || height < 16 || (long)width * height > MaxSourcePixels)
+            throw new InvalidDataException("Use an image between 16 × 16 pixels and 200 megapixels.");
+        var fit = ImageReferenceSizing.Fit(width, height);
+        BitmapSource image = bitmap;
+        if (fit.CropWidth < width || fit.CropHeight < height)
+            image = new CroppedBitmap(image, new Int32Rect((width - fit.CropWidth) / 2, (height - fit.CropHeight) / 2, fit.CropWidth, fit.CropHeight));
+        image = new TransformedBitmap(image, new ScaleTransform(fit.Width / (double)fit.CropWidth, fit.Height / (double)fit.CropHeight));
+        return new Prepared(Images.Png(OnWhite(image)), fit.Width, fit.Height);
+    }
+
     /// <exception cref="InvalidDataException">The image can't be read or is out of bounds; the message tells the user why.</exception>
     public static Prepared Prepare(byte[] bytes, string name)
     {
@@ -43,7 +57,8 @@ public static class ReferenceImages
 
     private static Prepared Build(byte[] bytes, bool colourManaged)
     {
-        var decoder = BitmapDecoder.Create(new MemoryStream(bytes, writable: false),
+        using var stream = new MemoryStream(bytes, writable: false);
+        var decoder = BitmapDecoder.Create(stream,
             colourManaged ? BitmapCreateOptions.None : BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.None);
         var frame = decoder.Frames[0];
         var (width, height) = (frame.PixelWidth, frame.PixelHeight);

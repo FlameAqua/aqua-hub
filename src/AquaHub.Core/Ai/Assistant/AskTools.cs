@@ -84,6 +84,9 @@ public abstract class AskTool
 /// <summary>Everything a tool may use while answering one question.</summary>
 public sealed class AskRun
 {
+    public AnswerTimings Timings { get; } = new();
+    public int ContextTokens { get; set; }
+    public int ContextLimit { get; set; }
     public required HubState State { get; init; }
     public HubDatabase? Db { get; init; }
     public required HubSettings Settings { get; init; }
@@ -429,8 +432,12 @@ public sealed class ListFolderTool : AskTool
     {
         var token = raw.Trim().Trim('%').ToLowerInvariant() switch
         {
-            "downloads" or "download" => "%DOWNLOADS%", "documents" or "my documents" or "docs" => "%DOCUMENTS%", "desktop" => "%DESKTOP%",
-            "pictures" or "photos" or "my pictures" or "images" => "%PICTURES%", "music" => "%MUSIC%", "videos" or "my videos" => "%VIDEOS%",
+            "downloads" or "download" => "%DOWNLOADS%",
+            "documents" or "my documents" or "docs" => "%DOCUMENTS%",
+            "desktop" => "%DESKTOP%",
+            "pictures" or "photos" or "my pictures" or "images" => "%PICTURES%",
+            "music" => "%MUSIC%",
+            "videos" or "my videos" => "%VIDEOS%",
             _ => null,
         };
         if (token is null) return raw.Trim();

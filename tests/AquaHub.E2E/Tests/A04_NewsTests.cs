@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>News page: filter chips, text filter, per-story Save / Copy link / Ask / Open and source chips.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Feeds")]
 public sealed class A04_NewsTests : E2ETestBase
 {
     public A04_NewsTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

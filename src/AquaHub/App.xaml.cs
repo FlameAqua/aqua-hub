@@ -42,6 +42,27 @@ public partial class App : Application
     private SingleInstance? _single;
     private TrayController? _trayController;
     private GeneralSettings? _lastGeneral;
+    private Task? _shutdown;
+    private bool _shutdownComplete;
+    private Task _initialization = Task.CompletedTask;
+    private Task _mediaInitialization = Task.CompletedTask;
+
+    public Task PrepareShutdownAsync() => _shutdown ??= StopOwnedAsync();
+
+    private async Task StopOwnedAsync()
+    {
+        Hub.Speech?.Stop();
+        Hub.Updates?.StopScheduling();
+        Hub.Ollama?.StopScheduling();
+        var agents = Hub.Core.Agents.StopAsync();
+        var local = Hub.LocalAi.StopAsync();
+        var ask = Hub.Ask.StopAsync();
+        var images = Hub.Images.StopAsync();
+        var llm = Hub.Core.Llm.StopAsync();
+        await Task.WhenAll(agents, local, ask, images, llm, _initialization, _mediaInitialization);
+        await Hub.Llama.StopAsync();
+        _shutdownComplete = true;
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -122,11 +143,18 @@ public partial class App : Application
             Hub.Platform.RecordGpu(snap.Gpu?.Utilization ?? 0, Hub.Core.Llm.IsBusy);
             Hub.State.SetSystem(snap);
         };
-        _ = FirstRun.EnsureDefaultsAsync();
+        if (!Sandbox.OfflineComponents && !(args.Measure && args.SnapshotPages == "performance")) _initialization = FirstRun.EnsureDefaultsAsync();
 
         if (Hub.SnapshotMode)
         {
             WindowEffects.ForceOpaque = true;
+            if (args.Measure && args.SnapshotPages == "performance")
+            {
+                if (!Sandbox.Enabled || args.DataDir is null) throw new InvalidOperationException("Performance measurement requires --e2e and a scratch --data-dir.");
+                Hub.Core.Settings.Update(s => { s.Ai.Enabled = false; s.Ai.ManageOllama = false; s.Ai.StartOllamaOnDemand = false; s.Ask.Computer = false; });
+                _ = ExperienceMeasurement.RunAsync(args.Snapshot!);
+                return;
+            }
             _ = args.Measure
                 ? SnapshotRunner.MeasureAsync(args.Snapshot!, args.SnapshotWait)
                 : SnapshotRunner.RunAsync(args.Snapshot!, args.SnapshotWait, args.SnapshotPages, scratchProfile: args.DataDir is not null);
@@ -161,14 +189,17 @@ public partial class App : Application
         Hub.Core.Settings.Changed += s => Hub.OnUi(() => OnSettingsChanged(s));
         Autostart.Sync(Hub.S.General.LaunchAtStartup, installed: Hub.Updates.IsInstalled);
 
-        _ = Hub.Media.InitAsync();
-        Hub.System.Start(TimeSpan.FromSeconds(20));
-        Hub.Core.Start();
-        Hub.Windows.StartIdleTrim();
-        Hub.Ollama.Start();
-        Hub.LocalAi.Start();
         Hub.Images.Start();
-        Hub.Updates.Start();
+        if (!Sandbox.OfflineComponents)
+        {
+            _mediaInitialization = Hub.Media.InitAsync();
+            Hub.System.Start(TimeSpan.FromSeconds(20));
+            Hub.Core.Start();
+            Hub.Windows.StartIdleTrim();
+            Hub.Ollama.Start();
+            Hub.Updates.Start();
+        }
+        Hub.LocalAi.Start();
         // Asking something (or a scheduled brief) may start a stopped local server, if Settings allow it.
         Hub.Core.Llm.StartServer = ct => Hub.S.Ai.StartOllamaOnDemand && OllamaPolicy.Applies(Hub.S.Ai)
             ? Hub.Ui.InvokeAsync(() => Hub.Ollama.StartAsync("you asked for AI", ct)).Task.Unwrap()
@@ -275,21 +306,28 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        try
+        void Cleanup(Action action)
         {
-            Hub.Speech?.Stop();
-            Hub.Images.Stop();
-            Hub.Ollama?.OnAppExit();
-            Hub.LocalAi?.Dispose();
-            Hub.Llama?.Dispose();
-            Hub.LlamaHost?.Dispose();
-            Hub.Hotkeys?.Dispose();
-            Hub.Tray?.Dispose();
-            Hub.System?.Dispose();
-            Hub.Core?.Dispose();
-            _single?.Dispose();
+            try { action(); }
+            catch (Exception ex) { Log.Warn("app", "Exit cleanup failed", ex); }
         }
-        catch { }
+        Cleanup(() => Hub.Speech?.Stop());
+        Cleanup(Hub.Images.Stop);
+        // Forced Windows/session shutdown cannot pump UI continuations. Cancel owners and leave their dependencies
+        // alive until process exit; normal Quit awaits them with the dispatcher still running.
+        if (!_shutdownComplete && Hub.Core is not null)
+        {
+            Cleanup(() => { _ = Hub.Core.Agents.StopAsync(); });
+            Cleanup(() => { if (Hub.LocalAi is not null) _ = Hub.LocalAi.StopAsync(); });
+            Cleanup(() => { if (Hub.Ask is not null) _ = Hub.Ask.StopAsync(); });
+        }
+        Cleanup(() => Hub.Ollama?.OnAppExit());
+        if (_shutdownComplete) Cleanup(() => Hub.Core?.Dispose());
+        Cleanup(() => Hub.LlamaHost?.Dispose());
+        Cleanup(() => Hub.Hotkeys?.Dispose());
+        Cleanup(() => Hub.Tray?.Dispose());
+        Cleanup(() => Hub.System?.Dispose());
+        Cleanup(() => _single?.Dispose());
         base.OnExit(e);
     }
 }

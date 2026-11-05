@@ -62,7 +62,9 @@ public partial class ImageGenerationPanel : UserControl
         {
             Endpoint = endpoint,
             Variant = Variant.SelectedIndex == 1 ? ImageModelVariant.Distilled4B : ImageModelVariant.Base4B,
-            DiffusionModel = (string)Diffusion.SelectedItem, TextEncoderModel = (string)Encoder.SelectedItem, VaeModel = (string)Vae.SelectedItem,
+            DiffusionModel = (string)Diffusion.SelectedItem,
+            TextEncoderModel = (string)Encoder.SelectedItem,
+            VaeModel = (string)Vae.SelectedItem,
         };
         // Validate before persisting; redirects are disabled by the HTTP client.
         using var validationHttp = new System.Net.Http.HttpClient();
@@ -104,7 +106,11 @@ public partial class ImageGenerationPanel : UserControl
         catch (Exception ex) { Session.Message(ex.Message, true); }
     }
     private void OnCancel(object sender, RoutedEventArgs e) => Session.Cancel();
-    private async void OnRecover(object sender, RoutedEventArgs e) => await Session.RecoverAsync();
+    private async void OnRecover(object sender, RoutedEventArgs e)
+    {
+        try { await Session.RecoverAsync(Options()); }
+        catch (Exception ex) { Session.Message(ex.Message, true); }
+    }
     private void OnExample(object sender, RoutedEventArgs e) { Session.ClearReference(); Prompt.Text = (string)((Button)sender).Tag; Refresh(); }
 
     // ───────────── Image to edit: picker, drop, paste ─────────────
@@ -114,12 +120,17 @@ public partial class ImageGenerationPanel : UserControl
     private async void OnAttachImage(object sender, RoutedEventArgs e)
     {
         var picker = new OpenFileDialog { Title = "Choose an image to edit", Filter = ImageFilter, CheckFileExists = true };
+        if (Sandbox.Enabled) picker.AddToRecent = false;
+        if (Sandbox.OfflineComponents) picker.InitialDirectory = Hub.Core.Paths.Root;
         if (picker.ShowDialog(Window.GetWindow(this)) != true) return;
         if (await Session.AttachFileAsync(picker.FileName)) FocusPrompt();
     }
 
     private static string? DroppedImage(IDataObject data) =>
-        data.GetData(DataFormats.FileDrop) is string[] files ? files.FirstOrDefault(f => File.Exists(f) && Core.Ai.Assistant.Documents.IsImage(f)) : null;
+        data.GetData(DataFormats.FileDrop) is string[] files ? files.FirstOrDefault(IsReferenceFile) : null;
+
+    private static bool IsReferenceFile(string path) => Core.Ai.Assistant.Documents.IsImage(path) ||
+        Path.GetExtension(path).Equals(".heif", StringComparison.OrdinalIgnoreCase);
 
     private void OnImageDragOver(object sender, DragEventArgs e)
     {
@@ -141,15 +152,15 @@ public partial class ImageGenerationPanel : UserControl
         if (e.Key != Key.V || Keyboard.Modifiers != ModifierKeys.Control || Session.Busy || Session.Attaching) return;
         try
         {
-            if (Clipboard.ContainsFileDropList() && Clipboard.GetFileDropList().Cast<string>().FirstOrDefault(f => File.Exists(f) && Core.Ai.Assistant.Documents.IsImage(f)) is { } file)
+            if (Clipboard.ContainsFileDropList() && Clipboard.GetFileDropList().Cast<string>().FirstOrDefault(IsReferenceFile) is { } file)
             {
                 e.Handled = true;
                 if (await Session.AttachFileAsync(file)) FocusPrompt();
             }
-            else if (!Clipboard.ContainsText() && ScreenCapture.ClipboardImage() is { } png)
+            else if (!Clipboard.ContainsText() && Clipboard.ContainsImage())
             {
                 e.Handled = true;
-                if (await Session.AttachImageAsync(png, "Pasted image")) FocusPrompt();
+                if (await Session.AttachClipboardAsync()) FocusPrompt();
             }
         }
         catch (System.Runtime.InteropServices.ExternalException) { }
@@ -207,7 +218,7 @@ public partial class ImageGenerationPanel : UserControl
         AttachImage.Content = Session.Reference is null ? "Add an image to edit…" : "Use a different image…";
         StartServer.IsEnabled = !Session.Busy && !Session.Checking;
         Check.IsEnabled = !Session.Busy && !Session.Checking && !Session.RecoveryNeeded;
-        SetupFields.IsEnabled = !Session.Busy && !Session.Checking && !Session.RecoveryNeeded;
+        SetupFields.IsEnabled = !Session.Busy && !Session.Checking && (!Session.RecoveryNeeded || !Session.HasRecoveryAddress);
         Recover.Visibility = Session.RecoveryNeeded ? Visibility.Visible : Visibility.Collapsed;
         Recover.IsEnabled = !Session.Checking;
         Prompt.IsEnabled = !Session.Busy;

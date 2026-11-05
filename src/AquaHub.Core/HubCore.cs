@@ -34,7 +34,7 @@ public sealed class HubPaths
 }
 
 /// <summary>Composition root for all platform-neutral services and agents.</summary>
-public sealed class HubCore : IDisposable
+public sealed class HubCore : IDisposable, IAsyncDisposable
 {
     public HubPaths Paths { get; }
     public SettingsStore Settings { get; }
@@ -84,7 +84,13 @@ public sealed class HubCore : IDisposable
         State.Load();
         Context = new HubContext
         {
-            Settings = Settings, Db = Db, Http = Http, Llm = Llm, State = State, Secrets = secrets, Platform = platform,
+            Settings = Settings,
+            Db = Db,
+            Http = Http,
+            Llm = Llm,
+            State = State,
+            Secrets = secrets,
+            Platform = platform,
         };
         Agents = new AgentRuntime(Context);
         foreach (var agent in CreateAgents()) Agents.Register(agent);
@@ -129,6 +135,14 @@ public sealed class HubCore : IDisposable
     public void Dispose()
     {
         Agents.Dispose();
+        Llm.Dispose();
+        WebReader.Dispose();
+        Http.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await Agents.StopAsync().ConfigureAwait(false);
         Llm.Dispose();
         WebReader.Dispose();
         Http.Dispose();

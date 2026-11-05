@@ -1,11 +1,11 @@
-# Independent review rounds
+# Review outcomes
 
-An independent reviewer agent (separate context, read-only access) scores the product after each
-iteration, using the original brief, the source, the test suite and headless screenshots of every screen.
-The target is an overall score of **8/10 or higher**: four rounds for the original brief, then up to three more for
-each batch of owner feedback. Round 1 scored
-viability, usability and design; from round 2 the criteria are **functionality**, **usability**,
-**implementation** and **design** (each /10, plus a holistic overall /10).
+This log preserves historical independent scores and later engineering findings. Current development uses the maintained
+Architecture, Security, Development and Roadmap documents; it does not require an agent-handoff or screenshot archive.
+Record a review's scope, findings, changes and verification, and distinguish independent scores from self-review.
+
+The original review target was an overall **8/10**. Round 1 scored viability, usability and design; subsequent original
+rounds scored functionality, usability, implementation and design. The tables below retain those historical outcomes.
 
 | Round | Viability | Usability | Design | Overall | Outcome |
 |---|---|---|---|---|---|
@@ -519,8 +519,7 @@ recreating Dependabot's pull request 2, private vulnerability reporting and a LI
 
 ## Phase 4 backend, 4 Oct: Aqua's own model runtime
 
-Backend only — the screens, the review and every test are Astra's from this phase; the handoff is
-[docs/handoff/phase-4.md](handoff/phase-4.md).
+Historical backend delivery. Current contracts are maintained in [Architecture](ARCHITECTURE.md); open acceptance work is maintained in [Roadmap](ROADMAP.md).
 
 - **Built:** a llama.cpp runtime installed on request (one pinned build, picked from the card and driver), a model library
   over Aqua's downloads and Ollama's store (GGUF headers parsed for fit, thinking, tools, vision and MTP), Hugging Face
@@ -537,3 +536,253 @@ Backend only — the screens, the review and every test are Astra's from this ph
 - **Not yet:** the official pinned build hasn't run here (it needs the owner's OK to download it: about 655 MB for CUDA
   12.4); models split across files aren't downloaded; llama.cpp's router mode isn't used.
 - Unit suite: 1,116 passed, 26 skipped, none failed.
+
+## Phase 4 review and studio follow-up, 4–5 October 2026 (recorded 5 November)
+
+**Astra's independent backend assessment: 7.5/10**, below the 8/10 target. This is the score of the original handoff,
+not a new score of the 6 October response. The outcome summary is retained below; current service and studio contracts are in [Architecture](ARCHITECTURE.md).
+
+- Strong service boundary, bounded parsing, ownership and verified downloads; deductions for integration readiness,
+  existing-file digest bypass, lost aliases/cache rejection, context minimum, conversion incompatibility, environment
+  isolation and cancellation. Astra fixed the listed defects and supplied the Models/settings/studio screens.
+- Historical review validation: 1,174 passed / 23 skipped / 0 failed; nine focused desktop cases passed. The subsequent
+  studio pass recorded 1,218 passed / 23 skipped / 0 failed, eight combined desktop cases and two final studio rechecks.
+  These are Astra's earlier results, not tests rerun by this takeover.
+- Seven recommendations: pinned artifact matrix; live GPU acceptance; distinct format/capacity failures; provider model
+  migration; one UI service boundary; honest fit until headers are known; measured UX budgets and a mouse-hook design.
+
+## Phase 4b response, 6 October 2026 (documented 5 November)
+
+Implemented in release 1.3.0, `b021e9b`. [Current backend/API contracts](ARCHITECTURE.md);
+[compatibility matrix and record](compatibility/local-ai.md). No new independent review or numeric score is claimed.
+
+| Review recommendation | Response and remaining acceptance |
+|---|---|
+| Pin compatibility evidence | Exported the local record with `CompatBook.Markdown()`; pinned known archive/model/projector hashes and preserved the supplied 6 October results separately. Exact historic Ollama artifacts/converters and executable hashes remain incomplete. |
+| Run live GPU acceptance | Handover reports official Q5, Ollama-engine Qwen, 27B and Gemma loads; verified Q5 download, crash/job cleanup, idle stop, and scratch Comfy generation/edit/cancel/release. Runtime install/cancel, CPU embedding coexistence and real in-app image/chat transitions remain open. |
+| Separate compatibility/capacity | Format/Memory/Other classification, static RoPE preflight, one engine retry for format, persisted format blocks and 1/5/15-minute background backoff. Interactive work bypasses transient delay. Process-creation failures precede the load/backoff path and remain a gap. |
+| Provider selections | Model/DeepModel dictionary per provider, portable Ollama names, HF isolation, and runtime Main changes while another provider is active. Frontend round-trip review remains. |
+| Single UI source | Added Engine/Problem/Compatibility/Matrix/Preview to LocalAi, with UI-thread notifications. The follow-up screen integration still needs review. |
+| Pre-download fit | Bounded remote GGUF-header preview. Fit remains an estimate; the full file's digest is verified only on download. |
+| Measured UX/hooks | Theme/long-Markdown budgets and WH_MOUSE_LL design remain open. |
+
+Additional response: recognizable Comfy model-pairing mismatches reject submission; Comfy Desktop launcher/output
+discovery added. Connection/start/generation session status still needs to display `Mismatches` explicitly. Eight later
+reference-image files were inspected and left unchanged; Adrian committed them as `86f5ec6` during this pass, author unknown.
+
+5 November regression: **1,218 passed, 23 skipped, 0 failed** in Debug from the normal output folder. No new tests were written and no E2E, live inference, downloads or owner
+instance changes were performed. The source record was read only. The maintained roadmap is [ROADMAP.md](ROADMAP.md).
+
+Adrian expanded the development remit to frontend and backend on 5 November. His subsequently agreed delivery order is recorded in the maintained roadmap; this log does not assign a new independent score.
+
+Validation details: the first sandboxed unit run built but aborted before tests because the test host could not connect
+within 90 seconds. The same suite passed outside the sandbox with `--no-restore`; no assertion was changed. The aborted
+run's reported test-host PID was no longer present when checked. `git diff --check` passed, and all eight inherited
+Image Gen files plus the takeover prompt retained their original SHA-256 values across Adrian's commit.
+
+CI rechecked after that commit: [main run 42065298281](https://github.com/FlameAqua/aqua-hub/actions/runs/42065298281)
+failed on `86f5ec6`: 1,217 passed, 23 skipped, one failure in
+`AgentSchedulingTests.RunAndWaitWaitsOnARunUnderWayAndGivesUpAtItsTimeout` (`BehaviourTests.cs:310`, expected 1 run,
+actual 2). Local Debug passed this test. The CI discrepancy is recorded for follow-up, not declared fixed by a local pass.
+
+## Documentation and maintainability review, 5 November 2026
+
+Owner-directed maintenance, not an independent product re-score. Removed the handoff and screenshot directories,
+including local ignored build/capture artifacts (492 files, 278,574,034 bytes in total), and the README screenshot link.
+Kept historical review outcomes and the useful compatibility evidence. The maintained roadmap now orders Phase 4,
+5.3/5.4, 7, 8, 9, 6, then 5.1/5.2; the repository copy supersedes reliance on the old private artifact.
+
+Architecture and Security were checked against composition, scheduling, settings, local file/network policy, model
+launch, GPU scheduling and image-reference storage. Replaced broad claims of complete testing/local-only AI, qualified
+the old .NET 9 memory observations, distinguished source HTTP from public-only WebReader, documented explicit-file grant
+exceptions, and described the current best-effort job assignment rather than guaranteeing crash cleanup on failure.
+Image Gen reference copies/temporary uploads and their independent retention are now documented.
+
+[DEVELOPMENT.md](DEVELOPMENT.md) sets boundaries for new/touched features: explicit dependencies, single state/operation
+ownership, cancellable/observed work, dispatcher discipline, bounded resource use and deterministic test seams. It labels
+performance targets as pending measurement rather than passed budgets. This pass changes documentation and static validation; it does not
+claim the following implementation gaps fixed:
+
+| Finding | Follow-up |
+|---|---|
+| Agent wait/start/completion is polled across changing state; current CI saw two runs instead of one | Resolve run identity and reproduce concurrent joining/completion with controlled synchronization. |
+| Agent shutdown waits for the loop but does not join tracked runs before clients are disposed | Establish owned async shutdown and dependency disposal order. |
+| LocalAi starts untracked workers and does not detach every subscribed callback | Track worker completion and pair subscriptions with disposal. |
+| Model job creation/assignment logs and continues on failure | Decide/implement fail-closed containment and verify failure/forced-exit paths. |
+| Exact-file grants bypass normal root/link checks; image-reference paths are a separate boundary | Review identity/read races, native decoding limits, persistence and privacy before expanding file search. |
+| Header/compatibility APIs exist but several screen/error paths are incomplete | Finish the Phase 4 readiness checklist in Roadmap. |
+
+Validation: **1,218 unit tests passed, 23 skipped, 0 failed** in Debug from the normal output folder; Markdown hygiene and `git diff --check` passed. No tests were written/modified, no E2E or live inference was run, and no owner profile,
+installed app, registry, vault or local server was changed. CI's existing failure remains separate from local evidence.
+The offline scripts/check-docs.ps1 check is now part of CI, covering UTF-8/LF, missing relative link targets and the removed archive locations; no application behaviour or unit/E2E tests were changed.
+
+## Fresh-chat development agreement, 5 November 2026
+
+Added [MASTER_PROMPT.md](MASTER_PROMPT.md) and a small root [AGENTS.md](../AGENTS.md) entry point. They establish source
+orientation, concise design communication with Adrian, bounded implementation, explicit self-review, proportionate
+verification, owner-environment protection and evidence-based completion. Current priorities/contracts remain in their
+maintained documents; this is not a phase handoff or blanket authorization to build the backlog. Test-authoring/live-test
+permissions are preserved. README and Development link the agreement, and the documentation checker now includes AGENTS.
+
+Validation: Markdown hygiene and whitespace checks passed; no application behaviour or unit/E2E tests changed. No new
+unit run was needed for this documentation/discovery change. No independent review score is assigned.
+
+## Phase 4 readiness and experience implementation, 5 November 2026
+
+Owner-directed frontend/backend work on `86f5ec6` plus the preserved documentation/CI cleanup. This is self-review and
+measured diagnostic evidence, not an independent score or Phase 4 acceptance certificate.
+
+- Scheduler: replaced separately polled run-count/Running/RunNow decisions with a completion identity selected under
+  one lock. Requests join pending/active work; pending pause/disable/exit results are explicit. The failed CI fixture can
+  also miss its one-second run through polling on a starved runner. It was not changed, weakened or padded with sleeps.
+- Lifecycle: cancel/join agent workers, LocalAi operations, Ask/title/notes/compression and LLM calls before dependencies
+  are disposed. Named subscriptions detach; refresh/health work coalesces. Normal Quit keeps the dispatcher alive; the
+  45-second/session-exit fallback retains active dependencies until process exit. Uncertain image work keeps its lease.
+- Processes: creation/assignment failures reject starts; failed assignment kills only the just-created Aqua process.
+  Launch and host close are serialized; failed termination blocks handoff. The short create-before-assignment window
+  remains, so failure/forced-exit acceptance is still required.
+- Models: engine/note/preflight problems, unknown compatibility values, Copy matrix, cancellable serialized model and
+  projector headers, projector selection, engine switch and Ollama-only device/runtime state. Self-review fixed cancelled
+  body reads, projector validation, bounded header caching and unavailable Main choices leaking another provider's model.
+- Images: pairing mismatches now reach all three prechecks. Imports use bounded open handles; clipboard scaling/encoding
+  runs off the dispatcher. Content IDs, temporary uploads and conservative reference retention remain. An endpoint-only
+  marker restores uncertain GPU reservations before scheduling after restart; only confirmed release removes it.
+- Experience: model-specific reading/context limits, plan/gather plus reported engine load/prompt/write timings, idle-only
+  cancellable warm-up, stable Ask policy before the volatile minute clock, and bounded graceful reasoning control.
+  Remote answers now identify the configured remote server instead of claiming on-device processing.
+  The control implementation follows the [pinned b11387 server protocol](https://github.com/ggml-org/llama.cpp/blob/b11387/tools/server/README.md#post-v1chatcompletionscontrol-control-a-running-chat-completion-in-real-time).
+  Unknown engines retain the direct-answer fallback. No control/vision quality or prompt-cache performance was measured live.
+- Adrian selected 60-message pages. Full storage/context/export is unchanged; native Markdown previews have character/block
+  bounds and background render scheduling. Self-review covered cancellation, stopped-host races, failed-stop ownership,
+  restart recovery, provider selection, stable UI rows, keyboard controls and the complete service/adapter/UI flow.
+
+### Offline Release performance baseline
+
+SDK **10.0.401**, runtime **.NET 10.0.12**, Windows build **26200**, 16 logical CPUs. Fresh isolated profiles, Release scratch
+builds, 1440 × 940 off-screen native window, no collectors/media/model/server work. Each run uses 300 synthetic messages
+(150 answers of 1,344 Markdown characters, including tables/code), 20 alternating theme samples and five navigation/
+show/hide cycles. Full GC occurs after each cycle; no working-set trim is used. Measurements are process-specific;
+CPU engine throughput, RAM/VRAM coexistence and real display/keyboard response are not established by this diagnostic.
+
+| Observation | Continuous 300-message view | 60-message view with queued rendering |
+|---|---:|---:|
+| Theme p95, 20 samples | 8.88 ms | 8.67 ms |
+| First chat layout/idle barrier | 8,431 ms | 2,561 ms |
+| Fully rendered chat | 8,431 ms (synchronous render) | 2,890 ms |
+| Private bytes after full rendering | 622.4 MiB | 297.1 MiB |
+| Managed bytes after repeated full GC | 244.3–244.5 MiB | 50.7–50.8 MiB |
+| Private bytes after fifth cycle | 697.5 MiB | 281.3 MiB |
+| Navigation/show/hide p95, five samples | 4,504 ms | 1,677 ms |
+| Background dispatcher p95 across workload | 2,066 ms | 867 ms |
+| Input-priority dispatcher p95, including full GC | not sampled | 322 ms (121 samples) |
+
+The UI content/window workloads match; the final serial sample also adds input-priority callback sampling. These are
+diagnostics, not a controlled hardware benchmark, leak certification or a universal latency claim. Multiple early probes
+informed the change: a prior queued-render sample took 2,102 ms to fully render, with 305.3 MiB private bytes. The table
+uses the final serial sample (18:05 UTC) against the continuous baseline (17:32 UTC), without averaging different builds.
+An input-priority exploratory run overlapped unit verification and is excluded from comparative results. Long-chat
+dispatcher stalls remain too large to accept the proposed 50 ms update target; theme's proposed 100 ms threshold is met
+in this workload only. Broader themes/DPI, long real answers and visible interaction still need acceptance. The diagnostic
+is `--e2e --data-dir <scratch> --snapshot <results> --measure --pages performance`, not an E2E suite.
+
+### Verification and remaining acceptance
+
+Existing Debug and Release suites: **1,218 passed, 23 skipped, 0 failed** each, from their normal output folders with
+`--no-restore`. The initial sandboxed Debug attempt aborted before executing tests because testhost could not connect;
+the permitted outside-sandbox run passed. Scratch Release app build: **0 warnings, 0 errors**. Documentation and
+whitespace checks passed. No tests were authored/modified; no E2E suite, opt-in live inference, microphone, artifact
+download, registry/vault write, owner-profile change or owner-server control was performed. Existing CI failure remains
+separate from local evidence; no commit/push/tag/release was made.
+
+A later Release verification exposed a regression in the first joining implementation: `FailuresBackOffExponentially`
+timed out at its second run (1,217 passed / 23 skipped / 1 failed). Terminal status was published while Running was
+still true, so Run now could lose a legitimate new request. The correction publishes terminal state, clears ownership
+and resolves that run's waiters atomically; uniquely tracked worker tasks remain owned through notification completion.
+The failing test/assertions remain unchanged. Final verification below supersedes that local implementation, without
+erasing the failure evidence or the older CI failure.
+
+After that correction: Debug **1,218 passed / 23 skipped / 0 failed**; Release **1,218 passed / 23 skipped / 0 failed**.
+The final scratch Release application also builds with **0 warnings / 0 errors**. Current remote CI is still run
+[42065298281](https://github.com/FlameAqua/aqua-hub/actions/runs/42065298281), failed on the unchanged committed HEAD;
+these uncommitted changes have not run on GitHub. Documentation/whitespace checks pass, and `git diff --name-only -- tests`
+is empty. Final review kept new worker tracking through notification completion and fixed full-path identity for file rows.
+
+Required regression cases remain reserved by the test-authoring instruction: controlled concurrent run start/finish,
+waiter cancellation, shutdown during active work, failed job creation/assignment/termination, cancelled header bodies,
+small/changed context, warm-up contention, supported/refused reasoning control and image recovery/retention.
+Runtime install/cancel, real GPU generation with CPU embeddings, imported-reference picker/drop/paste/corrupt/missing/
+retention paths and the actual in-app Image Gen → chat → Image Gen transition remain live acceptance. The Qwen
+`--image-min-tokens 1024` flag is documented by pinned upstream but remains disabled until both engines are compared
+for grounding, latency and VRAM. The maintained [roadmap](ROADMAP.md) remains open for those tasks and performance stalls.
+
+## 5 November 2026: modular E2E work paused
+
+Adrian authorized extending the existing desktop tests and modularizing component selection, then asked to stop to
+preserve his usage window. Implementation is preserved, uncommitted and unfinished. The runner defaults to offline
+Phase4, supports individual/combined component traits, narrowing smoke/name filters, plan/list modes, unique TRX/JSON
+results and zero-test failure. Legacy/full execution is explicit. Existing working-tree changes were preserved.
+
+Added synthetic stored-chat paging/Markdown checks, missing-reference/gallery/picker cases, owned random-port Comfy
+inventory/recovery/cancellation fixtures and pattern-only close/reopen/quit. Corrected the old Main-role assertion to
+check the provider-specific setting rather than modifying another provider's choice. Offline startup suppresses
+collectors, media, updates and service management; picker isolation avoids Recent files and opens the scratch profile.
+No owner app/service was controlled, no synthetic input was used and no real inference or downloads were performed.
+Core's transitive fixture dependencies were restored from the existing local NuGet cache only.
+
+Observed evidence before the requested stop:
+
+- Isolated Release app and E2E builds: 0 warnings / 0 errors. Selection checks: 9 passed.
+- Initial sandboxed desktop attempt: testhost connection timed out; zero executed. Outside-sandbox execution worked.
+- Models/Runtime group: 4 passed, about 14 seconds. Ask group: 2 passed, about 20 seconds.
+- Initial offline Phase4 run: 8 passed / 6 failed. Failures exposed fixture dependency resolution, asynchronous assertion
+  timing, inventory/setup sequencing, HTTP chunk parsing and native picker accessibility, rather than proven app defects.
+- After corrections, Images group: 5 passed / 2 failed, about 31 seconds. Passing cases include gallery editing/deletion/
+  retention, roleplay reset, missing-reference refusal, recovery-marker reservation through busy/idle/free responses and
+  clean exit during an observed pending HTTP request. Close/activate/quit also passed in the initial Phase4 run.
+- Remaining: pairing test now explicitly expands setup after successful discovery (change not rerun); picker Open is
+  exposed as a Pane without Invoke/Toggle/SelectionItem by the managed UIA harness. Its focused diagnostic rerun still
+  fails. The picker tree is retained only in ignored scratch run artifacts. No assertion was removed or input fallback added.
+
+Finish the native UIA action, verify the corrected pairing flow, rerun affected components and the offline Phase4 group,
+then perform final diff review and the normal unit regression. Plan/list discovery, zero-match execution and the updated
+CI selection step still need end-to-end verification. This turn's new app/test changes have not had the unit suite rerun;
+earlier 1,218-pass unit results apply to the preceding implementation. The full legacy suite and live GPU/model tests
+were not run. Fixture recovery does not establish physical GPU release. Phase 4 and this E2E task remain open.
+
+## 5 November 2026: modular E2E completion
+
+Resumed at Adrian's request. Both paused failures were in the harness: image setup automatically collapses after a
+successful connection, so the pairing test now expands it before changing files; the native picker exposes Open as a
+Pane, but the listed file supports UIA Invoke and accepts the dialog. The picker test uses that native accessibility action
+when Open lacks Invoke. Its valid/corrupt inputs, retained-reference and unchanged-original assertions are preserved.
+No keyboard/mouse fallback or skipped assertion was added.
+
+The offline Phase4 group passed **14/14**, zero skipped, in **116 seconds** (test execution including startup/cleanup,
+excluding builds). Its component groups are Models, Runtime, Ask, Images, Roleplay and Lifecycle. Specific earlier runs
+were Models/Runtime 4/4 in 14 seconds and Ask 2/2 in 20 seconds; timings vary with desktop load and are not performance
+budgets. The final focused pairing and picker cases also passed separately. The preceding failed runs remain documented
+above rather than being replaced with a success-only history.
+
+Final review strengthened evidence/isolation: results now hash the app/Core/test assemblies as well as the apphost
+executable, since the apphost hash alone cannot identify C# implementation changes; --no-build checks the resolved test
+assembly path rather than just its output directory. Zero executed tests fail. Per-fixture offline mode starts empty when
+included in a legacy run, preventing inherited legacy paths/work. A direct isolated lifecycle test passed **1/1** with the
+global offline flag unset and the legacy baseline deliberately absent, exercising this otherwise untested branch.
+
+Verification:
+
+- Release E2E build: **0 warnings / 0 errors**. Current isolated Release app build from the earlier image pass also had
+  **0 warnings / 0 errors**; application source has not changed since that build.
+- Debug unit regression from its normal output folder, --no-restore: **1,218 passed / 23 skipped / 0 failed**.
+- Nine offline selection contracts passed, including component OR, smoke/name narrowing and explicit full/legacy scope.
+- Component listing, plan output and Runtime-only discovery were exercised. A deliberately absent test failed execution
+  with zero executed, and absent discovery failed explicitly. The expected failures are runner checks, not app regressions.
+- JSON binary hashes/counts and restoration of the caller's offline environment variable were verified on a zero-match run.
+- CI's new selection step invokes the same nine-case script locally verified here. Desktop tests remain compiled only on
+  GitHub. The latest remote CI is still failed run 42065298281 on committed 86f5ec6; none of these uncommitted changes have
+  run remotely, and local passes do not supersede that failure.
+
+The full legacy suite, downloads and real model/GPU tests were not run. Owner app/profile, Ollama and ComfyUI were not
+controlled; only scratch app processes and an owned random-port HTTP fixture were used. This completes the authorized
+component E2E extension/modularization. Phase 4 remains open for the live engine/GPU, additional unit regressions and
+performance acceptance in Roadmap. All changes remain uncommitted; Adrian owns commits/releases.

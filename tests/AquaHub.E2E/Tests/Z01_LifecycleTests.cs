@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Window lifecycle: close keeps the app running, activation brings it back, --quit and tray Quit exit cleanly.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Lifecycle")]
 public sealed class Z01_LifecycleTests : E2ETestBase
 {
     public Z01_LifecycleTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

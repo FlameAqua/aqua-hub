@@ -7,6 +7,10 @@ public static class E2EConfig
 {
     private static string? Env(string name) => Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : null;
 
+    /// <summary>Deterministic, pattern-only component runs; no collectors, model inference or external service management.</summary>
+    public static bool OfflineComponents => Env("AQUAHUB_E2E_OFFLINE") == "1";
+    public static bool PatternsOnly => OfflineComponents;
+
     /// <summary>Home of the suite's build, warm profile and results (scripts\e2e.ps1 sets it up):
     /// %LOCALAPPDATA%\AquaHub.E2E, apart from the real app's %LOCALAPPDATA%\AquaHub profile.</summary>
     public static string Root => Env("AQUAHUB_E2E_ROOT")
@@ -20,7 +24,8 @@ public static class E2EConfig
 
     public static string RunsRoot => Env("AQUAHUB_E2E_RUNS") ?? Path.Combine(Root, "e2e-runs");
 
-    public static string RunId { get; } = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+    public static string RunId { get; } = Env("AQUAHUB_E2E_RUN_ID") is { } id && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-')
+        ? id : DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..8];
 
     private static readonly Lazy<string> RunDirLazy = new(() =>
     {

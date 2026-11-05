@@ -31,6 +31,7 @@
     </DataTemplate></ItemsControl.ItemTemplate>
    </ItemsControl>
    <DockPanel Margin="0,0,0,10">
+    <Button DockPanel.Dock="Right" Content="Copy matrix" Click="OnCopyMatrix" Style="{StaticResource Btn.Standard}" Margin="8,0,0,0" AutomationProperties.AutomationId="models-copy-matrix" ToolTip="Copy recorded compatibility observations. May include local model paths; review before sharing."/>
     <Button x:Name="RefreshButton" DockPanel.Dock="Right" Content="Refresh library" Click="OnRefresh" Style="{StaticResource Btn.Standard}" AutomationProperties.AutomationId="models-refresh"/>
     <StackPanel><TextBlock Text="Your library" Style="{StaticResource T.Subtitle}"/><TextBlock x:Name="LibraryCount" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis" Margin="0,3,12,0"/></StackPanel>
    </DockPanel>
@@ -48,6 +49,9 @@
         <Border Style="{StaticResource Pill}" Margin="0,0,0,6"><TextBlock Text="{Binding Model.Source}" FontSize="11"/></Border>
        </WrapPanel>
        <TextBlock Text="{Binding Detail}" Style="{StaticResource T.Caption}"/>
+       <TextBlock Text="{Binding Engine}" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+       <TextBlock Text="{Binding EngineNote}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Visibility="{Binding EngineNote, Converter={StaticResource Vis}}"/>
+       <TextBlock Text="{Binding Problem}" Foreground="{DynamicResource B.Down}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding Problem, Converter={StaticResource Vis}}"/>
        <ItemsControl ItemsSource="{Binding Capabilities}" Margin="0,10,0,0">
         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate><DataTemplate><c:GroupBorder Style="{StaticResource Pill}" Margin="0,0,6,6" Background="{DynamicResource B.Subtle}" AutomationProperties.Name="{Binding}"><TextBlock Text="{Binding}" FontSize="11"/></c:GroupBorder></DataTemplate></ItemsControl.ItemTemplate>
@@ -55,6 +59,11 @@
        <TextBlock Text="{Binding Fit}" Foreground="{Binding FitBrush}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" ToolTip="{Binding FitDetail}"/>
        <TextBlock Text="{Binding State}" Style="{StaticResource T.Body2}" Margin="0,5,0,0" TextWrapping="Wrap" Visibility="{Binding State, Converter={StaticResource Vis}}"/>
        <TextBlock Text="{Binding Speed}" Style="{StaticResource T.Caption}" Margin="0,5,0,0" Visibility="{Binding Speed, Converter={StaticResource Vis}}"/>
+       <Expander Header="Recorded compatibility" Foreground="{DynamicResource B.Text}" Margin="0,8,0,0">
+        <StackPanel><TextBlock Text="Recorded observations are specific to the model and engine used. Missing measurements are not inferred." Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
+         <TextBlock Text="{Binding Compatibility}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+        </StackPanel>
+       </Expander>
        <WrapPanel Margin="0,12,0,0" IsEnabled="{Binding Available}">
         <Button Content="Use for Ask" Style="{StaticResource Btn.Standard}" Click="OnUse" IsEnabled="{Binding CanChat}" Margin="0,0,8,4" AutomationProperties.Name="{Binding Model.Name, StringFormat=Use {0} for Ask}"/>
         <Button Content="Stop" Style="{StaticResource Btn.Standard}" Click="OnStop" Margin="0,0,8,4" Visibility="{Binding CanStop, Converter={StaticResource Vis}}" AutomationProperties.Name="{Binding Model.Name, StringFormat=Stop {0}}"/>
@@ -103,9 +112,11 @@
     <TextBlock x:Name="RepoTitle" Style="{StaticResource T.CardTitle}" TextWrapping="Wrap"/>
     <TextBlock x:Name="RepoStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,6,0,12" AutomationProperties.LiveSetting="Polite"/>
     <CheckBox x:Name="VisionOption" Margin="0,0,0,12" Checked="OnVisionChanged" Unchecked="OnVisionChanged"/>
+    <ComboBox x:Name="ProjectorChoice" DisplayMemberPath="Name" SelectionChanged="OnProjectorChanged" Visibility="Collapsed" Margin="0,0,0,12" AutomationProperties.Name="Vision projector" AutomationProperties.AutomationId="models-projector"/>
     <ItemsControl x:Name="Files"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,6,0,12">
      <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
      <TextBlock Text="{Binding Detail}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,4,0,8"/>
+     <Button Content="Check fit and capabilities" Click="OnPreview" Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" Margin="0,0,0,6" AutomationProperties.Name="{Binding File.Name, StringFormat=Check fit for {0}}"/>
      <Button Content="Download" Click="OnFileDownload" IsEnabled="{Binding CanDownload}" Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" AutomationProperties.Name="{Binding File.Name, StringFormat=Download {0}}"/>
      <TextBlock Text="{Binding Error}" Foreground="{DynamicResource B.Down}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
     </StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>

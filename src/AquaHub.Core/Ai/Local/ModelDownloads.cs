@@ -238,13 +238,14 @@ public sealed partial class ModelDownloads
     /// <summary>
     /// Reads a file's GGUF header from Hugging Face without downloading the model — an HTTP range of its first bytes, at
     /// most 64 MB, stopped as soon as the header has been read — so its layers, context cache and abilities are known
-    /// before a download (and its fit is exact, not a guess from the file size). Kept in memory per file.
+    /// before a download. Fit remains an estimate; no full-file digest or inference is verified. Up to 128 cached headers.
     /// </summary>
-    public async Task<GgufInfo> HeaderAsync(string repo, string revision, HfFile file, CancellationToken ct = default)
+    public async Task<GgufInfo> HeaderAsync(string repo, string revision, HfFile file, CancellationToken ct = default, bool projector = false)
     {
+        ct.ThrowIfCancellationRequested();
         if (!RepoRx().IsMatch(repo) || !ShaRx().IsMatch(revision) || !SafePath(file.Path) || file.Size <= 0)
             throw new DownloadException("That isn't a model Aqua can look at.");
-        if (_headers.TryGetValue(file.Sha256, out var known)) return known;
+        if (_headers.TryGetValue(file.Sha256, out var known)) return ValidateHeader(known, projector);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{Hub}{repo}/resolve/{revision}/{Escape(file.Path)}");
@@ -256,10 +257,11 @@ public sealed partial class ModelDownloads
             if (!response.IsSuccessStatusCode) throw new DownloadException($"Hugging Face said {(int)response.StatusCode} {response.ReasonPhrase} — try again later.");
             if (response.RequestMessage?.RequestUri is { Scheme: not "https" }) throw new DownloadException("The file was offered over an insecure connection, so Aqua didn't read it.");
             await using var body = await response.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
-            await using var capped = new CappedStream(body, HeaderLimit);
+            await using var capped = new CappedStream(body, HeaderLimit, cts.Token);
             await using var buffered = new BufferedStream(capped, 1 << 20);
             var info = await Task.Run(() => Gguf.Read(buffered), cts.Token).ConfigureAwait(false);
-            if (info.Type is "mmproj" or "adapter") throw new DownloadException("That file is a " + (info.Type == "mmproj" ? "vision projector" : "adapter") + ", not a model.");
+            ValidateHeader(info, projector);
+            if (_headers.Count >= 128) _headers.Clear();
             _headers[file.Sha256] = info;
             return info;
         }
@@ -273,8 +275,15 @@ public sealed partial class ModelDownloads
         }
     }
 
+    private static GgufInfo ValidateHeader(GgufInfo info, bool projector)
+    {
+        if (projector && info.Type != "mmproj") throw new DownloadException("The selected projector's header does not identify a vision projector.");
+        if (!projector && info.Type is "mmproj" or "adapter") throw new DownloadException("That file is a " + (info.Type == "mmproj" ? "vision projector" : "adapter") + ", not a model.");
+        return info;
+    }
+
     /// <summary>A read-only stream that ends with an error after <c>limit</c> bytes (a header that never ends can't run on).</summary>
-    private sealed class CappedStream(Stream inner, long limit) : Stream
+    private sealed class CappedStream(Stream inner, long limit, CancellationToken ct) : Stream
     {
         private long _read;
         public override bool CanRead => true;
@@ -290,7 +299,8 @@ public sealed partial class ModelDownloads
         public override int Read(byte[] buffer, int offset, int count)
         {
             if (_read >= limit) throw new GgufFormatException("its header is larger than Aqua reads before downloading");
-            var n = inner.Read(buffer, offset, (int)Math.Min(count, limit - _read));
+            // Gguf is synchronous on a worker. Use cancellable async transport reads underneath it, including after headers arrive.
+            var n = inner.ReadAsync(buffer.AsMemory(offset, (int)Math.Min(count, limit - _read)), ct).AsTask().GetAwaiter().GetResult();
             _read += n;
             return n;
         }

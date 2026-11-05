@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Tray context menu (opened with --tray-menu): every item except Quit (covered by the lifecycle tests).</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Desktop")]
 public sealed class A15_TrayMenuTests : E2ETestBase
 {
     public A15_TrayMenuTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

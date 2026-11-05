@@ -3,7 +3,8 @@
     End-to-end UI tests for the native WPF shell, driven through Windows UI Automation
     (System.Windows.Automation - the accessibility API behind WinAppDriver/Appium).
     The app under test is launched as a separate process in dry-run mode (the e2e switch) against a
-    throw-away profile; nothing here references the src projects. Not part of AquaHub.sln on purpose.
+    throw-away profile. Core is referenced only to seed/read deterministic storage fixtures; the UI is a separate process.
+    Not part of AquaHub.sln on purpose.
     How to run it: scripts/e2e.ps1 (its header) and the README's Testing section.
     Env overrides: AQUAHUB_E2E_EXE, AQUAHUB_E2E_PRISTINE, AQUAHUB_E2E_RUNS, AQUAHUB_E2E_AI_TIMEOUT (seconds).
   -->
@@ -22,6 +23,7 @@
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/AquaHub.Core/AquaHub.Core.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />

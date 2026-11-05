@@ -9,6 +9,8 @@ public sealed class ExploreFactAttribute : FactAttribute
     }
 }
 
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Crawler")]
 public sealed class A00_ExploreTests : E2ETestBase
 {
     public A00_ExploreTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

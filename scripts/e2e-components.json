@@ -1,0 +1,16 @@
+{
+  "Phase4": { "components": ["Models", "Runtime", "Ask", "Images", "Roleplay", "Lifecycle"], "description": "Offline Phase 4 UI contracts; no inference, installs or GPU acceptance" },
+  "Models": { "description": "Library roles, engine/problem observations and compatibility export" },
+  "Runtime": { "description": "Runtime settings, provider selection and intercepted installation" },
+  "Ask": { "description": "Chat paging, retained history, Markdown limits and offline sending" },
+  "Images": { "description": "Gallery/reference editing, connection fixtures and GPU recovery UI" },
+  "Roleplay": { "description": "Roleplay form and scene reset contracts" },
+  "Lifecycle": { "description": "Owned session exit, reopen and cancellation during fixture HTTP work" },
+  "Shell": { "legacy": true, "description": "Legacy startup, navigation, title bar and notifications" },
+  "Settings": { "legacy": true, "description": "Legacy full settings flows" },
+  "Feeds": { "legacy": true, "description": "Legacy Today, news, social, markets and agenda flows" },
+  "Agents": { "legacy": true, "description": "Legacy agent dashboard flows" },
+  "Workbench": { "legacy": true, "description": "Legacy Workbench authoring flows" },
+  "Desktop": { "legacy": true, "description": "Legacy tray, flyout, palette and desktop-input flows" },
+  "Crawler": { "legacy": true, "description": "Legacy broad UI exploration" }
+}

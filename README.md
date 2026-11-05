@@ -3,9 +3,7 @@
 **A private, agent-driven personal hub for Windows.** Aqua Hub's agents read reliable news, your local
 social feeds, the markets, prediction markets, your calendar and the weather, then tell you what matters
 in a one-minute brief, a native dashboard, a taskbar quick panel and a global command palette.
-All AI runs on your PC.
-
-![Today dashboard](docs/screenshots/today.png)
+AI runs locally by default; a remote OpenAI-compatible endpoint is an explicit opt-in.
 
 ## Highlights
 
@@ -264,18 +262,38 @@ $env:AQUAHUB_LIVE=1; dotnet test tests/AquaHub.Tests # + 23 live runs against re
                                                      # AQUAHUB_ASK_PROFILE to a profile for the Ask scenarios, and
                                                      # AQUAHUB_WHISPER to a profile's whisper folder for Whisper)
 powershell -ExecutionPolicy Bypass -File scripts/e2e.ps1
-                                                     # UI Automation end-to-end suite: drives every page, button and
-                                                     # window of the real app in a sandboxed dry-run profile
+                                                     # Offline Phase 4 UI components in isolated scratch profiles
 ```
 
-The end-to-end suite takes over the mouse and keyboard for 30–60 minutes, so quit your own Aqua Hub first and
-leave the PC alone while it runs. `scripts/e2e.ps1` builds a separate copy of the app, and on its first run opens it
-on an empty test profile for you to finish onboarding (that becomes the warm profile every test copies). Its build,
-profiles and results (`run.log`, screenshots, findings) live in `%LOCALAPPDATA%\AquaHub.E2E`. `-Filter A11` runs one
-class, `-Smoke` runs a quick subset (start-up, every page, the palette, Settings and its search, the update banner
-and quitting: a few minutes, no model needed), `-Setup` redoes the warm profile, and `-NoBuild` reuses the last build. CI compiles the suite on every push
-but doesn't run it: it needs a desktop session, the warm profile and a local model.
+The E2E runner defaults to **offline Phase4 components**, with automatic fixture profiles and UI Automation patterns.
+Choose just the affected area; an interactive Windows desktop is required, but no model or interactive onboarding is
+needed. Dependencies must already be restored; builds use `--no-restore`. Examples from PowerShell:
+
+```powershell
+./scripts/e2e.ps1 -ListComponents
+./scripts/e2e.ps1 -Component Models
+./scripts/e2e.ps1 -Component Ask,Images
+./scripts/e2e.ps1 -Component Runtime -ListTests # discover only; no app/profile setup
+./scripts/e2e.ps1 -Component Images -Filter T02 -NoBuild
+./scripts/e2e.ps1 -Plan                       # resolve selection without building or launching
+```
+
+Offline components are **Models, Runtime, Ask, Images, Roleplay and Lifecycle**. Multiple components are combined with
+OR; `-Filter` (test/class name fragment) and `-Smoke` narrow that selection. `-NoBuild` reuses app and test binaries;
+omit it after code changes. Results include TRX, a JSON summary with counts/duration/app and test binary hashes, logs and failure screenshots.
+Each run has a unique folder under `%LOCALAPPDATA%\AquaHub.E2E\e2e-runs`; `-Root` selects another dedicated scratch root.
+A selection matching no tests fails. Offline fixtures disable collectors, media, updates, inference, global hotkeys and
+Ollama management. Synthetic model headers and owned random-port HTTP responses exercise UI/service contracts; intercepted
+downloads/generation and fixture recovery **do not prove real inference, GPU unloading or engine coexistence**.
+
+The older broad suite remains explicit: `./scripts/e2e.ps1 -All`, or `-Legacy -Component Settings -Smoke` for a smaller
+legacy group. It can take 30–60 minutes, uses keyboard/mouse input and may need configured services. Quit your own Aqua
+and leave the desktop idle for legacy runs. Its first run opens a scratch app for onboarding; `-Setup` recreates that warm
+fixture while preserving the previous one. The runner never kills pre-existing apps. CI checks component selection and
+compiles the desktop suite; it does not run desktop tests. See [Development](docs/DEVELOPMENT.md) for evidence boundaries.
 
 ## Project status
 
-See [docs/SCORING.md](docs/SCORING.md) for the independent design/usability/viability review rounds.
+For a fresh development chat, use the [master prompt](docs/MASTER_PROMPT.md). The root [AGENTS.md](AGENTS.md) points agents to the same working agreement.
+
+See the [roadmap](docs/ROADMAP.md) for delivery priorities, [architecture](docs/ARCHITECTURE.md) for service boundaries, [security](docs/SECURITY.md) for privacy and trust limits, [development guide](docs/DEVELOPMENT.md) for safe builds and verification, and [review log](docs/SCORING.md) for recorded outcomes.

@@ -4,6 +4,8 @@ namespace AquaHub.E2E.Tests;
 /// Updates you can't miss, with a pretend release (<c>--demo-update</c>: nothing is downloaded or installed): the
 /// banner offers it, shows the download and Restart now, Settings carries a dot, and Not now puts the banner away.
 /// </summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Shell")]
 public sealed class A18_UpdateTests : E2ETestBase
 {
     public A18_UpdateTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

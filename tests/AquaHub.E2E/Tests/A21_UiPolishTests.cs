@@ -1,5 +1,7 @@
 namespace AquaHub.E2E.Tests;
 
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Shell")]
 public sealed class A21_UiPolishTests : E2ETestBase
 {
     public A21_UiPolishTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

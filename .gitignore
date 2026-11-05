@@ -7,5 +7,7 @@ TestResults/
 # Velopack packaging output (vpk pack) and its notes file
 Releases/
 release-notes.md
-# Screenshots with personal details (your name, what was playing, press photos): kept locally, never published
-docs/screenshots/private/
+# Agent reports and generated visual/build artifacts are not maintained documentation.
+/docs/handoff/
+/docs/screenshots/
+/artifacts/phase4/

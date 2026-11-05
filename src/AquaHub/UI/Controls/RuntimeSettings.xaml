@@ -64,6 +64,9 @@
     <c:SettingRow Title="Use the models Ollama has downloaded" Description="Read them in place, without making a second copy.">
      <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.Llama.UseOllamaModels}" AutomationProperties.AutomationId="settings-ai-ollama-models"/>
     </c:SettingRow>
+    <c:SettingRow Title="Run Ollama's own models on Ollama's engine" Description="Use Ollama's installed engine for its conversions when needed, or when Aqua's runtime is absent. Aqua manages its own processes; Ollama's store stays read-only.">
+     <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.Llama.UseOllamaEngine}" AutomationProperties.AutomationId="settings-ai-ollama-engine"/>
+    </c:SettingRow>
     <c:SettingRow Title="Server path (custom)" Description="Optional local path ending in llama-server.exe. Leave empty to use Aqua's install.">
      <c:SettingRow.Below><TextBox Text="{Binding Ai.Llama.ServerPath, UpdateSourceTrigger=LostFocus}" ui:UiProps.Placeholder="Automatic" AutomationProperties.Name="Server path (custom)" AutomationProperties.AutomationId="settings-ai-server-path"/></c:SettingRow.Below>
     </c:SettingRow>

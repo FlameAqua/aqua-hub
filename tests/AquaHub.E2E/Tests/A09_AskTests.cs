@@ -4,6 +4,8 @@ namespace AquaHub.E2E.Tests;
 /// Ask Aqua (local model): every suggestion chip streams an answer, citations open sources, typed question + Enter,
 /// Stop while streaming, New chat. Answers can take up to AQUAHUB_E2E_AI_TIMEOUT (150 s) each.
 /// </summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Ask")]
 public sealed class A09_AskTests : E2ETestBase
 {
     public A09_AskTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

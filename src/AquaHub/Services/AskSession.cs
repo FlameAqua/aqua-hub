@@ -58,22 +58,97 @@ public sealed class AskSession
     private readonly Dictionary<string, ChatThread> _open = new(StringComparer.Ordinal);
     private bool _loaded;
     private string _filter = "";
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly HashSet<Task> _workers = new();
+    private readonly HashSet<TaskCompletionSource> _operations = new();
+    private readonly Action<AquaHub.Core.Settings.HubSettings> _settingsChanged;
+    private readonly Action _chatsChanged;
+    private string _provider = Hub.S.Ai.Provider;
+    private CancellationTokenSource? _typing;
+    private Task? _typingTask;
+    private bool _stopping;
 
     public AskSession()
     {
+        Current = NewThread(null);
         // Turning "Keep Ask chats" off deletes the stored ones straight away; "Keep pictures with chats" off, their pictures
         // and what the messages kept about them (the pictures' paths and what they showed).
         var keptPictures = Hub.S.Ask.KeepPictures;
-        Hub.Core.Settings.Changed += s =>
+        _settingsChanged = s =>
         {
+            if (_stopping) return;
+            CancelTypingWarmup();
+            if (_provider != s.Ai.Provider)
+            {
+                _provider = s.Ai.Provider;
+                Hub.OnUi(() => { foreach (var thread in _open.Values.Append(Current).Distinct()) { thread.Cts?.Cancel(); thread.CompressCts?.Cancel(); thread.ContextUsed = thread.ContextWindow = 0; } ContextChanged?.Invoke(); });
+            }
             if (!s.Privacy.KeepAskHistory && Hub.Core.Chats.List().Count > 0) Hub.Core.Chats.DeleteAll();
             if (keptPictures && !s.Ask.KeepPictures) InBackground("forget the chats' pictures", Hub.Core.Chats.ForgetPictures);
             keptPictures = s.Ask.KeepPictures;
         };
-        Hub.Core.Chats.Changed += () => Hub.OnUi(RefreshChats);
+        Hub.Core.Settings.Changed += _settingsChanged;
+        _chatsChanged = () => Hub.OnUi(() => { if (!_stopping) RefreshChats(); });
+        Hub.Core.Chats.Changed += _chatsChanged;
         Web = Hub.S.Ask.Web;
         Think = Hub.S.Ask.ThinkByDefault;
-        Current = NewThread(null);
+    }
+
+    private IDisposable OwnOperation()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _operations.Add(completion);
+        return new OwnedOperation(() => { _operations.Remove(completion); completion.TrySetResult(); });
+    }
+    private sealed class OwnedOperation(Action finish) : IDisposable { public void Dispose() => finish(); }
+    private void Track(Task task)
+    {
+        lock (_workers)
+        {
+            _workers.RemoveWhere(t => t.IsCompleted);
+            _workers.Add(task);
+        }
+    }
+
+    public void CancelTypingWarmup()
+    {
+        _typing?.Cancel();
+        Hub.Core.Llm.CancelWarmup();
+    }
+
+    public void WarmWhileTyping(string text)
+    {
+        if (_stopping || string.IsNullOrWhiteSpace(text) || IsBusy) { CancelTypingWarmup(); return; }
+        if (_typingTask is { IsCompleted: false }) return;
+        _typing?.Dispose();
+        var cancellation = _typing = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var model = Model;
+        _typingTask = WarmAsync();
+        Track(_typingTask);
+        async Task WarmAsync()
+        {
+            try
+            {
+                await Task.Delay(700, cancellation.Token);
+                if (Model != model || _stopping) return;
+                await Hub.Core.Llm.WarmupAsync(model, Hub.S.Ask.ContextWindow > 0 ? Hub.S.Ask.ContextWindow : null, cancellation.Token);
+            }
+            catch (OperationCanceledException) { }
+        }
+    }
+
+    public async Task StopAsync()
+    {
+        _stopping = true;
+        Hub.Core.Settings.Changed -= _settingsChanged;
+        Hub.Core.Chats.Changed -= _chatsChanged;
+        CancelTypingWarmup();
+        _lifetime.Cancel();
+        Voice.Dispose();
+        foreach (var thread in _open.Values.Append(Current).Distinct()) { thread.Cts?.Cancel(); thread.CompressCts?.Cancel(); }
+        Task[] workers;
+        lock (_workers) workers = _workers.ToArray();
+        await Task.WhenAll(_operations.Select(o => o.Task).Concat(workers).ToArray());
     }
 
     public AskPlatform Platform { get; } = new();
@@ -88,6 +163,7 @@ public sealed class AskSession
         var thread = new ChatThread(notes) { Summary = summary };
         thread.Notes.Changed += () => Hub.OnUi(() =>
         {
+            if (_stopping) return;
             SaveNotes(thread);
             if (ReferenceEquals(thread, Current)) NotesChanged?.Invoke();
         });
@@ -157,14 +233,14 @@ public sealed class AskSession
     }
 
     /// <summary>Tidies the stored chats off the UI thread (the store is thread-safe); logs how many changed.</summary>
-    private static void InBackground(string what, Func<int> work) => _ = Task.Run(() =>
+    private void InBackground(string what, Func<int> work) => Track(Task.Run(() =>
     {
         try
         {
             if (work() is var n and > 0) Log.Info("ask", $"Did {what}: {Plural.Of(n, "chat")} changed");
         }
         catch (Exception ex) { Log.Warn("ask", "Couldn't " + what, ex); }
-    });
+    }));
 
     // ───────────────────────────── Chats ─────────────────────────────
 
@@ -207,7 +283,10 @@ public sealed class AskSession
             if (group != lastGroup) { Chats.Add(new ChatListItemVM { IsHeader = true, Title = group }); lastGroup = group; }
             var item = new ChatListItemVM
             {
-                Id = chat.Id, Title = chat.Title, Starred = chat.Starred, IsCurrent = chat.Id == Current.Id,
+                Id = chat.Id,
+                Title = chat.Title,
+                Starred = chat.Starred,
+                IsCurrent = chat.Id == Current.Id,
                 Subtitle = snippet.Length > 0 ? snippet : TimeText.Ago(chat.Updated, now),
                 Tooltip = chat.Preview.Length > 0 ? chat.Title + "\n" + chat.Preview : chat.Title,
                 IsBusy = _open.TryGetValue(chat.Id, out var t) && t.IsBusy,
@@ -264,12 +343,23 @@ public sealed class AskSession
                 : new List<PictureVM>();
             var vm = new ChatMessageVM
             {
-                IsUser = m.User, Text = m.Text, Citations = m.Citations ?? new(), Footer = m.Footer ?? "", IsChat = m.Chat,
-                Reasoning = m.Reasoning ?? "", ReasoningLabel = m.Reasoning is { Length: > 0 } ? "Reasoning" : "", ModeLabel = m.Mode ?? "",
-                Question = m.Question ?? "", Options = m.Options, IsDone = true, At = m.At ?? summary.Updated, Sources = m.Sources ?? new(),
+                IsUser = m.User,
+                Text = m.Text,
+                Citations = m.Citations ?? new(),
+                Footer = m.Footer ?? "",
+                IsChat = m.Chat,
+                Reasoning = m.Reasoning ?? "",
+                ReasoningLabel = m.Reasoning is { Length: > 0 } ? "Reasoning" : "",
+                ModeLabel = m.Mode ?? "",
+                Question = m.Question ?? "",
+                Options = m.Options,
+                IsDone = true,
+                At = m.At ?? summary.Updated,
+                Sources = m.Sources ?? new(),
                 Attachments = (m.Attachments ?? new()).Select(a => new AttachmentChipVM
                 {
-                    Name = a, Icon = Documents.IsImage(a) || a.StartsWith("Screenshot", StringComparison.Ordinal) ? "image" : "file",
+                    Name = a,
+                    Icon = Documents.IsImage(a) || a.StartsWith("Screenshot", StringComparison.Ordinal) ? "image" : "file",
                     Picture = m.User ? pictures.FirstOrDefault(p => p.Name == a) : null,
                 }).ToList(),
             };
@@ -386,12 +476,16 @@ public sealed class AskSession
 
     public async Task SendAsync(string question, AskOptions? options = null)
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
+        CancelTypingWarmup();
         EnsureLoaded();
         var thread = Current;
         thread.Cts?.Cancel();
+        thread.Cts?.Dispose();
         // A summary being written on its own would make the question wait for the model: it can be written after the answer.
         if (thread.CompressingAutomatically) thread.CompressCts?.Cancel();
-        var cts = thread.Cts = new CancellationTokenSource();
+        var cts = thread.Cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         var opts = options ?? CurrentOptions(null);
         // Every question goes to the composer's model, however it was asked (a chip, a skill, "Look it up").
         if (opts.Model is null) opts = opts with { Model = Model };
@@ -409,7 +503,12 @@ public sealed class AskSession
         var history = HistoryOf(thread, compression);
         var user = new ChatMessageVM
         {
-            IsUser = true, Text = question, IsChat = true, ModeLabel = ModeOf(opts), Options = opts, IsDone = true,
+            IsUser = true,
+            Text = question,
+            IsChat = true,
+            ModeLabel = ModeOf(opts),
+            Options = opts,
+            IsDone = true,
             Attachments = attachments.Select(a => new AttachmentChipVM { Name = a.Name, Icon = a.Icon, Thumbnail = a.Thumbnail, Note = a.Note, Picture = AttachedPicture(thread, a) }).ToList(),
         };
         Wire(thread, user);
@@ -421,6 +520,7 @@ public sealed class AskSession
         Persist(thread);
 
         var host = new ChatHost(this, thread, answer, cts.Token);
+        var answeredWithModel = false;
         try
         {
             // "Remember that …" / "Forget …": straight to the Workbench's memory, no model needed (with Undo and
@@ -454,9 +554,14 @@ public sealed class AskSession
             var earlier = EarlierSources(thread, answer);
             var chat = new AskChatContext
             {
-                Notes = thread.Notes, Summary = compression?.Summary ?? "", SummaryCovers = compression?.Covers ?? 0, ReadPrivate = thread.ReadPrivate,
+                Notes = thread.Notes,
+                Summary = compression?.Summary ?? "",
+                SummaryCovers = compression?.Covers ?? 0,
+                ReadPrivate = thread.ReadPrivate,
             };
             var result = await Task.Run(() => Hub.Core.Assistant.RunAsync(question, history, files, opts, host, Platform, thread.AllowedForChat, cts.Token, earlier, chat), cts.Token);
+            Track(result.NoteTaking);
+            answeredWithModel = true;
             if (result.SawPrivate) thread.ReadPrivate = true;
             host.Flush();
             host.Close();
@@ -474,12 +579,18 @@ public sealed class AskSession
             var used = answer.Citations.Count;
             var snippets = answer.Citations.Count(c => c.Kind == "result");
             var parts = new List<string> { result.Model, $"{result.Elapsed.TotalSeconds:0.0}s" };
+            if (result.Timings is { } timings)
+            {
+                static string Time(TimeSpan? t) => t is { } value ? $"{value.TotalSeconds:0.00}s" : "not reported";
+                parts.Add($"plan {Time(timings.Plan)} / gather {Time(timings.Gather)}");
+                parts.Add($"model: load {Time(timings.Load)} / prompt {Time(timings.Prompt)} / write {Time(timings.Write)}");
+            }
             parts.Add(used == 0 ? "no sources cited" : Plural.Of(used, "source") + " cited" + (snippets > 0 ? $" ({snippets} only from search snippets)" : ""));
             if (result.UsedWeb) parts.Add("used the web");
             if (result.Skill.Length > 0) parts.Add("skill: " + result.Skill);
             if (compression is not null) parts.Add($"{Plural.Of(compression.Covers, "earlier message")} as a summary");
             if (result.TrimmedMessages > 0) parts.Add($"left out {Plural.Of(result.TrimmedMessages, "older message")}");
-            parts.Add("on-device");
+            parts.Add(result.OnDevice ? "on-device" : "configured remote server");
             answer.Footer = string.Join(" · ", parts);
             thread.ContextUsed = result.PromptTokens + result.OutputTokens;
             thread.ContextWindow = result.ContextTokens > 0 ? result.ContextTokens : Hub.S.Ai.ContextTokens;
@@ -519,11 +630,11 @@ public sealed class AskSession
             Persist(thread);
             // A "remember …"/"forget …" chat keeps its question as the title: it was answered without the model, so
             // there's nothing worth waking it for.
-            if (thread.Summary is { Named: false } && thread.Messages.Count(m => m.IsUser) == 1 && answer.Footer.EndsWith("on-device", StringComparison.Ordinal)
-                && !answer.HasMemoryActions)
-                _ = NameChatAsync(thread, opts.Model);
+            if (thread.Summary is { Named: false } && thread.Messages.Count(m => m.IsUser) == 1 && answeredWithModel
+                && !answer.HasMemoryActions && !_stopping)
+                Track(NameChatAsync(thread, opts.Model));
             // A chat whose earlier messages no longer all go with a question is compressed (while the model is loaded).
-            if (answer.Footer.EndsWith("on-device", StringComparison.Ordinal) && !answer.HasMemoryActions) _ = MaybeCompressAsync(thread);
+            if (!_stopping && answeredWithModel && !answer.HasMemoryActions) Track(MaybeCompressAsync(thread));
         }
     }
 
@@ -574,7 +685,7 @@ public sealed class AskSession
 
     /// <summary>Gives a new chat a short title from its first exchange (in the background, when the model is idle).</summary>
     /// <param name="model">The model that answered (already loaded, so naming doesn't swap models).</param>
-    private static async Task NameChatAsync(ChatThread thread, string? model)
+    private async Task NameChatAsync(ChatThread thread, string? model)
     {
         var summary = thread.Summary;
         if (summary is null || !Hub.Core.Llm.Health.Available) return;
@@ -592,7 +703,7 @@ public sealed class AskSession
                 Temperature = 0.2,
                 MaxTokens = 24,
                 Think = false,
-            }));
+            }, _lifetime.Token));
             var title = Regex.Replace(result.Text.Trim().Trim('"', '“', '”', '\'').TrimEnd('.'), @"\s+", " ");
             if (title.Length is < 3 or > 70 || summary.Named) return;
             summary.Title = title;
@@ -649,12 +760,14 @@ public sealed class AskSession
 
     public async Task SummariseClipboardAsync()
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
         var text = ActionExecutor.ClipboardText();
         if (string.IsNullOrWhiteSpace(text)) return;
         StartFresh();
         var thread = Current;
         thread.Cts?.Cancel();
-        var cts = thread.Cts = new CancellationTokenSource();
+        var cts = thread.Cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
         var user = new ChatMessageVM { IsUser = true, Text = $"Summarise my clipboard ({Plural.Of(words, "word")})", IsDone = true };
         Wire(thread, user);
@@ -696,6 +809,8 @@ public sealed class AskSession
 
     public async Task AttachFilesAsync(IEnumerable<string> paths)
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
         var list = paths.ToList();
         for (var i = 0; i < list.Count; i++)
         {
@@ -717,14 +832,17 @@ public sealed class AskSession
             }
             var chip = new AttachmentChipVM
             {
-                Name = Path.GetFileName(path), Icon = Documents.IsImage(path) ? "image" : "file", IsLoading = true, Note = "Reading…",
+                Name = Path.GetFileName(path),
+                Icon = Documents.IsImage(path) ? "image" : "file",
+                IsLoading = true,
+                Note = "Reading…",
                 Thumbnail = Documents.IsImage(path) ? await Task.Run(() => SafeThumb(path)) : null,
             };
             chip.RemoveCommand = new RelayCommand(() => Pending.Remove(chip));
             Pending.Add(chip);
             try
             {
-                var attachment = await Platform.AttachFileAsync(path);
+                var attachment = await Platform.AttachFileAsync(path, _lifetime.Token);
                 chip.Attachment = attachment;
                 chip.Note = attachment.Kind == AttachmentKind.Image
                     ? (attachment.Text.Length > 0 ? "image · text found" : "image")
@@ -750,6 +868,8 @@ public sealed class AskSession
     /// </summary>
     public async Task AttachFolderAsync(string path)
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
         if (IsFull)
         {
             NoteLeftOut(1);
@@ -819,7 +939,9 @@ public sealed class AskSession
         var total = count + (old?.LeftOut ?? 0);
         var chip = new AttachmentChipVM
         {
-            Name = "Not attached", Icon = "warning", LeftOut = total,
+            Name = "Not attached",
+            Icon = "warning",
+            LeftOut = total,
             Note = $"{total.ToString(CultureInfo.CurrentCulture)} more: a message takes {MaxAttachments} at most",
         };
         chip.RemoveCommand = new RelayCommand(() => Pending.Remove(chip));
@@ -833,6 +955,8 @@ public sealed class AskSession
     /// </summary>
     public async Task<bool> AttachCaptureAsync(Func<Task<byte[]?>> capture, string label)
     {
+        if (_stopping) return false;
+        using var operation = OwnOperation();
         if (IsFull)
         {
             NoteLeftOut(1);
@@ -847,6 +971,8 @@ public sealed class AskSession
     /// <summary>Your own screenshot (the button, or "Ask about my screen"): never needs an extra OK.</summary>
     public async Task<bool> AttachScreenshotAsync(bool snip)
     {
+        if (_stopping) return false;
+        using var operation = OwnOperation();
         if (IsFull)
         {
             NoteLeftOut(1);
@@ -860,6 +986,8 @@ public sealed class AskSession
 
     public async Task AttachImageAsync(byte[] bytes, string name)
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
         if (IsFull)
         {
             NoteLeftOut(1);
@@ -870,7 +998,7 @@ public sealed class AskSession
         Pending.Add(chip);
         try
         {
-            chip.Attachment = await Platform.AttachImageAsync(bytes, name);
+            chip.Attachment = await Platform.AttachImageAsync(bytes, name, ct: _lifetime.Token);
             chip.Note = chip.Attachment.Text.Length > 0 ? "image · text found" : "image";
         }
         catch (Exception ex)
@@ -889,6 +1017,8 @@ public sealed class AskSession
     /// </summary>
     public async Task AskAboutScreenAsync()
     {
+        if (_stopping) return;
+        using var operation = OwnOperation();
         await Task.Delay(150); // let the menu or palette close
         var png = await ScreenCapture.CaptureScreenAsync();
         Hub.Windows.ShowMain("ask");
@@ -1011,7 +1141,9 @@ public sealed class AskSession
             m.Steps.Select(s => forExport && s.IsFailed ? "✗ " + s.Text : s.Text).ToList(), m.Reasoning.Length > 0 ? HtmlText.Truncate(m.Reasoning, forExport ? 60000 : 20000) : null,
             m.Attachments.Select(a => a.Name).ToList(), m.ModeLabel, m.Question)
         {
-            Options = m.Options, At = m.At, Sources = !forExport && keepSources.Contains(m) ? m.Sources : null,
+            Options = m.Options,
+            At = m.At,
+            Sources = !forExport && keepSources.Contains(m) ? m.Sources : null,
             Pictures = forExport || folder is not null ? Keep(m.IsUser ? m.Attachments.Select(a => a.Picture).OfType<PictureVM>() : m.Pictures, folder) : null,
         }).ToList();
     }
@@ -1062,7 +1194,12 @@ public sealed class AskSession
     {
         var vm = new PictureVM
         {
-            Name = picture.Name, Kind = picture.Kind, Path = picture.Path, Match = picture.Match, Note = picture.Note, Bytes = picture.Image,
+            Name = picture.Name,
+            Kind = picture.Kind,
+            Path = picture.Path,
+            Match = picture.Match,
+            Note = picture.Note,
+            Bytes = picture.Image,
             Thumbnail = thumbnail,
         };
         vm.OpenCommand = new RelayCommand(() => OpenPicture(thread, vm));
@@ -1255,6 +1392,8 @@ public sealed class AskSession
     /// </summary>
     public async Task<string> CompressAsync(ChatThread thread, bool automatic = false)
     {
+        if (_stopping) return "Aqua is closing.";
+        using var operation = OwnOperation();
         if (thread.Compressing) return "Already compressing this chat…";
         var turns = Turns(thread).Select(t => t.Turn).ToList();
         var current = ValidCompression(thread);
@@ -1265,7 +1404,7 @@ public sealed class AskSession
         if (Hub.Core.Llm.UserPaused || !Hub.Core.Llm.Health.Available) return "The local model isn't available, so the chat can't be compressed now.";
         thread.Compressing = true;
         thread.CompressingAutomatically = automatic;
-        using var cts = thread.CompressCts = new CancellationTokenSource();
+        using var cts = thread.CompressCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         CompressionChanged?.Invoke();
         try
         {
@@ -1486,7 +1625,9 @@ public sealed class AskSession
             {
                 _answer.Approval = new ApprovalVM
                 {
-                    Title = request.Title, Detail = request.Detail, Icon = request.Icon,
+                    Title = request.Title,
+                    Detail = request.Detail,
+                    Icon = request.Icon,
                     AllowCommand = new RelayCommand(() => tcs.TrySetResult(true)),
                     AllowForChatCommand = new RelayCommand(() =>
                     {

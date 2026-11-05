@@ -22,6 +22,8 @@ public interface ILlamaProcess : IDisposable
 /// </summary>
 public interface ILlamaProcessHost
 {
+    /// <summary>False when a failed start left an Aqua-owned process whose termination could not be confirmed.</summary>
+    bool CanReleaseGpu => true;
     /// <summary>Starts <paramref name="program"/> hidden; each line it writes (stdout and stderr) goes to <paramref name="output"/>.</summary>
     ILlamaProcess Start(string program, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, string workingDirectory, Action<string> output);
     /// <summary>A free loopback port.</summary>
@@ -29,7 +31,11 @@ public interface ILlamaProcessHost
 }
 
 /// <summary>Where a request goes: one model's server, its key, and what it was started with.</summary>
-public sealed record LlamaEndpoint(Uri BaseUri, string Key, string Alias, int ContextTokens, LocalModel Model, LlamaLane Lane, int MtpDraft);
+public sealed record LlamaEndpoint(Uri BaseUri, string Key, string Alias, int ContextTokens, LocalModel Model, LlamaLane Lane, int MtpDraft)
+{
+    /// <summary>Verified against the pinned engine's protocol; unknown/custom/Ollama versions use the direct-answer fallback.</summary>
+    public bool ReasoningControl { get; init; }
+}
 
 public enum LlamaInstanceState { Starting, Ready, Failed, Stopped }
 
@@ -75,7 +81,7 @@ public sealed class LlamaRuntimeException(string message) : Exception(message);
 /// output is read for what Aqua needs (load progress, layers and memory on the card, errors) and never written to Aqua's log
 /// wholesale; the last lines are kept in memory for a failure's details.
 /// </summary>
-public sealed partial class LlamaRuntime : IDisposable
+public sealed partial class LlamaRuntime : IDisposable, IAsyncDisposable
 {
     private readonly Func<HubSettings> _settings;
     private readonly LlamaSetup _setup;
@@ -87,6 +93,9 @@ public sealed partial class LlamaRuntime : IDisposable
     private readonly Dictionary<string, Instance> _instances = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (int Failures, DateTimeOffset Until, string Error)> _backoff = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _versions = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _stop = new();
+    private readonly List<Task> _probes = new();
+    private Task? _shutdown;
 
     public LlamaRuntime(Func<HubSettings> settings, LlamaSetup setup, ModelLibrary library, ILlamaProcessHost host, Func<GpuFacts> gpu, SpeedBook speed,
         CompatBook? compat = null, Func<string?>? ollamaEngine = null)
@@ -197,8 +206,14 @@ public sealed partial class LlamaRuntime : IDisposable
     /// first. Waits until the model has loaded. <paramref name="background"/> work doesn't start a server that failed a
     /// short while ago (it waits 1, 5, then 15 minutes); a file the server can't read fails at once, every time.
     /// </summary>
-    public async Task<LlamaEndpoint> EnsureAsync(LocalModel model, LlamaLane lane, int? contextTokens, CancellationToken ct, bool background = false)
+    public Task<LlamaEndpoint> EnsureAsync(LocalModel model, LlamaLane lane, int? contextTokens, CancellationToken ct, bool background = false) =>
+        Task.Run(() => EnsureCoreAsync(model, lane, contextTokens, ct, background));
+
+    private async Task<LlamaEndpoint> EnsureCoreAsync(LocalModel model, LlamaLane lane, int? contextTokens, CancellationToken ct, bool background)
     {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+        ct = linked.Token;
+        ct.ThrowIfCancellationRequested();
         lock (_instances)
             if (Reusable(model, lane, contextTokens) is { } ready) return ready;
         await _gate.WaitAsync(ct).ConfigureAwait(false);
@@ -252,7 +267,7 @@ public sealed partial class LlamaRuntime : IDisposable
     {
         List<Instance> stopping;
         lock (_instances)
-            stopping = _instances.Values.Where(i => i.ModelId == model.Id || (lane == LlamaLane.Gpu && i.Lane == LlamaLane.Gpu && i.State != LlamaInstanceState.Failed)).ToList();
+            stopping = _instances.Values.Where(i => i.ModelId == model.Id || (lane == LlamaLane.Gpu && i.Lane == LlamaLane.Gpu && i.ProcessOrNull is { HasExited: false })).ToList();
         foreach (var old in stopping) Stop(old, old.ModelId == model.Id ? "to restart it" : "to make room for " + model.Name);
     }
 
@@ -270,21 +285,13 @@ public sealed partial class LlamaRuntime : IDisposable
         var port = _host.FreePort();
         var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         var launch = LlamaArgs.Build(model, lane, s.Ai.Llama, gpu, port, key, contextTokens, mtp);
-        var endpoint = new LlamaEndpoint(new Uri($"http://127.0.0.1:{port}/"), key, launch.Alias, launch.ContextTokens, model, lane, launch.MtpDraft);
+        var endpoint = new LlamaEndpoint(new Uri($"http://127.0.0.1:{port}/"), key, launch.Alias, launch.ContextTokens, model, lane, launch.MtpDraft)
+        { ReasoningControl = choice.Kind == LlamaServerKind.Aqua && Build == "b11387" && model.Thinking };
         var instance = new Instance(model, lane, endpoint, choice, ModelKey(model), ServerKey(choice), speedBuild);
         // Ollama's engine changes with Ollama's updates: its version goes into the compatibility record.
         if (choice.Kind == LlamaServerKind.Ollama) ProbeVersion(choice.Path, choice.Kind);
         Log.Info("llama", $"Starting {model.Name} on the {(lane == LlamaLane.Gpu ? "graphics card" : "processor")} with {choice.Label} ({launch.ContextTokens / 1024}K context{(launch.MtpDraft > 0 ? ", MTP" : "")})");
         var started = DateTimeOffset.Now;
-        try
-        {
-            instance.Process = _host.Start(choice.Path, launch.Arguments, launch.Environment, Path.GetDirectoryName(choice.Path)!, instance.Output);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Log.Warn("llama", "Couldn't start llama-server", ex);
-            throw new LlamaRuntimeException("Aqua's model runtime couldn't be started: " + ex.Message);
-        }
         lock (_instances) _instances[model.Id] = instance;
         Changed?.Invoke();
 
@@ -292,6 +299,8 @@ public sealed partial class LlamaRuntime : IDisposable
         var deadline = DateTimeOffset.Now + TimeSpan.FromSeconds(120 + 30 * model.Bytes / 1_000_000_000.0);
         try
         {
+            ct.ThrowIfCancellationRequested();
+            instance.Process = _host.Start(choice.Path, launch.Arguments, launch.Environment, Path.GetDirectoryName(choice.Path)!, instance.Output);
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
@@ -371,7 +380,9 @@ public sealed partial class LlamaRuntime : IDisposable
     /// Stops one model's server (null: all of them), e.g. to free the card for a game. Naming a model also forgets its
     /// failures, so the next request is a fresh try (Models › Clear failure).
     /// </summary>
-    public async Task UnloadAsync(string? modelId, string why, CancellationToken ct = default)
+    public Task UnloadAsync(string? modelId, string why, CancellationToken ct = default) => Task.Run(() => UnloadCoreAsync(modelId, why, ct));
+
+    private async Task UnloadCoreAsync(string? modelId, string why, CancellationToken ct)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -398,9 +409,10 @@ public sealed partial class LlamaRuntime : IDisposable
     /// <summary>Stops the graphics card's model (for a game or another app that needs the card); the next request starts it again.</summary>
     public Task UnloadGpuAsync(string why, CancellationToken ct = default)
     {
+        if (!_host.CanReleaseGpu) throw new LlamaRuntimeException("Aqua couldn't confirm a failed model process stopped. GPU handoff is blocked; restart Aqua.");
         string? id;
-        lock (_instances) id = _instances.Values.FirstOrDefault(i => i.Lane == LlamaLane.Gpu && i.State != LlamaInstanceState.Failed)?.ModelId;
-        return id is null ? Task.CompletedTask : StopRunningAsync(id, why, ct);
+        lock (_instances) id = _instances.Values.FirstOrDefault(i => i.Lane == LlamaLane.Gpu && i.ProcessOrNull is { HasExited: false })?.ModelId;
+        return id is null ? Task.CompletedTask : Task.Run(() => StopRunningAsync(id, why, ct));
     }
 
     private async Task StopRunningAsync(string modelId, string why, CancellationToken ct)
@@ -410,7 +422,7 @@ public sealed partial class LlamaRuntime : IDisposable
         {
             Instance? running;
             lock (_instances) running = _instances.GetValueOrDefault(modelId);
-            if (running is not null && running.State != LlamaInstanceState.Failed) Stop(running, why);
+            if (running is not null) Stop(running, why);
         }
         finally { _gate.Release(); }
     }
@@ -457,9 +469,10 @@ public sealed partial class LlamaRuntime : IDisposable
 
     private void Stop(Instance instance, string why)
     {
+        // Confirm termination before forgetting the owner or allowing another model onto the card.
+        KillQuietly(instance);
         lock (_instances)
             if (_instances.TryGetValue(instance.ModelId, out var current) && current == instance) _instances.Remove(instance.ModelId);
-        KillQuietly(instance);
         instance.State = LlamaInstanceState.Stopped;
         Log.Info("llama", $"Stopped {instance.Name} {why}");
         Changed?.Invoke();
@@ -475,22 +488,42 @@ public sealed partial class LlamaRuntime : IDisposable
                 p.Dispose();
             }
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { Log.Debug("llama", "stop: " + ex.Message); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            throw new LlamaRuntimeException("Couldn't confirm Aqua's model server stopped. GPU handoff is blocked: " + ex.Message);
+        }
     }
 
     /// <summary>Stops every server (Aqua is quitting).</summary>
-    public void Dispose()
+    public Task StopAsync()
     {
-        List<Instance> all;
-        lock (_instances)
+        lock (_probes) return _shutdown ??= Task.Run(StopOwnedAsync);
+    }
+
+    private async Task StopOwnedAsync()
+    {
+        _stop.Cancel();
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            all = _instances.Values.ToList();
-            _instances.Clear();
+            List<Instance> all;
+            lock (_instances)
+            {
+                all = _instances.Values.ToList();
+                _instances.Clear();
+            }
+            foreach (var i in all) KillQuietly(i);
         }
-        foreach (var i in all) KillQuietly(i);
+        finally { _gate.Release(); }
+        Task[] probes;
+        lock (_probes) probes = _probes.ToArray();
+        await Task.WhenAll(probes).ConfigureAwait(false);
         Compat.Flush();
         _http.Dispose();
     }
+
+    public void Dispose() => StopAsync().GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => new(StopAsync());
 
     // ───────────── Server versions (Ollama's engine and custom servers say theirs on request) ─────────────
 
@@ -501,25 +534,32 @@ public sealed partial class LlamaRuntime : IDisposable
     private void ProbeVersion(string path, LlamaServerKind kind)
     {
         var key = ServerKey(path, kind);
-        if (!_versions.TryAdd(key, "")) return;
-        _ = Task.Run(async () =>
+        lock (_probes)
         {
-            var lines = new List<string>();
-            try
+            if (_stop.IsCancellationRequested || !_versions.TryAdd(key, "")) return;
+            _probes.RemoveAll(t => t.IsCompleted);
+            _probes.Add(Task.Run(async () =>
             {
-                using var process = _host.Start(path, ["--version"], new Dictionary<string, string>(), Path.GetDirectoryName(path)!, l => { lock (lines) lines.Add(l); });
-                for (var i = 0; i < 50 && !process.HasExited; i++) await Task.Delay(200).ConfigureAwait(false);
-                if (!process.HasExited) process.Kill();
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                Log.Debug("llama", "version: " + ex.Message);
-                return;
-            }
-            string? version;
-            lock (lines) version = lines.Select(l => VersionRx().Match(l)).FirstOrDefault(m => m.Success)?.Groups[1].Value;
-            if (version is { Length: > 0 }) _versions[key] = version.Length > 40 ? version[..40] : version;
-        });
+                var lines = new List<string>();
+                try
+                {
+                    using var process = _host.Start(path, ["--version"], new Dictionary<string, string>(), Path.GetDirectoryName(path)!, l => { lock (lines) lines.Add(l); });
+                    try
+                    {
+                        for (var i = 0; i < 50 && !process.HasExited; i++) await Task.Delay(200, _stop.Token).ConfigureAwait(false);
+                    }
+                    finally { if (!process.HasExited) process.Kill(); }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    Log.Debug("llama", "version: " + ex.Message);
+                    return;
+                }
+                string? version;
+                lock (lines) version = lines.Select(l => VersionRx().Match(l)).FirstOrDefault(m => m.Success)?.Groups[1].Value;
+                if (version is { Length: > 0 }) _versions[key] = version.Length > 40 ? version[..40] : version;
+            }));
+        }
     }
 
     [GeneratedRegex(@"^\s*version:\s*(.+?)\s*$", RegexOptions.IgnoreCase)]
@@ -689,11 +729,25 @@ public sealed partial class LlamaRuntime : IDisposable
             lock (_buffers)
                 return new CompatEntry
                 {
-                    ModelId = model.Id, ModelName = model.Name, ModelKey = modelKey, ServerKey = serverKey, Server = server.Label,
-                    Outcome = outcome, Error = error, When = DateTimeOffset.Now, Context = endpoint.ContextTokens, Cache = cacheType,
-                    MtpDraft = endpoint.MtpDraft, GpuLayers = GpuLayers, TotalLayers = TotalLayers, LoadSeconds = Math.Round(load.TotalSeconds, 1),
-                    ModelMiB = Math.Round(_modelMiB), CacheMiB = Math.Round(_cacheMiB), ComputeMiB = Math.Round(_computeMiB),
-                    Gpu = gpu.Present ? gpu.Name : null, Driver = gpu.Driver,
+                    ModelId = model.Id,
+                    ModelName = model.Name,
+                    ModelKey = modelKey,
+                    ServerKey = serverKey,
+                    Server = server.Label,
+                    Outcome = outcome,
+                    Error = error,
+                    When = DateTimeOffset.Now,
+                    Context = endpoint.ContextTokens,
+                    Cache = cacheType,
+                    MtpDraft = endpoint.MtpDraft,
+                    GpuLayers = GpuLayers,
+                    TotalLayers = TotalLayers,
+                    LoadSeconds = Math.Round(load.TotalSeconds, 1),
+                    ModelMiB = Math.Round(_modelMiB),
+                    CacheMiB = Math.Round(_cacheMiB),
+                    ComputeMiB = Math.Round(_computeMiB),
+                    Gpu = gpu.Present ? gpu.Name : null,
+                    Driver = gpu.Driver,
                 };
         }
 

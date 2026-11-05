@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Start-up in dry-run mode, and reaching every page through the nav rail and the keyboard shortcuts.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Shell")]
 public sealed class A01_StartupNavigationTests : E2ETestBase
 {
     public A01_StartupNavigationTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

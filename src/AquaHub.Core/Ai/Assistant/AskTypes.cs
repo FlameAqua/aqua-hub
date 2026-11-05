@@ -132,6 +132,8 @@ public sealed record AskChatContext
 /// <summary>What happened while answering, for the footer and the conversation history.</summary>
 public sealed record AskResult
 {
+    public bool OnDevice { get; init; }
+    public AnswerTimings? Timings { get; init; }
     public string Text { get; init; } = "";
     public List<Citation> Citations { get; init; } = new();
     public string Model { get; init; } = "";
@@ -158,6 +160,29 @@ public sealed record AskResult
     public List<ChatSource> Sources { get; init; } = new();
     /// <summary>The chat's notes being brought up to date after the answer (a plain chat's small background call).</summary>
     public Task NoteTaking { get; init; } = Task.CompletedTask;
+}
+
+/// <summary>Plan/gather are wall-clock phases. Engine timings are components within those phases and writing, not additive totals.</summary>
+public sealed class AnswerTimings
+{
+    private readonly object _gate = new();
+    public TimeSpan Plan { get; set; }
+    public TimeSpan Gather { get; set; }
+    public TimeSpan? Load { get; set; }
+    public TimeSpan? Prompt { get; private set; }
+    public TimeSpan? Write { get; private set; }
+    public int CachedTokens { get; private set; }
+    public void Add(LlmTimings? timings)
+    {
+        if (timings is null) return;
+        lock (_gate)
+        {
+            Load = (Load ?? TimeSpan.Zero) + timings.Load;
+            Prompt = (Prompt ?? TimeSpan.Zero) + timings.Prompt;
+            Write = (Write ?? TimeSpan.Zero) + timings.Output;
+            CachedTokens += timings.CachedTokens;
+        }
+    }
 }
 
 /// <summary>

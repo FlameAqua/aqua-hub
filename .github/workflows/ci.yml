@@ -1,6 +1,6 @@
 # Build, unit/behaviour tests and a vulnerability audit on every push to a branch and every pull request; the UI
-# Automation suite is compiled too. It isn't run here: it needs a warm profile, an interactive desktop and (for Ask)
-# a local model, so it runs on a PC with scripts/e2e.ps1, every side effect kept in the --e2e dry-run sandbox.
+# Automation suite is compiled too. Desktop tests need an interactive Windows session; scripts/e2e.ps1 selects offline
+# components by default. Legacy/full flows remain explicit. Action intercepts are not an OS sandbox or live GPU evidence.
 name: ci
 
 on:
@@ -25,6 +25,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Documentation hygiene
+        run: ./scripts/check-docs.ps1
+      - name: E2E component selection contracts
+        run: ./scripts/check-e2e-selection.ps1
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json

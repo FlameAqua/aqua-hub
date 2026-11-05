@@ -111,6 +111,8 @@ public sealed class UpdateService
     public event Action? Changed;
 
     /// <summary>Automatic checks: the first a few minutes after start-up, then about once a day while Aqua runs.</summary>
+    public void StopScheduling() => _timer?.Stop();
+
     public void Start()
     {
         // After an update the "available" and "ready" alerts for this version would still be in the bell, unread.

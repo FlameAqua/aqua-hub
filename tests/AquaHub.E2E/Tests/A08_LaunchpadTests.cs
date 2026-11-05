@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Launchpad: media controls and volume, music search, scene Run buttons, app tiles, Add app picker.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Desktop")]
 public sealed class A08_LaunchpadTests : E2ETestBase
 {
     public A08_LaunchpadTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

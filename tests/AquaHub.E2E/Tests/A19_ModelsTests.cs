@@ -6,6 +6,8 @@ using System.Text.Json.Nodes;
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Phase 4 UI contracts against a tiny synthetic GGUF. No inference or real downloads are needed.</summary>
+[Trait("Execution", "Offline")]
+[Trait("Component", "Models")]
 public sealed class A19_ModelsTests : E2ETestBase
 {
     public A19_ModelsTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }
@@ -14,6 +16,7 @@ public sealed class A19_ModelsTests : E2ETestBase
 
     protected override SessionOptions Options => new()
     {
+        Offline = true,
         EditSettings = root =>
         {
             root["onboardingComplete"] = true;
@@ -63,13 +66,14 @@ public sealed class A19_ModelsTests : E2ETestBase
         foreach (var role in new[] { "main", "creative", "background" })
         {
             Ui.SelectComboItem(Field("models-role-" + role), ModelName, Pid);
-            App.Settings.WaitForString(role == "main" ? "ai.model" : "ai.llama." + role + "Model", ModelId);
+            App.Settings.WaitForString(role == "main" ? "ai.providerModels.llamacpp.model" : "ai.llama." + role + "Model", ModelId);
         }
+        Assert.Equal("auto", App.Settings.GetString("ai.model")); // Preparing Aqua's model must preserve Ollama's choice.
         GoTo("today"); GoTo("models");
         File.WriteAllText(Path.Combine(E2EConfig.RunDir, "models-ui.txt"), TreeSnapshot.Dump(TreeSnapshot.Capture(Models)));
         Wait.For(() => Ui.Find(Models, Ui.Name("Thinking")) is not null, "model capability available to accessibility");
         Ui.SelectComboItem(Field("models-role-main"), "Automatic", Pid);
-        App.Settings.WaitFor("ai.model", n => n?.GetValue<string>() is "" or "auto", "automatic main model");
+        App.Settings.WaitForString("ai.providerModels.llamacpp.model", "auto");
         Ui.SelectComboItem(Field("models-role-background"), "Use Main (recommended)", Pid);
         App.Settings.WaitForString("ai.llama.backgroundModel", "");
         var suggested = Field("models-suggested");
@@ -80,6 +84,7 @@ public sealed class A19_ModelsTests : E2ETestBase
     });
 
     [Fact]
+    [Trait("Component", "Runtime")]
     public void T02_MissingRuntimeDoesNotSwitchProviderAndInstallIsIntercepted() => Run(() =>
     {
         GoTo("models");
@@ -98,6 +103,7 @@ public sealed class A19_ModelsTests : E2ETestBase
     });
 
     [Fact]
+    [Trait("Component", "Runtime")]
     public void T03_ExternalProviderRoundTripKeepsSelection() => Run(() =>
     {
         GoTo("models"); Ui.Invoke(Ui.WaitFind(Models, Ui.Name("AI settings"), "AI settings link"));
@@ -107,5 +113,16 @@ public sealed class A19_ModelsTests : E2ETestBase
         GoTo("today"); GoTo("models"); Ui.Invoke(Ui.WaitFind(Models, Ui.Name("AI settings"), "AI settings link"));
         Ui.SelectComboItem(Field("settings-ai-provider"), "Ollama", Pid);
         App.Settings.WaitForString("ai.provider", "ollama");
+    });
+
+    [Fact]
+    public void T04_MatrixDoesNotInventAnInferenceResult() => Run(() =>
+    {
+        GoTo("models");
+        Wait.For(() => Ui.Texts(Models).Contains(ModelName), "synthetic library loaded");
+        var entry = ExpectJournal("clipboard", () => Ui.Invoke(Field("models-copy-matrix")));
+        Assert.Contains("| Model | Server | Result |", entry.Detail);
+        Assert.DoesNotContain("Aqua QA", entry.Detail); // Header inspection is not a recorded model load.
+        Assert.Contains("No engine", string.Join(" ", Ui.Texts(Models)), StringComparison.OrdinalIgnoreCase);
     });
 }

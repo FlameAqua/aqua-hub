@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>The taskbar quick panel (opened with the --flyout remote command).</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Desktop")]
 public sealed class A13_FlyoutTests : E2ETestBase
 {
     public A13_FlyoutTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

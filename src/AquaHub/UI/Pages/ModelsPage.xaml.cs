@@ -17,6 +17,11 @@ public partial class ModelsPage : UserControl, IPage
 {
     private bool _syncing, _active, _downloadAction, _cancelRequested;
     private CancellationTokenSource? _browse;
+    private CancellationTokenSource? _preview;
+    private FileRow? _previewRow;
+    private readonly Dictionary<string, FileRow> _files = new();
+    private readonly ObservableCollection<FileRow> _fileItems = new();
+    private readonly SemaphoreSlim _previewGate = new(1, 1);
     private HfRepoFiles? _repo;
     private HfFile? _projector;
     private readonly Dictionary<string, ModelRow> _rows = new();
@@ -33,6 +38,7 @@ public partial class ModelsPage : UserControl, IPage
         InitializeComponent();
         Library.ItemsSource = _modelItems;
         Suggestions.ItemsSource = _suggestionItems;
+        Files.ItemsSource = _fileItems;
         _timer.Tick += (_, _) => UpdateHardware();
     }
 
@@ -58,10 +64,16 @@ public partial class ModelsPage : UserControl, IPage
         Hub.Core.Settings.Changed -= OnSettingsChanged;
         _timer.Stop();
         _browse?.Cancel();
+        _preview?.Cancel();
     }
 
     private void OnSettingsChanged(HubSettings _) => Hub.OnUi(() => { if (_active) Refresh(); });
     private void OnSettings(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "ai");
+    private void OnCopyMatrix(object sender, RoutedEventArgs e)
+    {
+        try { var matrix = Hub.LocalAi.CompatibilityMatrix(); if (!Sandbox.Intercept("clipboard", matrix)) Clipboard.SetText(matrix); LibraryError.Text = "Compatibility matrix copied."; }
+        catch (System.Runtime.InteropServices.COMException) { LibraryError.Text = "Couldn't copy. Try again when the clipboard is available."; }
+    }
 
     private void UpdateHardware()
     {
@@ -135,8 +147,7 @@ public partial class ModelsPage : UserControl, IPage
     {
         var list = models.Where(m => role == "search" ? m.Embedding : !m.Embedding)
             .Select(m => new Choice(m.Id, m.Name)).Prepend(new Choice("", role == "main" ? "Automatic" : role == "search" ? "None" : "Use Main (recommended)")).ToList();
-        var raw = role switch { "main" => Hub.S.Ai.Model, "creative" => Hub.S.Ai.Llama.CreativeModel,
-            "background" => Hub.S.Ai.Llama.BackgroundModel, _ => Hub.S.Ai.Llama.SearchModel };
+        var raw = Hub.LocalAi.RoleValue(role);
         var id = Hub.LocalAi.ForRole(role)?.Id ?? (raw is "" or "auto" ? "" : raw);
         if (id.Length > 0 && list.All(c => c.Id != id)) list.Add(new Choice(id, raw + " (unavailable for this role)"));
         return new(role, title, hint, list, id);
@@ -170,6 +181,16 @@ public partial class ModelsPage : UserControl, IPage
         public string Fit => FitText(Estimate);
         public Brush FitBrush => Fmt.Res(Estimate.Verdict is FitVerdict.Fits ? "B.Up" : "B.Warn");
         public string FitDetail => $"Estimate: {Fmt.Bytes(Estimate.TotalBytes)} at {Estimate.ContextTokens:N0} tokens. Actual memory use is checked when loading.";
+        public string Engine => Hub.LocalAi.Engine(Model)?.Label ?? "No engine available";
+        public string EngineNote => Hub.LocalAi.Engine(Model)?.Note ?? "";
+        public string Problem => Hub.LocalAi.Problem(Model) ?? "";
+        public string Compatibility => Hub.LocalAi.Compatibility(Model).Count == 0 ? "No observations recorded for this model." : string.Join("\n\n", Hub.LocalAi.Compatibility(Model).Select(e =>
+            $"{e.When:dd MMM yyyy HH:mm} · {e.Server} · {(e.Ok ? "Loaded" : e.Outcome)}\n" +
+            $"Context: {(e.Context > 0 ? e.Context.ToString("N0") : "not reported")} · cache: {(e.Cache.Length > 0 ? e.Cache : "not reported")} · MTP: {(e.MtpDraft > 0 ? e.MtpDraft.ToString() : "off")}\n" +
+            $"Layers on card: {(e.GpuLayers is { } g && e.TotalLayers is { } t ? $"{g}/{t}" : "not reported")} · model/cache/work MiB: {Measured(e.ModelMiB)} / {Measured(e.CacheMiB)} / {Measured(e.ComputeMiB)}\n" +
+            $"Load: {(e.Ok && e.LoadSeconds > 0 ? $"{e.LoadSeconds:0.0}s" : "not reported")} · prompt/write tok/s: {Measured(e.PromptPerSecond)} / {Measured(e.OutputPerSecond)}\n" +
+            $"{e.Gpu ?? "Card not reported"} · {e.Driver ?? "driver not reported"}" + (e.Error is { Length: > 0 } ? "\n" + e.Error : "")));
+        private static string Measured(double value) => value > 0 ? value.ToString("0.0") : "not reported";
         public string State => string.Join(" · ", Hub.LocalAi.Running.Where(r => r.ModelId == Model.Id && r.State != LlamaInstanceState.Stopped).Select(r =>
             r.State == LlamaInstanceState.Failed ? "Failed: " + r.Error : r.State == LlamaInstanceState.Starting ? "Starting…"
             : r.Lane == LlamaLane.Cpu ? "On the processor" : $"On the graphics card · {r.ContextTokens / 1024}K" + (r.PartlyOnCpu ? $" · {r.GpuLayers}/{r.TotalLayers} layers on the card" : "")));
@@ -194,7 +215,8 @@ public partial class ModelsPage : UserControl, IPage
         FitVerdict.Fits => $"Fits · {fit.ContextTokens / 1024}K context",
         FitVerdict.Tight => "Fits, little room left for games",
         FitVerdict.PartlyOnCpu => "Partly on the processor (slower)",
-        FitVerdict.CpuOnly => "Processor only", _ => "Too big for this PC",
+        FitVerdict.CpuOnly => "Processor only",
+        _ => "Too big for this PC",
     };
 
     private void OnUse(object sender, RoutedEventArgs e)
@@ -243,7 +265,8 @@ public partial class ModelsPage : UserControl, IPage
     {
         public override string ToString() => File.Name;
         public HfFile File { get; } = file;
-        public string Detail { get; } = detail;
+        private string _detail = detail;
+        public string Detail { get => _detail; set => Set(ref _detail, value); }
         public bool CanDownload { get; set; }
     }
     public sealed record RepoRow(string Id, string Detail)
@@ -316,6 +339,7 @@ public partial class ModelsPage : UserControl, IPage
 
     private CancellationTokenSource BeginBrowse()
     {
+        _preview?.Cancel(); _previewRow = null;
         _browse?.Cancel(); _browse?.Dispose();
         return _browse = new CancellationTokenSource();
     }
@@ -339,9 +363,9 @@ public partial class ModelsPage : UserControl, IPage
     private async void OnRepo(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: RepoRow row }) return;
-        var request = BeginBrowse(); _repo = null; _projector = null;
+        var request = BeginBrowse(); _repo = null; _projector = null; _files.Clear();
         RepoPanel.Visibility = Visibility.Visible; RepoTitle.Text = row.Id; RepoStatus.Text = "Reading files…";
-        Files.ItemsSource = null; VisionOption.Visibility = Visibility.Collapsed;
+        _fileItems.Clear(); VisionOption.Visibility = ProjectorChoice.Visibility = Visibility.Collapsed;
         try
         {
             var repo = await Hub.LocalAi.FilesAsync(row.Id, request.Token);
@@ -353,26 +377,83 @@ public partial class ModelsPage : UserControl, IPage
                 : $"{repo.Models.Count} files · license: {repo.License ?? "not supplied"}. Fit is a weights-only estimate until the GGUF header is downloaded; context memory is not yet known.";
             VisionOption.Visibility = _projector is not null && !repo.Gated ? Visibility.Visible : Visibility.Collapsed;
             VisionOption.Content = _projector is null ? "" : $"Also download vision (+{Fmt.Bytes(_projector.Size)})";
+            ProjectorChoice.ItemsSource = repo.Projectors;
+            ProjectorChoice.SelectedItem = _projector;
             VisionOption.IsChecked = false;
             FillFiles();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!request.IsCancellationRequested) RepoStatus.Text = ex.Message; }
     }
-    private void OnVisionChanged(object sender, RoutedEventArgs e) => FillFiles();
+    private async void OnVisionChanged(object sender, RoutedEventArgs e)
+    {
+        ProjectorChoice.Visibility = VisionOption.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        _preview?.Cancel();
+        FillFiles();
+        if (_previewRow is { } row) await PreviewAsync(row);
+    }
+
+    private void OnProjectorChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ProjectorChoice.SelectedItem is not HfFile projector || ReferenceEquals(_projector, projector)) return;
+        _projector = projector;
+        VisionOption.Content = $"Also download vision (+{Fmt.Bytes(projector.Size)})";
+        OnVisionChanged(sender, e);
+    }
+
+    private async void OnPreview(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: FileRow row }) await PreviewAsync(row);
+    }
+
+    private async Task PreviewAsync(FileRow row)
+    {
+        if (_repo is not { Gated: false } repo) return;
+        _preview?.Cancel(); _preview?.Dispose();
+        var request = _preview = new CancellationTokenSource();
+        _previewRow = row;
+        var projector = VisionOption.IsChecked == true ? _projector : null;
+        row.Detail = "Checking the GGUF header…"; row.Error = "";
+        var entered = false;
+        try
+        {
+            await _previewGate.WaitAsync(request.Token);
+            entered = true;
+            var model = await Hub.LocalAi.PreviewAsync(repo, row.File, projector, request.Token);
+            if (request.IsCancellationRequested || !ReferenceEquals(repo, _repo)) return;
+            row.Detail = $"{Fmt.Bytes(model.Bytes)} · {FitText(Hub.LocalAi.Fit(model))} (header estimate) · " +
+                string.Join(" · ", new[] { model.Vision ? "Vision" : null, model.Thinking ? "Thinking" : null, model.Tools ? "Tools" : null, model.Embedding ? "Embedding" : null }.OfType<string>()) +
+                "\n" + (Hub.LocalAi.Engine(model)?.Label ?? "No engine available") + ". Full-file verification happens on download; inference is not verified.";
+            row.Error = Hub.LocalAi.Problem(model) ?? "";
+        }
+        catch (OperationCanceledException) { if (ReferenceEquals(request, _preview)) FillFiles(); }
+        catch (Exception ex) { if (!request.IsCancellationRequested) { FillFiles(); row.Error = "Header unavailable; weights-only estimate. " + ex.Message; } }
+        finally { if (entered) _previewGate.Release(); }
+    }
     private void FillFiles()
     {
         if (_repo is not { } repo) return;
         var projector = VisionOption.IsChecked == true ? _projector : null;
-        Files.ItemsSource = repo.Models.Select(f =>
+        Synchronize(_fileItems, repo.Models.Select(f =>
         {
-            var model = new LocalModel { Id = "preview", Name = f.Name, Path = f.Name, Source = ModelSource.Aqua, Size = f.Size,
-                ProjectorPath = projector?.Path, ProjectorSize = projector?.Size ?? 0,
-                Info = new GgufInfo { ContextLength = repo.ContextLength, Architecture = repo.Architecture ?? "", Parameters = repo.Parameters } };
+            var model = new LocalModel
+            {
+                Id = "preview",
+                Name = f.Name,
+                Path = f.Name,
+                Source = ModelSource.Aqua,
+                Size = f.Size,
+                ProjectorPath = projector?.Path,
+                ProjectorSize = projector?.Size ?? 0,
+                Info = new GgufInfo { ContextLength = repo.ContextLength, Architecture = repo.Architecture ?? "", Parameters = repo.Parameters }
+            };
             var fit = Hub.LocalAi.Fit(model);
             var verdict = fit.Verdict == FitVerdict.Fits ? "Weights fit on the card" : FitText(fit);
-            return new FileRow(f, $"{Fmt.Bytes(model.Bytes)} · {f.Quant ?? "GGUF"} · {verdict} (estimate)");
-        }).ToList();
+            var detail = $"{Fmt.Bytes(model.Bytes)} · {f.Quant ?? "GGUF"} · {verdict} (weights-only estimate)";
+            if (!_files.TryGetValue(f.Path, out var row)) _files[f.Path] = row = new FileRow(f, detail);
+            else row.Detail = detail;
+            return row;
+        }).ToList());
         UpdateDownloadButtons();
     }
 }

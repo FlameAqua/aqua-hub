@@ -18,14 +18,20 @@ namespace AquaHub.Services;
 public sealed class LlamaProcessHost : ILlamaProcessHost, IDisposable
 {
     private readonly SafeFileHandle? _job = Native.CreateKillOnCloseJob();
+    private readonly object _lifetime = new();
+    private bool _blocked;
+    private Process? _unconfirmed;
+    public bool CanReleaseGpu { get { lock (_lifetime) return _unconfirmed is null || _unconfirmed.HasExited; } }
 
     public LlamaProcessHost()
     {
-        if (_job is null) Log.Warn("llama", "Windows didn't create a job for the model servers; they're still stopped when Aqua quits normally");
+        if (_job is null) Log.Warn("llama", "Windows couldn't create model-process containment. Model starts are disabled.");
     }
 
     public ILlamaProcess Start(string program, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, string workingDirectory, Action<string> output)
     {
+        if (_job is null || _job.IsClosed || _job.IsInvalid)
+            throw new LlamaRuntimeException("Windows couldn't create safe process containment. Restart Aqua before loading a model.");
         var info = new ProcessStartInfo(program)
         {
             UseShellExecute = false,
@@ -60,15 +66,49 @@ public sealed class LlamaProcessHost : ILlamaProcessHost, IDisposable
             info.WorkingDirectory = cuda;
         }
 
-        var process = Process.Start(info) ?? throw new InvalidOperationException("llama-server didn't start.");
-        if (_job is not null && !Native.AssignProcessToJobObject(_job, process.Handle))
-            Log.Debug("llama", "Couldn't put the model server in Aqua's job (it's still stopped when Aqua quits normally)");
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) output(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output(e.Data); };
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        Sandbox.Record("llama", "start · " + (arguments.SkipWhile(a => a != "-a").Skip(1).FirstOrDefault() ?? string.Join(' ', arguments)));
-        return new Handle(process);
+        Process process;
+        lock (_lifetime)
+        {
+            if (_job.IsClosed || _blocked) throw new LlamaRuntimeException("Aqua's model-process host is closing or Windows refused containment. Restart Aqua before loading a model.");
+            process = Process.Start(info) ?? throw new InvalidOperationException("llama-server didn't start.");
+            try
+            {
+                if (!Native.AssignProcessToJobObject(_job, process.Handle))
+                    throw new LlamaRuntimeException($"Windows couldn't contain Aqua's model server (error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}). Restart Aqua before trying again.");
+            }
+            catch
+            {
+                _blocked = true;
+                try
+                {
+                    if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(5000); }
+                }
+                finally
+                {
+                    if (!process.HasExited) _unconfirmed = process;
+                    else process.Dispose();
+                }
+                throw;
+            }
+        }
+        try
+        {
+            process.OutputDataReceived += (_, e) => { if (e.Data is not null) output(e.Data); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output(e.Data); };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            Sandbox.Record("llama", "start · " + (arguments.SkipWhile(a => a != "-a").Skip(1).FirstOrDefault() ?? string.Join(' ', arguments)));
+            return new Handle(process);
+        }
+        catch
+        {
+            lock (_lifetime)
+            {
+                try { using var failed = new Handle(process); }
+                catch { _blocked = true; _unconfirmed = process; throw; }
+            }
+            throw;
+        }
     }
 
     public int FreePort()
@@ -79,7 +119,17 @@ public sealed class LlamaProcessHost : ILlamaProcessHost, IDisposable
         finally { listener.Stop(); }
     }
 
-    public void Dispose() => _job?.Dispose();
+    public void Dispose()
+    {
+        lock (_lifetime)
+        {
+            _job?.Dispose();
+            if (_unconfirmed is not { } process) return;
+            try { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(5000); } }
+            catch (Exception ex) { Log.Error("llama", "Couldn't stop Aqua's unconfirmed model process on exit", ex); }
+            finally { process.Dispose(); _unconfirmed = null; }
+        }
+    }
 
     private sealed class Handle(Process process) : ILlamaProcess
     {
@@ -96,10 +146,15 @@ public sealed class LlamaProcessHost : ILlamaProcessHost, IDisposable
 
         public void Kill()
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { Log.Debug("llama", "kill: " + ex.Message); }
+            if (HasExited) return;
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                if (!process.WaitForExit(5000)) throw new LlamaRuntimeException("Aqua's model process did not stop. GPU handoff is blocked; restart Aqua before retrying.");
+            }
+            catch (InvalidOperationException) when (HasExited) { }
         }
 
-        public void Dispose() => process.Dispose();
+        public void Dispose() { Kill(); process.Dispose(); }
     }
 }

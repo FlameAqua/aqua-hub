@@ -1,6 +1,8 @@
 namespace AquaHub.E2E.Tests;
 
 /// <summary>Agents: model-output inspector, Run all now, Pause all / Resume all, every per-agent Run button.</summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Agents")]
 public sealed class A10_AgentsTests : E2ETestBase
 {
     public A10_AgentsTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

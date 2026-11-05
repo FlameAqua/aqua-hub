@@ -228,6 +228,7 @@ public sealed class OllamaManager
     /// </summary>
     public void OnAppExit()
     {
+        StopScheduling();
         if (_startedPid is not int pid || !IsLocalOllama || !Hub.S.Ai.ManageOllama || Native.ListenerPid(Port) != pid) return;
         if (Sandbox.Intercept("ollama", "stop · Aqua is quitting")) return;
         try
@@ -241,6 +242,8 @@ public sealed class OllamaManager
             Log.Debug("ollama", "exit: " + ex.Message);
         }
     }
+
+    public void StopScheduling() => _timer?.Stop();
 
     /// <summary>
     /// Another program is using the server right now: it has a connection open to it (a terminal `ollama pull` or

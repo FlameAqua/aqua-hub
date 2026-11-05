@@ -176,8 +176,13 @@ public sealed class ImageArchive(string folder)
         var path = ReferencePath(referenceId);
         EnsureNoReparsePoints(path);
         EnsureRegularFileOrMissing(path);
-        if (!File.Exists(path) || new FileInfo(path).Length is < 8 or > ImageReference.MaxPngBytes) return null;
-        var png = File.ReadAllBytes(path);
+        if (!File.Exists(path)) return null;
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var length = stream.Length;
+        if (length is < 8 or > ImageReference.MaxPngBytes) return null;
+        var png = new byte[checked((int)length)];
+        stream.ReadExactly(png);
+        if (stream.ReadByte() != -1 || !png.AsSpan(0, 8).SequenceEqual(PngSignature)) return null;
         return ImageReference.IdFor(png) == referenceId ? png : null;
     }
 

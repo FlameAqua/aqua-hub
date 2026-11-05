@@ -4,6 +4,8 @@ namespace AquaHub.E2E.Tests;
 /// Generic crawler over every page (each Settings section separately), the title bar, the quick panel and the palette:
 /// activates every enabled control once and asserts the app survives. The last test reports accessibility gaps.
 /// </summary>
+[Trait("Execution", "Legacy")]
+[Trait("Component", "Crawler")]
 public sealed class A16_CrawlerTests : E2ETestBase
 {
     public A16_CrawlerTests(AppFixture fixture, ITestOutputHelper output) : base(fixture, output) { }

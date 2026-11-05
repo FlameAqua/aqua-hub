@@ -31,6 +31,14 @@ public sealed record LlmTool(string Name, string Description, JsonObject Paramet
 /// <summary>A call the model made; <see cref="ArgumentsJson"/> is the raw JSON object of arguments.</summary>
 public sealed record LlmToolCall(string Name, string ArgumentsJson, string? Id = null);
 
+/// <summary>Control belongs to one streamed request and its server-issued ID, never to a global slot.</summary>
+public sealed class LlmReasoningControl
+{
+    internal Func<CancellationToken, Task<bool>>? End;
+    internal string? Id;
+    public Task<bool> TryEndAsync(CancellationToken ct) => End?.Invoke(ct) ?? Task.FromResult(false);
+}
+
 /// <summary>What a model is able to do, from Ollama's /api/show (other servers: tools yes, vision unknown).</summary>
 public sealed record LlmCapabilities(string Model, bool Tools, bool Vision, bool Thinking);
 
@@ -97,6 +105,7 @@ public sealed record LlmRequest
     public string? Model { get; init; }
     /// <summary>Context window for this request; null = Settings. A different size reloads the model, so only long jobs raise it.</summary>
     public int? ContextTokens { get; init; }
+    public LlmReasoningControl? ReasoningControl { get; init; }
 }
 
 public sealed record LlmResult(string Text, string Model, int PromptTokens, int OutputTokens, TimeSpan Duration)
@@ -151,6 +160,12 @@ public sealed partial class LlmClient : IDisposable
     private readonly PriorityGate _gate = new();
     /// <summary>Aqua's runtime's processor-lane models (such as embeddings), which run beside the card's.</summary>
     private readonly PriorityGate _cpuGate = new();
+    private readonly object _warmGate = new();
+    private CancellationTokenSource? _warmCancellation;
+    private Task? _warmTask;
+    private readonly CancellationTokenSource _stop = new();
+    private readonly HashSet<TaskCompletionSource> _operations = new();
+    private Task? _shutdown;
     private readonly Dictionary<string, HashSet<string>> _capabilities = new(StringComparer.OrdinalIgnoreCase);
     private LlmHealth _health = new() { CheckedAt = DateTimeOffset.MinValue };
 
@@ -233,6 +248,8 @@ public sealed partial class LlmClient : IDisposable
 
     public async Task<LlmHealth> CheckAsync(CancellationToken ct = default)
     {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
         var s = _settings();
         LlmHealth health;
         if (!s.Enabled)
@@ -281,7 +298,10 @@ public sealed partial class LlmClient : IDisposable
             {
                 health = new LlmHealth
                 {
-                    Enabled = true, Available = false, Provider = s.Provider, Endpoint = s.Endpoint,
+                    Enabled = true,
+                    Available = false,
+                    Provider = s.Provider,
+                    Endpoint = s.Endpoint,
                     Error = ex is LlmUnavailableException ? ex.Message : $"Can't reach {s.Endpoint} — is {(IsOllama ? "Ollama" : "the model server")} running?",
                     CheckedAt = DateTimeOffset.Now,
                 };
@@ -338,6 +358,8 @@ public sealed partial class LlmClient : IDisposable
 
     public async Task<List<LlmModelInfo>> ListModelsAsync(CancellationToken ct = default)
     {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
         var list = new List<LlmModelInfo>();
         if (IsLlama)
         {
@@ -374,6 +396,8 @@ public sealed partial class LlmClient : IDisposable
     /// <summary>Loaded models and their VRAM usage (Ollama; Aqua's runtime lists its running servers, without a VRAM figure).</summary>
     public async Task<List<(string Name, long VramBytes, DateTimeOffset? ExpiresAt)>> RunningModelsAsync(CancellationToken ct = default)
     {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
         var list = new List<(string, long, DateTimeOffset?)>();
         if (IsLlama)
         {
@@ -396,6 +420,8 @@ public sealed partial class LlmClient : IDisposable
     /// <summary>Frees VRAM immediately (useful before gaming).</summary>
     public async Task UnloadAsync(CancellationToken ct = default)
     {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
         if (IsLlama)
         {
             await Llama!.UnloadGpuAsync("to free the graphics card", ct).ConfigureAwait(false);
@@ -493,7 +519,78 @@ public sealed partial class LlmClient : IDisposable
     /// Holds the GPU for a multi-step interactive job (Ask with tools), so background agents don't slip in between its
     /// model calls. Pass <c>reserved: true</c> to <see cref="ChatStreamAsync"/> while holding it.
     /// </summary>
-    public Task<IDisposable> ReserveAsync(CancellationToken ct) => _gate.AcquireAsync(interactive: true, ct);
+    public Task<IDisposable> ReserveAsync(CancellationToken ct) => AcquireGenerationAsync(true, ct);
+
+    private Task<IDisposable> AcquireGenerationAsync(bool interactive, CancellationToken ct)
+    {
+        lock (_warmGate)
+        {
+            _stop.Token.ThrowIfCancellationRequested();
+            _warmCancellation?.Cancel();
+            return _gate.AcquireAsync(interactive, ct);
+        }
+    }
+
+    public void CancelWarmup() { lock (_warmGate) _warmCancellation?.Cancel(); }
+
+    /// <summary>Speculative local loading only while the generation lane is idle; never queues ahead of real work.</summary>
+    public Task WarmupAsync(string? model, int? context, CancellationToken ct)
+    {
+        lock (_warmGate)
+        {
+            if (_warmTask is { IsCompleted: false }) return _warmTask;
+            if (_stop.IsCancellationRequested || !IsLlama || !_settings().Enabled || UserPaused || !_health.Available || PauseReason() is not null || ct.IsCancellationRequested)
+                return Task.CompletedTask;
+            var lease = _gate.TryAcquire();
+            if (lease is null) return Task.CompletedTask;
+            _warmCancellation?.Dispose();
+            var cancellation = _warmCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _warmTask = Task.Run(async () =>
+            {
+                using (lease)
+                {
+                    try { await Llama!.EnsureAsync(ResolveLocal(model, false), LlamaLane.Gpu, context, cancellation.Token, background: true).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex) { Log.Debug("llama", "Warm-up skipped: " + ex.Message); }
+                }
+            });
+            return _warmTask;
+        }
+    }
+
+    /// <summary>The routed runtime's loaded context, or the context it will actually launch with. No model is started.</summary>
+    public int ContextForModel(string? model, int? requested = null)
+    {
+        if (!IsLlama) return requested is > 0 ? requested.Value : _settings().ContextTokens;
+        var local = ResolveLocal(model, false);
+        var active = Llama!.Instances.FirstOrDefault(i => i.ModelId == local.Id && i.State == LlamaInstanceState.Ready);
+        if (active is not null && (requested is not > 0 || active.ContextTokens >= requested)) return active.ContextTokens;
+        return LlamaArgs.Build(local, LlamaLane.Gpu, _settings().Llama, Llama.Gpu, 1, "context-estimate", requested, 0).ContextTokens;
+    }
+
+    public async Task<(int Context, TimeSpan? Load)> PrepareContextAsync(string? model, int? requested, CancellationToken ct)
+    {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
+        if (!IsLlama)
+        {
+            if (IsOllama && requested is not > 0)
+            {
+                using var running = await GetJsonAsync("api/ps", TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+                if (running is not null)
+                    foreach (var loaded in running.RootElement.Arr("models"))
+                        if ((loaded.Str("name") == model || loaded.Str("model") == model) && loaded.Lng("context_length") is > 0 and <= 131072 and var window)
+                            return ((int)window, null);
+            }
+            return (ContextForModel(model, requested), null);
+        }
+        using var lease = await ReserveAsync(ct).ConfigureAwait(false);
+        var loading = Stopwatch.StartNew();
+        var endpoint = await Llama!.EnsureAsync(ResolveLocal(model, false), LlamaLane.Gpu, requested, ct).ConfigureAwait(false);
+        var load = loading.Elapsed;
+        var props = await Llama.PropsAsync(endpoint, ct).ConfigureAwait(false);
+        return (props is { Context: > 0 } actual ? actual.Context : endpoint.ContextTokens, load);
+    }
 
     /// <summary>
     /// Reserves the GPU for image generation or other external GPU work. Interactive requests wait behind this lease;
@@ -501,7 +598,8 @@ public sealed partial class LlmClient : IDisposable
     /// </summary>
     public async Task<IDisposable> ReserveForImageAsync(CancellationToken ct = default)
     {
-        var lease = await _gate.AcquireAsync(interactive: true, ct).ConfigureAwait(false);
+        CancelWarmup();
+        var lease = await AcquireGenerationAsync(true, ct).ConfigureAwait(false);
         try
         {
             if (IsLlama) await Llama!.UnloadGpuAsync("to make room for image generation", ct).ConfigureAwait(false);
@@ -514,9 +612,13 @@ public sealed partial class LlmClient : IDisposable
         }
     }
 
+    /// <summary>Before scheduling starts, restore an unresolved external image reservation from the previous launch.</summary>
+    public IDisposable ReserveImageRecovery() => _gate.TryAcquire() ?? throw new InvalidOperationException("Restore image recovery before starting model work.");
+
     // ───────────────────────────── Aqua's runtime ─────────────────────────────
 
-    private PriorityGate GateFor(LlamaLane lane) => lane == LlamaLane.Cpu ? _cpuGate : _gate;
+    private Task<IDisposable> AcquireLaneAsync(LlamaLane lane, bool interactive, CancellationToken ct) =>
+        lane == LlamaLane.Cpu ? _cpuGate.AcquireAsync(interactive, ct) : AcquireGenerationAsync(interactive, ct);
 
     /// <summary>The library model a name means (Ask's pick, the deep or the active one); throws when there's none.</summary>
     private LocalModel ResolveLocal(string? requested, bool deep)
@@ -586,8 +688,10 @@ public sealed partial class LlmClient : IDisposable
             var started = Stopwatch.StartNew();
             var endpoint = await Llama!.EnsureAsync(model, lane, request.ContextTokens, ct, background: request.Priority != LlmPriority.Interactive).ConfigureAwait(false);
             var load = started.Elapsed;
+            var body = LlamaBody(endpoint, request, s, stream);
+            if (stream && request.ReasoningControl is not null && endpoint.ReasoningControl) body["reasoning_control"] = true;
             var req = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint.BaseUri, "v1/chat/completions"))
-            { Content = new StringContent(LlamaBody(endpoint, request, s, stream).ToJsonString(), Encoding.UTF8, "application/json") };
+            { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Key);
             try
             {
@@ -606,7 +710,7 @@ public sealed partial class LlmClient : IDisposable
     private async Task<LlmResult> LlamaCompleteAsync(LlmRequest request, AiSettings s, CancellationToken ct)
     {
         var (model, lane) = RouteLocal(request);
-        using var lease = await GateFor(lane).AcquireAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
+        using var lease = await AcquireLaneAsync(lane, request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
         var sw = Stopwatch.StartNew();
         try
         {
@@ -660,13 +764,16 @@ public sealed partial class LlmClient : IDisposable
 
     public async Task<LlmResult> CompleteAsync(LlmRequest request, CancellationToken ct = default)
     {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
+        CancelWarmup();
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(request.Priority == LlmPriority.Interactive || request.WakeServer, ct).ConfigureAwait(false);
         if (IsLlama) return await LlamaCompleteAsync(request, s, ct).ConfigureAwait(false);
         var model = ModelFor(request.Model, request.Deep);
 
-        using var lease = await _gate.AcquireAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
+        using var lease = await AcquireGenerationAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
         var sw = Stopwatch.StartNew();
         try
         {
@@ -944,7 +1051,8 @@ public sealed partial class LlmClient : IDisposable
                         ? new JsonObject { ["function"] = new JsonObject { ["name"] = c.Name, ["arguments"] = args } }
                         : new JsonObject
                         {
-                            ["id"] = c.Id ?? "call_" + c.Name, ["type"] = "function",
+                            ["id"] = c.Id ?? "call_" + c.Name,
+                            ["type"] = "function",
                             ["function"] = new JsonObject { ["name"] = c.Name, ["arguments"] = args.ToJsonString() },
                         });
                 }
@@ -1078,6 +1186,9 @@ public sealed partial class LlmClient : IDisposable
     /// <param name="reserved">The caller holds <see cref="ReserveAsync"/> (don't queue for the GPU again).</param>
     public async IAsyncEnumerable<LlmDelta> ChatStreamAsync(LlmRequest request, bool reserved, [EnumeratorCancellation] CancellationToken ct = default)
     {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
+        CancelWarmup();
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
         await EnsureAvailableAsync(wake: true, ct).ConfigureAwait(false);
@@ -1092,7 +1203,7 @@ public sealed partial class LlmClient : IDisposable
             // Aqua's runtime: the routed model's server (started, or woken, as needed), with its key.
             var (local, lane) = RouteLocal(request);
             model = local.Id;
-            lease = reserved && lane == LlamaLane.Gpu ? null : await GateFor(lane).AcquireAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
+            lease = reserved && lane == LlamaLane.Gpu ? null : await AcquireLaneAsync(lane, request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
             try { (sent, endpoint, load) = await LlamaSendAsync(local, lane, request, s, stream: true, ct).ConfigureAwait(false); }
             catch (LlamaRuntimeException ex)
             {
@@ -1108,19 +1219,23 @@ public sealed partial class LlmClient : IDisposable
         else
         {
             model = ModelFor(request.Model, request.Deep);
-            lease = reserved ? null : await _gate.AcquireAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
-            if (IsOllama)
+            lease = reserved ? null : await AcquireGenerationAsync(request.Priority == LlmPriority.Interactive, ct).ConfigureAwait(false);
+            try
             {
-                var body = await OllamaBodyAsync(model, request, s, stream: true, ct).ConfigureAwait(false);
-                req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "api/chat"))
-                { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+                if (IsOllama)
+                {
+                    var body = await OllamaBodyAsync(model, request, s, stream: true, ct).ConfigureAwait(false);
+                    req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "api/chat"))
+                    { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+                }
+                else
+                {
+                    req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "v1/chat/completions"))
+                    { Content = new StringContent(OpenAiBody(model, request, s, stream: true).ToJsonString(), Encoding.UTF8, "application/json") };
+                    AddAuth(req);
+                }
             }
-            else
-            {
-                req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "v1/chat/completions"))
-                { Content = new StringContent(OpenAiBody(model, request, s, stream: true).ToJsonString(), Encoding.UTF8, "application/json") };
-                AddAuth(req);
-            }
+            catch { req?.Dispose(); lease?.Dispose(); throw; }
         }
 
         using (lease)
@@ -1143,135 +1258,173 @@ public sealed partial class LlmClient : IDisposable
             LlmTimings? timings = null;
             var sw = Stopwatch.StartNew();
             var answer = new StringBuilder();
-            // OpenAI-compatible servers stream tool calls in pieces, keyed by index.
-            var partial = new SortedDictionary<int, (string? Id, string Name, StringBuilder Args)>();
-            List<LlmToolCall>? calls = null;
-            while (!ct.IsCancellationRequested)
+            var control = request.ReasoningControl;
+            if (control is not null && endpoint is { ReasoningControl: true } controlled)
+                control.End = token => EndReasoningAsync(controlled, control.Id, token);
+            try
             {
-                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
-                if (line is null) break;
-                if (line.Length == 0) continue;
-                if (!IsOllama)
+                // OpenAI-compatible servers stream tool calls in pieces, keyed by index.
+                var partial = new SortedDictionary<int, (string? Id, string Name, StringBuilder Args)>();
+                List<LlmToolCall>? calls = null;
+                while (!ct.IsCancellationRequested)
                 {
-                    if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
-                    line = line[5..].Trim();
-                    if (line == "[DONE]") break;
-                }
-                string? piece = null, thinking = null;
-                var done = false;
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    var root = doc.RootElement;
-                    if (IsOllama)
+                    var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                    if (line is null) break;
+                    if (line.Length == 0) continue;
+                    if (!IsOllama)
                     {
-                        if (root.TryProp("message", out var m))
-                        {
-                            piece = m.Str("content");
-                            thinking = m.Str("thinking");
-                            foreach (var call in m.Arr("tool_calls"))
-                                if (call.TryProp("function", out var fn) && fn.Str("name") is { Length: > 0 } name)
-                                    (calls ??= new()).Add(new LlmToolCall(name,
-                                        fn.TryProp("arguments", out var a) ? (a.ValueKind == JsonValueKind.String ? a.GetString() ?? "{}" : a.GetRawText()) : "{}",
-                                        call.Str("id")));
-                        }
-                        done = root.Bool("done") == true;
-                        if (done && root.Lng("eval_count") is { } n) tokens = (int)n;
-                        if (done && root.Lng("prompt_eval_count") is { } pn) promptTokens = (int)pn;
-                        if (done) doneReason = root.Str("done_reason") ?? "";
+                        if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+                        line = line[5..].Trim();
+                        if (line == "[DONE]") break;
                     }
-                    else
+                    string? piece = null, thinking = null;
+                    var done = false;
+                    try
                     {
-                        var choice = root.Arr("choices").FirstOrDefault();
-                        if (choice.ValueKind == JsonValueKind.Object && choice.Str("finish_reason") is { Length: > 0 } finish) doneReason = finish;
-                        if (choice.ValueKind == JsonValueKind.Object && choice.TryProp("delta", out var delta))
+                        using var doc = JsonDocument.Parse(line);
+                        var root = doc.RootElement;
+                        if (control is not null && root.Str("id") is { Length: > 0 and <= 200 } completionId) control.Id = completionId;
+                        if (IsOllama)
                         {
-                            piece = delta.Str("content");
-                            thinking = delta.Str("reasoning_content") ?? delta.Str("reasoning");
-                            foreach (var tc in delta.Arr("tool_calls"))
+                            if (root.TryProp("message", out var m))
                             {
-                                var index = (int)(tc.Lng("index") ?? 0);
-                                partial.TryGetValue(index, out var entry);
-                                entry.Args ??= new StringBuilder();
-                                if (tc.Str("id") is { Length: > 0 } id) entry.Id = id;
-                                if (tc.TryProp("function", out var fn))
+                                piece = m.Str("content");
+                                thinking = m.Str("thinking");
+                                foreach (var call in m.Arr("tool_calls"))
+                                    if (call.TryProp("function", out var fn) && fn.Str("name") is { Length: > 0 } name)
+                                        (calls ??= new()).Add(new LlmToolCall(name,
+                                            fn.TryProp("arguments", out var a) ? (a.ValueKind == JsonValueKind.String ? a.GetString() ?? "{}" : a.GetRawText()) : "{}",
+                                            call.Str("id")));
+                            }
+                            done = root.Bool("done") == true;
+                            if (done && root.Lng("eval_count") is { } n) tokens = (int)n;
+                            if (done && root.Lng("prompt_eval_count") is { } pn) promptTokens = (int)pn;
+                            if (done) doneReason = root.Str("done_reason") ?? "";
+                        }
+                        else
+                        {
+                            var choice = root.Arr("choices").FirstOrDefault();
+                            if (choice.ValueKind == JsonValueKind.Object && choice.Str("finish_reason") is { Length: > 0 } finish) doneReason = finish;
+                            if (choice.ValueKind == JsonValueKind.Object && choice.TryProp("delta", out var delta))
+                            {
+                                piece = delta.Str("content");
+                                thinking = delta.Str("reasoning_content") ?? delta.Str("reasoning");
+                                foreach (var tc in delta.Arr("tool_calls"))
                                 {
-                                    if (fn.Str("name") is { Length: > 0 } name) entry.Name = name;
-                                    if (fn.Str("arguments") is { } args) entry.Args.Append(args);
+                                    var index = (int)(tc.Lng("index") ?? 0);
+                                    partial.TryGetValue(index, out var entry);
+                                    entry.Args ??= new StringBuilder();
+                                    if (tc.Str("id") is { Length: > 0 } id) entry.Id = id;
+                                    if (tc.TryProp("function", out var fn))
+                                    {
+                                        if (fn.Str("name") is { Length: > 0 } name) entry.Name = name;
+                                        if (fn.Str("arguments") is { } args) entry.Args.Append(args);
+                                    }
+                                    partial[index] = entry;
                                 }
-                                partial[index] = entry;
+                            }
+                            // llama.cpp ends with its timings and the usage (stream_options.include_usage).
+                            if (endpoint is not null && root.TryProp("timings", out _)) timings = LlmTimings.From(root, load);
+                            if (root.TryProp("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+                            {
+                                if (usage.Lng("prompt_tokens") is { } inputTokens) promptTokens = (int)inputTokens;
+                                if (usage.Lng("completion_tokens") is { } outputTokens) tokens = (int)outputTokens;
                             }
                         }
-                        // llama.cpp ends with its timings and the usage (stream_options.include_usage).
-                        if (endpoint is not null && root.TryProp("timings", out _)) timings = LlmTimings.From(root, load);
-                        if (root.TryProp("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
-                        {
-                            if (usage.Lng("prompt_tokens") is { } inputTokens) promptTokens = (int)inputTokens;
-                            if (usage.Lng("completion_tokens") is { } outputTokens) tokens = (int)outputTokens;
-                        }
                     }
-                }
-                catch (JsonException) { continue; }
+                    catch (JsonException) { continue; }
 
-                if (!string.IsNullOrEmpty(thinking)) yield return new LlmThinkingDelta(thinking);
-                if (!string.IsNullOrEmpty(piece))
-                {
-                    // Reasoning models without a separate thinking channel put it inline in <think> tags.
-                    var text = piece;
-                    var reasoning = "";
-                    if (text.Contains("<think>", StringComparison.Ordinal))
+                    if (!string.IsNullOrEmpty(thinking)) yield return new LlmThinkingDelta(thinking);
+                    if (!string.IsNullOrEmpty(piece))
                     {
-                        var at = text.IndexOf("<think>", StringComparison.Ordinal);
-                        reasoning = text[(at + 7)..];
-                        text = text[..at];
-                        inThink = true;
-                        if (reasoning.Contains("</think>", StringComparison.Ordinal))
+                        // Reasoning models without a separate thinking channel put it inline in <think> tags.
+                        var text = piece;
+                        var reasoning = "";
+                        if (text.Contains("<think>", StringComparison.Ordinal))
                         {
-                            var end = reasoning.IndexOf("</think>", StringComparison.Ordinal);
-                            text += reasoning[(end + 8)..];
-                            reasoning = reasoning[..end];
-                            inThink = false;
+                            var at = text.IndexOf("<think>", StringComparison.Ordinal);
+                            reasoning = text[(at + 7)..];
+                            text = text[..at];
+                            inThink = true;
+                            if (reasoning.Contains("</think>", StringComparison.Ordinal))
+                            {
+                                var end = reasoning.IndexOf("</think>", StringComparison.Ordinal);
+                                text += reasoning[(end + 8)..];
+                                reasoning = reasoning[..end];
+                                inThink = false;
+                            }
+                        }
+                        else if (inThink)
+                        {
+                            if (text.Contains("</think>", StringComparison.Ordinal))
+                            {
+                                var end = text.IndexOf("</think>", StringComparison.Ordinal);
+                                reasoning = text[..end];
+                                text = text[(end + 8)..];
+                                inThink = false;
+                            }
+                            else { reasoning = text; text = ""; }
+                        }
+                        if (reasoning.Length > 0) yield return new LlmThinkingDelta(reasoning);
+                        if (text.Length > 0)
+                        {
+                            answer.Append(text);
+                            yield return new LlmTextDelta(text);
                         }
                     }
-                    else if (inThink)
-                    {
-                        if (text.Contains("</think>", StringComparison.Ordinal))
-                        {
-                            var end = text.IndexOf("</think>", StringComparison.Ordinal);
-                            reasoning = text[..end];
-                            text = text[(end + 8)..];
-                            inThink = false;
-                        }
-                        else { reasoning = text; text = ""; }
-                    }
-                    if (reasoning.Length > 0) yield return new LlmThinkingDelta(reasoning);
-                    if (text.Length > 0)
-                    {
-                        answer.Append(text);
-                        yield return new LlmTextDelta(text);
-                    }
+                    if (done) break;
                 }
-                if (done) break;
+                foreach (var (_, p) in partial)
+                    if (p.Name is { Length: > 0 }) (calls ??= new()).Add(new LlmToolCall(p.Name, p.Args?.ToString() ?? "{}", p.Id));
+                if (calls is { Count: > 0 }) yield return new LlmToolCallsDelta(calls);
+
+                if (tokens == 0) tokens = answer.Length / 4;
+                if (endpoint is not null && timings is not null) Llama!.Record(endpoint, timings);
+                // On Aqua's runtime the window is the one the model's server was started with.
+                yield return new LlmUsageDelta(promptTokens, tokens, endpoint?.ContextTokens ?? request.ContextTokens ?? s.ContextTokens, doneReason) { Timings = timings };
+                Interlocked.Increment(ref Stats.Calls);
+                Interlocked.Add(ref Stats.OutputTokens, tokens);
+                if (timings is { OutputPerSecond: > 0 }) Stats.LastTokensPerSecond = timings.OutputPerSecond;
+                else if (sw.Elapsed.TotalSeconds > 0) Stats.LastTokensPerSecond = tokens / sw.Elapsed.TotalSeconds;
+                Stats.LastCall = DateTimeOffset.Now;
+                Remember(request.Purpose, model, answer.ToString() + (calls is { Count: > 0 } ? "\n[tool calls] " + string.Join(", ", calls.Select(c => c.Name + c.ArgumentsJson)) : ""));
             }
-            foreach (var (_, p) in partial)
-                if (p.Name is { Length: > 0 }) (calls ??= new()).Add(new LlmToolCall(p.Name, p.Args?.ToString() ?? "{}", p.Id));
-            if (calls is { Count: > 0 }) yield return new LlmToolCallsDelta(calls);
-
-            if (tokens == 0) tokens = answer.Length / 4;
-            if (endpoint is not null && timings is not null) Llama!.Record(endpoint, timings);
-            // On Aqua's runtime the window is the one the model's server was started with.
-            yield return new LlmUsageDelta(promptTokens, tokens, endpoint?.ContextTokens ?? request.ContextTokens ?? s.ContextTokens, doneReason) { Timings = timings };
-            Interlocked.Increment(ref Stats.Calls);
-            Interlocked.Add(ref Stats.OutputTokens, tokens);
-            if (timings is { OutputPerSecond: > 0 }) Stats.LastTokensPerSecond = timings.OutputPerSecond;
-            else if (sw.Elapsed.TotalSeconds > 0) Stats.LastTokensPerSecond = tokens / sw.Elapsed.TotalSeconds;
-            Stats.LastCall = DateTimeOffset.Now;
-            Remember(request.Purpose, model, answer.ToString() + (calls is { Count: > 0 } ? "\n[tool calls] " + string.Join(", ", calls.Select(c => c.Name + c.ArgumentsJson)) : ""));
+            finally { if (control is not null) { control.End = null; control.Id = null; } }
         }
+    }
+
+    private async Task<bool> EndReasoningAsync(LlamaEndpoint endpoint, string? id, CancellationToken ct)
+    {
+        if (id is null) return false;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint.BaseUri, "v1/chat/completions/control"))
+            { Content = new StringContent(new JsonObject { ["id"] = id, ["action"] = "reasoning_end" }.ToJsonString(), Encoding.UTF8, "application/json") };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Key);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return false;
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            var bytes = new byte[4097];
+            var count = 0;
+            while (count < bytes.Length)
+            {
+                var n = await stream.ReadAsync(bytes.AsMemory(count), timeout.Token).ConfigureAwait(false);
+                if (n == 0) break;
+                count += n;
+            }
+            if (count > 4096) return false;
+            using var json = JsonDocument.Parse(bytes.AsMemory(0, count));
+            return json.RootElement.Bool("success") == true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException || ex is OperationCanceledException && !ct.IsCancellationRequested) { return false; }
     }
 
     private async Task<JsonDocument?> GetJsonAsync(string path, TimeSpan timeout, CancellationToken ct)
     {
+        using var operation = OwnOperation(ct);
+        ct = operation.Token;
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
         using var req = new HttpRequestMessage(HttpMethod.Get, new Uri(BaseUri(), path));
@@ -1289,7 +1442,42 @@ public sealed partial class LlmClient : IDisposable
         }
     }
 
-    public void Dispose() => _http.Dispose();
+    private OwnedCall OwnOperation(CancellationToken ct)
+    {
+        lock (_operations)
+        {
+            _stop.Token.ThrowIfCancellationRequested();
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, _stop.Token);
+            _operations.Add(completion);
+            return new OwnedCall(cancellation, () => { lock (_operations) _operations.Remove(completion); completion.TrySetResult(); });
+        }
+    }
+
+    private sealed class OwnedCall(CancellationTokenSource cancellation, Action finish) : IDisposable
+    {
+        public CancellationToken Token => cancellation.Token;
+        public void Dispose() { cancellation.Dispose(); finish(); }
+    }
+
+    public Task StopAsync()
+    {
+        lock (_operations) return _shutdown ??= JoinAsync();
+    }
+
+    private async Task JoinAsync()
+    {
+        _stop.Cancel();
+        CancelWarmup();
+        Task[] calls;
+        lock (_operations) calls = _operations.Select(o => o.Task).ToArray();
+        await Task.WhenAll(calls).ConfigureAwait(false);
+        Task? warm;
+        lock (_warmGate) warm = _warmTask;
+        if (warm is not null) await warm.ConfigureAwait(false);
+    }
+
+    public void Dispose() { StopAsync().GetAwaiter().GetResult(); _http.Dispose(); }
 }
 
 /// <summary>
@@ -1306,10 +1494,21 @@ public sealed class PriorityGate
     public bool InteractiveWaiting { get { lock (_lock) return _interactive.Count > 0; } }
     public bool IsBusy { get { lock (_lock) return _busy; } }
 
+    public IDisposable? TryAcquire()
+    {
+        lock (_lock)
+        {
+            if (_busy) return null;
+            _busy = true;
+            return new Lease(this);
+        }
+    }
+
     public Task<IDisposable> AcquireAsync(bool interactive, CancellationToken ct)
     {
         lock (_lock)
         {
+            if (ct.IsCancellationRequested) return Task.FromCanceled<IDisposable>(ct);
             if (!_busy)
             {
                 _busy = true;
@@ -1319,7 +1518,7 @@ public sealed class PriorityGate
             var node = (interactive ? _interactive : _background).AddLast(tcs);
             if (ct.CanBeCanceled)
             {
-                ct.Register(() =>
+                var registration = ct.Register(() =>
                 {
                     lock (_lock)
                     {
@@ -1327,6 +1526,7 @@ public sealed class PriorityGate
                     }
                     tcs.TrySetCanceled(ct);
                 });
+                _ = tcs.Task.ContinueWith(_ => registration.Dispose(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             }
             return tcs.Task;
         }

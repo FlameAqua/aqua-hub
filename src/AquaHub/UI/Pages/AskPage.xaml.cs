@@ -44,6 +44,10 @@ public partial class AskPage : UserControl, IPage
     private bool _notesDirty, _fillingNotes;
     private bool _syncing;
     private bool _follow = true;
+    private const int MessagePageSize = 60;
+    private int _messagePageStart = -1;
+    private INotifyCollectionChanged? _boundMessages;
+    private readonly System.Collections.ObjectModel.ObservableCollection<ChatMessageVM> _visibleMessages = new();
     private string _dictationBase = "";
     private string _beforeDictation = "";
     private string? _untidied;
@@ -74,6 +78,7 @@ public partial class AskPage : UserControl, IPage
     {
         InitializeComponent();
         _scroll = new UiThrottle(() => { if (_follow) Scroller.ScrollToEnd(); }, 60);
+        Messages.SizeChanged += (_, _) => { if (_follow) _scroll.Request(); };
         PopupToggle.Attach(ContextPopup, ContextButton);
         if (ScreenshotButton.ContextMenu is { } captureMenu) PopupToggle.Attach(captureMenu, ScreenshotButton);
         Scroller.ScrollChanged += (_, e) =>
@@ -162,9 +167,10 @@ public partial class AskPage : UserControl, IPage
 
     public void OnNavigatedFrom()
     {
+        Session.CancelTypingWarmup();
         Hub.State.Changed -= OnState;
         // Answers keep streaming in the session; this page just stops listening.
-        Session.Messages.CollectionChanged -= OnMessagesChanged;
+        if (_boundMessages is not null) _boundMessages.CollectionChanged -= OnMessagesChanged;
         Session.ChatChanged -= OnChatChanged;
         Session.BusyChanged -= OnBusyChanged;
         Session.Progress -= _scroll.Request;
@@ -185,10 +191,12 @@ public partial class AskPage : UserControl, IPage
     /// <summary>Shows the current chat (called again when another chat is opened).</summary>
     private void Bind()
     {
-        if (Messages.ItemsSource is INotifyCollectionChanged old) old.CollectionChanged -= OnMessagesChanged;
-        Messages.ItemsSource = Session.Messages;
-        Session.Messages.CollectionChanged -= OnMessagesChanged;
-        Session.Messages.CollectionChanged += OnMessagesChanged;
+        if (_boundMessages is not null) _boundMessages.CollectionChanged -= OnMessagesChanged;
+        _boundMessages = Session.Messages;
+        Messages.ItemsSource = _visibleMessages;
+        _boundMessages.CollectionChanged += OnMessagesChanged;
+        _messagePageStart = -1;
+        ShowMessagePage();
         UpdateEmpty();
         UpdateTitle();
     }
@@ -416,8 +424,52 @@ public partial class AskPage : UserControl, IPage
 
     private void OnMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (e.Action == NotifyCollectionChangedAction.Add && Session.IsBusy) _messagePageStart = -1;
+        ShowMessagePage();
         UpdateEmpty();
-        if (e.Action == NotifyCollectionChangedAction.Add) { _follow = true; _scroll.Request(); }
+        if (e.Action == NotifyCollectionChangedAction.Add && _messagePageStart < 0) { _follow = true; _scroll.Request(); }
+    }
+
+    private void ShowMessagePage()
+    {
+        var count = Session.Messages.Count;
+        var start = _messagePageStart < 0 ? Math.Max(0, count - MessagePageSize) : Math.Clamp(_messagePageStart, 0, Math.Max(0, count - 1));
+        var wanted = Session.Messages.Skip(start).Take(MessagePageSize).ToList();
+        foreach (var old in _visibleMessages.Except(wanted).ToList()) _visibleMessages.Remove(old);
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var index = _visibleMessages.IndexOf(wanted[i]);
+            if (index < 0) _visibleMessages.Insert(i, wanted[i]);
+            else if (index != i) _visibleMessages.Move(index, i);
+        }
+        MessagePaging.Visibility = count > MessagePageSize ? Visibility.Visible : Visibility.Collapsed;
+        EarlierMessages.IsEnabled = start > 0;
+        LaterMessages.IsEnabled = start + MessagePageSize < count;
+        LatestMessages.IsEnabled = _messagePageStart >= 0;
+        MessageRange.Text = count == 0 ? "" : $"{start + 1}–{Math.Min(start + MessagePageSize, count)} of {count} messages";
+    }
+
+    private void OnEarlierMessages(object sender, RoutedEventArgs e)
+    {
+        var start = _messagePageStart < 0 ? Math.Max(0, Session.Messages.Count - MessagePageSize) : _messagePageStart;
+        _messagePageStart = Math.Max(0, start - MessagePageSize);
+        _follow = false;
+        ShowMessagePage();
+        Scroller.ScrollToTop();
+    }
+    private void OnLaterMessages(object sender, RoutedEventArgs e)
+    {
+        _messagePageStart = Math.Min(Math.Max(0, Session.Messages.Count - MessagePageSize), _messagePageStart + MessagePageSize);
+        if (_messagePageStart + MessagePageSize >= Session.Messages.Count) _messagePageStart = -1;
+        _follow = _messagePageStart < 0;
+        ShowMessagePage();
+        Scroller.ScrollToTop();
+    }
+    private void OnLatestMessages(object sender, RoutedEventArgs e)
+    {
+        _messagePageStart = -1; _follow = true;
+        ShowMessagePage();
+        Scroller.ScrollToEnd();
     }
 
     // ───────────────────────────── Chat history ─────────────────────────────
@@ -849,6 +901,7 @@ public partial class AskPage : UserControl, IPage
     // Once you edit the tidied words, Undo would lose your edits.
     private void OnInputChanged(object sender, TextChangedEventArgs e)
     {
+        if (IsLoaded) Session.WarmWhileTyping(Input.Text);
         if (_untidied is not null && Input.Text != _dictationBase) HideTidyUndo();
     }
 
@@ -1110,6 +1163,7 @@ public partial class AskPage : UserControl, IPage
     /// <summary>Switches Ask to a model and brings back the Think and Research switches you last used with it.</summary>
     private void UseModel(string model)
     {
+        Session.CancelTypingWarmup();
         Session.Model = model;
         var modes = Hub.S.Ask.ModesFor(model);
         Session.Think = modes.Think;
@@ -1188,8 +1242,13 @@ public partial class AskPage : UserControl, IPage
 
     internal static string FolderLabel(string folder) => folder.ToUpperInvariant() switch
     {
-        "%DOCUMENTS%" => "Documents", "%DESKTOP%" => "Desktop", "%DOWNLOADS%" => "Downloads", "%PICTURES%" => "Pictures",
-        "%MUSIC%" => "Music", "%VIDEOS%" => "Videos", "%USERPROFILE%" => "your user folder",
+        "%DOCUMENTS%" => "Documents",
+        "%DESKTOP%" => "Desktop",
+        "%DOWNLOADS%" => "Downloads",
+        "%PICTURES%" => "Pictures",
+        "%MUSIC%" => "Music",
+        "%VIDEOS%" => "Videos",
+        "%USERPROFILE%" => "your user folder",
         _ => Path.GetFileName(folder.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : folder,
     };
 
@@ -1204,6 +1263,7 @@ public partial class AskPage : UserControl, IPage
 
     private void OnBusyChanged()
     {
+        if (Session.IsBusy) { _messagePageStart = -1; _follow = true; ShowMessagePage(); }
         StopButton.Visibility = Session.IsBusy ? Visibility.Visible : Visibility.Collapsed;
         SendButton.IsEnabled = !Session.IsBusy;
         if (ContextPopup.IsOpen) UpdateCompression();
