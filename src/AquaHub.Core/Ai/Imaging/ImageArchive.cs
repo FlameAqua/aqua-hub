@@ -11,8 +11,13 @@ public sealed record GeneratedImage(string Id, string Prompt, ulong Seed, int Wi
     public string Vae { get; init; } = "";
     /// <summary>Validated relative path of the original ComfyUI output (subfolder/name).</summary>
     public string? ComfyOutputPath { get; init; }
-    /// <summary>Validated relative ComfyUI path of the reference image used to create this image.</summary>
+    /// <summary>
+    /// Validated relative ComfyUI path of the reference image used to create this image, in ComfyUI's output folder:
+    /// how edits were recorded before Aqua kept its own copy (<see cref="EditedFrom"/>).
+    /// </summary>
     public string? ReferenceImage { get; init; }
+    /// <summary>The image this one was edited from, kept at <see cref="ImageArchive.ReferencePath"/>.</summary>
+    public ImageReference? EditedFrom { get; init; }
 }
 
 public sealed record ImageArchiveFailure(string ImageId, string Path, string Message);
@@ -21,15 +26,22 @@ public sealed record ImageArchivePruneResult(int DeletedCount, IReadOnlyList<Ima
 /// <summary>Generated images belong to this profile, with reproducible settings beside the PNG.</summary>
 public sealed class ImageArchive(string folder)
 {
+    private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+
     public string Folder { get; } = Path.GetFullPath(folder);
     public string ImagePath(GeneratedImage image) => Path.Combine(Folder, SafeId(image.Id) + ".png");
+
+    /// <summary>Aqua's copies of the images edits start from, one per content (see <see cref="ImageReference"/>).</summary>
+    public string ReferencesFolder => Path.Combine(Folder, "references");
+    public string ReferencePath(string referenceId) => Path.Combine(ReferencesFolder, (ImageReference.IsValidId(referenceId) ? referenceId
+        : throw new ArgumentException("Invalid reference identifier.", nameof(referenceId))) + ".png");
 
     private static string SafeId(string id) => Guid.TryParseExact(id, "N", out _) ? id
         : throw new ArgumentException("Invalid image identifier.", nameof(id));
 
     public async Task SaveAsync(GeneratedImage item, byte[] png, CancellationToken ct = default)
     {
-        if (png.Length is < 8 or > 64 * 1024 * 1024 || !png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
+        if (png.Length is < 8 or > 64 * 1024 * 1024 || !png.AsSpan(0, 8).SequenceEqual(PngSignature))
             throw new InvalidDataException("The image server did not return a PNG image.");
         Directory.CreateDirectory(Folder);
         var path = ImagePath(item);
@@ -95,7 +107,7 @@ public sealed class ImageArchive(string folder)
                 if (Path.GetFileName(file.FullName) != SafeId(image.Id) + ".png.json")
                     throw new InvalidDataException("Metadata identifier does not match its filename.");
             }
-            catch (Exception ex) when (ex is IOException or JsonException or ArgumentException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or ArgumentException or UnauthorizedAccessException)
             {
                 failures.Add(new ImageArchiveFailure(Path.GetFileName(file.FullName), file.FullName, ex.Message));
                 continue;
@@ -130,6 +142,90 @@ public sealed class ImageArchive(string folder)
             catch (Exception ex) when (ex is IOException or JsonException or ArgumentException or UnauthorizedAccessException) { }
         }
         return result.OrderByDescending(x => x.Created).ToList();
+    }
+
+    /// <summary>Keeps a prepared reference PNG and returns its content identifier; the same image is kept once.</summary>
+    public async Task<string> SaveReferenceAsync(byte[] png, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(png);
+        if (png.Length is < 8 or > ImageReference.MaxPngBytes || !png.AsSpan(0, 8).SequenceEqual(PngSignature))
+            throw new InvalidDataException("A reference image must be a PNG of at most 16 MiB.");
+        var id = ImageReference.IdFor(png);
+        Directory.CreateDirectory(ReferencesFolder);
+        EnsureNoReparsePoints(ReferencesFolder);
+        var path = ReferencePath(id);
+        EnsureRegularFileOrMissing(path);
+        if (ReadReference(id) is not null) return id;
+        // Written beside its name and moved into place, so a crash never leaves half an image under a real name.
+        var partial = path + "." + Guid.NewGuid().ToString("N") + ".partial";
+        try
+        {
+            await File.WriteAllBytesAsync(partial, png, ct).ConfigureAwait(false);
+            File.Move(partial, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(partial)) File.Delete(partial);
+        }
+        return id;
+    }
+
+    /// <summary>A kept reference's bytes, or null when it's gone or no longer matches the content it's named after.</summary>
+    public byte[]? ReadReference(string referenceId)
+    {
+        var path = ReferencePath(referenceId);
+        EnsureNoReparsePoints(path);
+        EnsureRegularFileOrMissing(path);
+        if (!File.Exists(path) || new FileInfo(path).Length is < 8 or > ImageReference.MaxPngBytes) return null;
+        var png = File.ReadAllBytes(path);
+        return ImageReference.IdFor(png) == referenceId ? png : null;
+    }
+
+    /// <summary>
+    /// Deletes kept references that no archived image was edited from, apart from <paramref name="keep"/> (the image
+    /// waiting to be edited and one being edited now), and unfinished writes over an hour old. An archive record that
+    /// can't be read might name a reference, so then nothing is deleted.
+    /// </summary>
+    public ImageArchivePruneResult PruneReferences(IEnumerable<string?> keep)
+    {
+        var folder = ReferencesFolder;
+        if (!Directory.Exists(folder)) return new ImageArchivePruneResult(0, Array.Empty<ImageArchiveFailure>());
+        var used = keep.Where(ImageReference.IsValidId).Cast<string>().ToHashSet(StringComparer.Ordinal);
+        foreach (var file in new DirectoryInfo(Folder).EnumerateFiles("*.png.json"))
+        {
+            try
+            {
+                if (file.Length > 64 * 1024) throw new InvalidDataException("Metadata file is too large.");
+                if (JsonSerializer.Deserialize<GeneratedImage>(File.ReadAllText(file.FullName))?.EditedFrom?.Id is { } id) used.Add(id);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or UnauthorizedAccessException)
+            {
+                return new ImageArchivePruneResult(0, [new ImageArchiveFailure(file.Name, file.FullName, "Kept every reference image: " + ex.Message)]);
+            }
+        }
+
+        EnsureNoReparsePoints(folder);
+        var failures = new List<ImageArchiveFailure>();
+        var deleted = 0;
+        var staleWrite = DateTime.UtcNow.AddHours(-1);
+        foreach (var file in new DirectoryInfo(folder).EnumerateFiles())
+        {
+            var name = file.Name;
+            var unused = name.EndsWith(".partial", StringComparison.Ordinal)
+                ? file.LastWriteTimeUtc < staleWrite
+                : name.EndsWith(".png", StringComparison.Ordinal) && ImageReference.IsValidId(name[..^4]) && !used.Contains(name[..^4]);
+            if (!unused) continue;
+            try
+            {
+                DeleteFileIfPresent(file.FullName);
+                deleted++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                failures.Add(new ImageArchiveFailure(name, file.FullName, ex.Message));
+            }
+        }
+        return new ImageArchivePruneResult(deleted, failures);
     }
 
     private static string ResolveComfyOutput(string configuredRoot, string relativePath)

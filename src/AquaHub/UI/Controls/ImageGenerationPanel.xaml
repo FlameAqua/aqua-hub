@@ -2,7 +2,8 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:c="clr-namespace:AquaHub.UI.Controls" xmlns:ui="clr-namespace:AquaHub.UI"
- AutomationProperties.AutomationId="image-studio" Loaded="OnLoaded" Unloaded="OnUnloaded" SizeChanged="OnResize">
+ AutomationProperties.AutomationId="image-studio" Loaded="OnLoaded" Unloaded="OnUnloaded" SizeChanged="OnResize"
+ AllowDrop="True" PreviewDragOver="OnImageDragOver" PreviewDrop="OnImageDrop" PreviewKeyDown="OnPreviewKey">
  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
   <StackPanel Margin="28,24,28,32" MaxWidth="1440">
    <DockPanel Margin="0,0,0,20">
@@ -20,9 +21,18 @@
       Padding="12" VerticalContentAlignment="Top" ui:UiProps.Placeholder="Describe your image…" TextChanged="OnPromptChanged"
       AutomationProperties.AutomationId="image-prompt" AutomationProperties.Name="Image prompt"/>
      <Border x:Name="ReferenceBanner" Background="{DynamicResource B.AccentSoft}" CornerRadius="6" Padding="10" Margin="0,8,0,0" Visibility="Collapsed">
-      <DockPanel><Button Content="Clear" Click="OnClearReference" DockPanel.Dock="Right" Style="{StaticResource Btn.Link}" AutomationProperties.AutomationId="image-clear-reference"/>
-       <TextBlock Text="Editing with a reference image. Describe what should change." TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,0,8,0"/></DockPanel>
+      <DockPanel><Button Content="Clear" Click="OnClearReference" DockPanel.Dock="Right" VerticalAlignment="Center" Style="{StaticResource Btn.Link}" AutomationProperties.AutomationId="image-clear-reference"/>
+       <Border x:Name="ReferenceThumbFrame" DockPanel.Dock="Left" CornerRadius="4" ClipToBounds="True" Margin="0,0,10,0" Visibility="Collapsed">
+        <Image x:Name="ReferenceThumb" Width="52" Height="52" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="Image to edit"/>
+       </Border>
+       <TextBlock x:Name="ReferenceText" Text="Editing with a reference image. Describe what should change." TextWrapping="Wrap" VerticalAlignment="Center" Style="{StaticResource T.Caption}" Margin="0,0,8,0"/></DockPanel>
      </Border>
+     <DockPanel Margin="0,8,0,0">
+      <Button x:Name="AttachImage" DockPanel.Dock="Left" Content="Add an image to edit…" Click="OnAttachImage" Style="{StaticResource Btn.Standard}" FontSize="12" Padding="10,5"
+       ToolTip="Start from your own picture: Aqua keeps its shape and changes what you describe. You can also drop an image here or paste one with Ctrl+V."
+       AutomationProperties.AutomationId="image-attach" AutomationProperties.Name="Add an image to edit"/>
+      <TextBlock Text="or drop / paste one" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+     </DockPanel>
      <TextBlock Text="Start with an idea" Style="{StaticResource T.Caption}" Margin="0,10,0,5"/>
      <WrapPanel>
       <Button Content="Coastal light" Click="OnExample" Tag="A quiet Atlantic coastline at blue hour, a small white lighthouse on weathered cliffs, sea spray catching the last light, cinematic landscape photography, natural colours" Style="{StaticResource Btn.Standard}" FontSize="12" Padding="10,5" Margin="0,0,6,6"/>

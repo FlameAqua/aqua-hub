@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using AquaHub.Core.Ai.Imaging;
@@ -104,7 +105,78 @@ public partial class ImageGenerationPanel : UserControl
     }
     private void OnCancel(object sender, RoutedEventArgs e) => Session.Cancel();
     private async void OnRecover(object sender, RoutedEventArgs e) => await Session.RecoverAsync();
-    private void OnExample(object sender, RoutedEventArgs e) { Session.ReferenceImage = null; Prompt.Text = (string)((Button)sender).Tag; Refresh(); }
+    private void OnExample(object sender, RoutedEventArgs e) { Session.ClearReference(); Prompt.Text = (string)((Button)sender).Tag; Refresh(); }
+
+    // ───────────── Image to edit: picker, drop, paste ─────────────
+
+    private static readonly string ImageFilter = "Images|" + string.Join(";", Core.Ai.Assistant.Documents.ImageExtensions.Append(".heif").Select(x => "*" + x));
+
+    private async void OnAttachImage(object sender, RoutedEventArgs e)
+    {
+        var picker = new OpenFileDialog { Title = "Choose an image to edit", Filter = ImageFilter, CheckFileExists = true };
+        if (picker.ShowDialog(Window.GetWindow(this)) != true) return;
+        if (await Session.AttachFileAsync(picker.FileName)) FocusPrompt();
+    }
+
+    private static string? DroppedImage(IDataObject data) =>
+        data.GetData(DataFormats.FileDrop) is string[] files ? files.FirstOrDefault(f => File.Exists(f) && Core.Ai.Assistant.Documents.IsImage(f)) : null;
+
+    private void OnImageDragOver(object sender, DragEventArgs e)
+    {
+        if (DroppedImage(e.Data) is null) return;
+        e.Effects = Session.Busy || Session.Attaching ? DragDropEffects.None : DragDropEffects.Copy;
+        e.Handled = true;
+    }
+
+    private async void OnImageDrop(object sender, DragEventArgs e)
+    {
+        if (DroppedImage(e.Data) is not { } path) return;
+        e.Handled = true;
+        if (await Session.AttachFileAsync(path)) FocusPrompt();
+    }
+
+    /// <summary>Ctrl+V with a picture (or a copied image file) on the clipboard makes it the image to edit; text pastes as usual.</summary>
+    private async void OnPreviewKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.V || Keyboard.Modifiers != ModifierKeys.Control || Session.Busy || Session.Attaching) return;
+        try
+        {
+            if (Clipboard.ContainsFileDropList() && Clipboard.GetFileDropList().Cast<string>().FirstOrDefault(f => File.Exists(f) && Core.Ai.Assistant.Documents.IsImage(f)) is { } file)
+            {
+                e.Handled = true;
+                if (await Session.AttachFileAsync(file)) FocusPrompt();
+            }
+            else if (!Clipboard.ContainsText() && ScreenCapture.ClipboardImage() is { } png)
+            {
+                e.Handled = true;
+                if (await Session.AttachImageAsync(png, "Pasted image")) FocusPrompt();
+            }
+        }
+        catch (System.Runtime.InteropServices.ExternalException) { }
+    }
+
+    private void FocusPrompt() { Prompt.BringIntoView(); Prompt.Focus(); }
+
+    private string? _matchTag;
+    /// <summary>Adds (and picks) a canvas the size of the image to edit; removes it when there's none.</summary>
+    private void SyncMatchCanvas()
+    {
+        var reference = Session.Reference;
+        var tag = reference is null ? null : $"{reference.Width},{reference.Height}";
+        if (tag == _matchTag) return;
+        _matchTag = tag;
+        var old = Aspect.Items.Cast<ComboBoxItem>().FirstOrDefault(x => Equals(x.Uid, "match"));
+        var wasSelected = old is not null && ReferenceEquals(Aspect.SelectedItem, old);
+        if (old is not null) Aspect.Items.Remove(old);
+        if (reference is null)
+        {
+            if (wasSelected || Aspect.SelectedItem is null) Aspect.SelectedIndex = 0;
+            return;
+        }
+        var match = new ComboBoxItem { Uid = "match", Content = $"Match image · {reference.Width} × {reference.Height}", Tag = tag };
+        Aspect.Items.Insert(0, match);
+        Aspect.SelectedItem = match;
+    }
 
     private void OnVariant(object sender, SelectionChangedEventArgs e)
     {
@@ -128,9 +200,11 @@ public partial class ImageGenerationPanel : UserControl
     {
         Status.Text = Session.Status;
         Status.SetResourceReference(TextBlock.ForegroundProperty, Session.Error ? "B.Down" : "B.Text2");
-        Generate.IsEnabled = !Session.Busy && !Session.Checking && !Session.ManagingImages && !Session.RecoveryNeeded;
-        Generate.Content = Session.Busy ? "Creating…" : Session.ReferenceImage is null ? "Generate image" : "Apply image edit";
-        ReferenceBanner.Visibility = Session.ReferenceImage is null ? Visibility.Collapsed : Visibility.Visible;
+        Generate.IsEnabled = !Session.Busy && !Session.Checking && !Session.ManagingImages && !Session.RecoveryNeeded && !Session.Attaching;
+        Generate.Content = Session.Busy ? "Creating…" : Session.Editing ? "Apply image edit" : "Generate image";
+        RefreshReference();
+        AttachImage.IsEnabled = !Session.Busy && !Session.Attaching;
+        AttachImage.Content = Session.Reference is null ? "Add an image to edit…" : "Use a different image…";
         StartServer.IsEnabled = !Session.Busy && !Session.Checking;
         Check.IsEnabled = !Session.Busy && !Session.Checking && !Session.RecoveryNeeded;
         SetupFields.IsEnabled = !Session.Busy && !Session.Checking && !Session.RecoveryNeeded;
@@ -141,7 +215,7 @@ public partial class ImageGenerationPanel : UserControl
         Seed.IsEnabled = !Session.Busy;
         Retention.IsEnabled = !Session.Busy && !Session.ManagingImages;
         Cancel.Visibility = Session.Busy ? Visibility.Visible : Visibility.Collapsed;
-        Progress.Visibility = Session.Busy || Session.Checking ? Visibility.Visible : Visibility.Collapsed;
+        Progress.Visibility = Session.Busy || Session.Checking || Session.Attaching ? Visibility.Visible : Visibility.Collapsed;
         UpdateQuality();
         if (!ReferenceEquals(_inventory, Session.Inventory) && Session.Inventory is { } inventory)
         {
@@ -160,7 +234,8 @@ public partial class ImageGenerationPanel : UserControl
         {
             _previewId = Session.Selected?.Id;
             Preview.Source = Session.Selected is { } item ? LoadImage(Session.Archive.ImagePath(item)) : null;
-            ImageDetails.Text = Session.Selected is { } selected ? $"{selected.Width} × {selected.Height}\nSeed {selected.Seed} · {selected.Seconds:0}s" : "";
+            ImageDetails.Text = Session.Selected is { } selected ? $"{selected.Width} × {selected.Height}\nSeed {selected.Seed} · {selected.Seconds:0}s"
+                + (selected.EditedFrom is { } from ? $"\nEdited from {(from.Source == ImageReferenceSource.Gallery ? "a gallery image" : from.Name)}" : "") : "";
         }
         EmptyCanvas.Visibility = Preview.Source is null ? Visibility.Visible : Visibility.Collapsed;
         SaveImage.IsEnabled = OpenImage.IsEnabled = Preview.Source is not null;
@@ -173,6 +248,23 @@ public partial class ImageGenerationPanel : UserControl
         RetentionHint.Text = string.IsNullOrWhiteSpace(settings.OutputFolder)
             ? "Expiry applies to Aqua's gallery. Choose ComfyUI's output folder below to expire its copies too."
             : "Expiry runs at startup and hourly while Aqua is open. Exported copies are kept.";
+    }
+
+    private string? _thumbId;
+    private void RefreshReference()
+    {
+        var reference = Session.Reference;
+        ReferenceBanner.Visibility = Session.Editing ? Visibility.Visible : Visibility.Collapsed;
+        ReferenceText.Text = reference is null ? "Editing with a reference image. Describe what should change."
+            : reference.Source == ImageReferenceSource.Gallery ? $"Editing a copy of “{reference.Name}”. Describe what should change; the original stays as it is."
+            : $"Editing {reference.Name} · {reference.Width} × {reference.Height}. Describe what should change, and what should stay.";
+        if (_thumbId != reference?.Id)
+        {
+            _thumbId = reference?.Id;
+            ReferenceThumb.Source = reference is null ? null : LoadImage(Session.Archive.ReferencePath(reference.Id), 104);
+        }
+        ReferenceThumbFrame.Visibility = ReferenceThumb.Source is null ? Visibility.Collapsed : Visibility.Visible;
+        SyncMatchCanvas();
     }
 
     private static BitmapImage? LoadImage(string path, int width = 0)
@@ -192,8 +284,11 @@ public partial class ImageGenerationPanel : UserControl
         Session.Selected = entry.Item;
         Refresh();
     }
-    private void RestoreSettings(GeneratedImage item)
+    private bool RestoreSettings(GeneratedImage item)
     {
+        // The reference first, so a "match image" canvas exists before the saved size is picked.
+        var restored = Session.RestoreReference(item);
+        RefreshReference();
         _filling = true;
         try
         {
@@ -219,32 +314,30 @@ public partial class ImageGenerationPanel : UserControl
         finally { _filling = false; }
         Prompt.Text = item.Prompt;
         Seed.Text = item.Seed.ToString(CultureInfo.InvariantCulture);
-        Session.ReferenceImage = item.ReferenceImage;
         Refresh();
+        return restored;
     }
     private void OnRegenerate(object sender, RoutedEventArgs e)
     {
         if (Session.Selected is not { } item || !Generate.IsEnabled) return;
-        RestoreSettings(item); Seed.Text = "";
+        // Without the image it was edited from, regenerating would ignore it; RestoreReference has said so.
+        if (!RestoreSettings(item)) return;
+        Seed.Text = "";
         OnGenerate(sender, e);
     }
-    private void OnEditImage(object sender, RoutedEventArgs e)
+    private async void OnEditImage(object sender, RoutedEventArgs e)
     {
         if (Session.Selected is not { } item || !Generate.IsEnabled) return;
         RestoreSettings(item);
-        if (string.IsNullOrWhiteSpace(item.ComfyOutputPath))
+        // Aqua edits its own copy of the image, so this works whether or not ComfyUI still has the output.
+        if (await Session.EditGalleryImageAsync(item))
         {
-            Session.Message("This older image has no ComfyUI reference. Its prompt and settings are restored so you can revise and regenerate it.");
-        }
-        else
-        {
-            Session.ReferenceImage = item.ComfyOutputPath;
             Prompt.Text = ""; Seed.Text = "";
-            Session.Message("Describe your changes. Aqua will use the selected image as a reference and save the edit as a new image.");
+            FocusPrompt();
         }
-        Prompt.BringIntoView(); Prompt.Focus(); Refresh();
+        Refresh();
     }
-    private void OnClearReference(object sender, RoutedEventArgs e) { Session.ReferenceImage = null; Refresh(); }
+    private void OnClearReference(object sender, RoutedEventArgs e) { Session.ClearReference(); Refresh(); }
     private void OnDelete(object sender, RoutedEventArgs e)
     {
         _deleteTarget = Session.Selected;

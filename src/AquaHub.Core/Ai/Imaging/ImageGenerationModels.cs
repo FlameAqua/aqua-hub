@@ -31,6 +31,15 @@ public sealed record ImageGenerationOptions
     });
 }
 
+/// <summary>The ComfyUI folder a reference image is read from.</summary>
+public enum ComfyImageFolder
+{
+    /// <summary>ComfyUI's output folder, where its generated images are saved.</summary>
+    Output,
+    /// <summary>ComfyUI's temporary folder, which it empties when it starts and stops; uploaded references go here.</summary>
+    Temp
+}
+
 public sealed record ImageGenerationRequest(
     string Prompt,
     int Width = 1024,
@@ -39,8 +48,11 @@ public sealed record ImageGenerationRequest(
     ulong? Seed = null,
     float? Guidance = null)
 {
-    /// <summary>A safe relative path to an image already stored in ComfyUI's output folder.</summary>
+    /// <summary>A safe relative path to an image already stored in ComfyUI's <see cref="ReferenceFolder"/>.</summary>
     public string? ReferenceImage { get; init; }
+
+    /// <summary>Where <see cref="ReferenceImage"/> is: the output folder, or the temporary folder for uploads.</summary>
+    public ComfyImageFolder ReferenceFolder { get; init; } = ComfyImageFolder.Output;
 }
 
 public sealed record ImageGenerationResult(byte[] PngBytes, ulong Seed, TimeSpan Elapsed, string FileName)

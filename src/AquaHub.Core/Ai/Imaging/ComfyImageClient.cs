@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -8,7 +9,8 @@ using System.Text.Json.Nodes;
 namespace AquaHub.Core.Ai.Imaging;
 
 /// <summary>
-/// Minimal ComfyUI HTTP API client for native FLUX.2 Klein 4B text-to-image graphs.
+/// Minimal ComfyUI HTTP API client for native FLUX.2 Klein 4B graphs: text to image, and edits of a reference image
+/// (one of ComfyUI's outputs, or a PNG Aqua uploads to its temporary folder).
 /// It talks only to an explicitly configured loopback endpoint.
 /// </summary>
 public sealed class ComfyImageClient
@@ -21,6 +23,9 @@ public sealed class ComfyImageClient
     ];
 
     private const string PromptOutputNode = "15";
+    /// <summary>The subfolder Aqua's uploads and outputs use on the ComfyUI server.</summary>
+    internal const string ReferenceSubfolder = "AquaHub";
+    private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
     private readonly HttpClient _http;
     private readonly ImageGenerationOptions _options;
     private readonly Uri _endpoint;
@@ -99,7 +104,7 @@ public sealed class ComfyImageClient
     {
         ValidateRequest(request);
         if (request.ReferenceImage is not null)
-            await EnsureReferenceImageExistsAsync(request.ReferenceImage, cancellationToken).ConfigureAwait(false);
+            await EnsureReferenceImageExistsAsync(request.ReferenceImage, request.ReferenceFolder, cancellationToken).ConfigureAwait(false);
         var inventory = await DiscoverAsync(request.ReferenceImage is not null, cancellationToken).ConfigureAwait(false);
         if (!inventory.IsReady)
         {
@@ -187,6 +192,39 @@ public sealed class ComfyImageClient
         }
         }
     }
+
+    /// <summary>
+    /// Sends a reference PNG to ComfyUI's temporary folder, which ComfyUI empties when it starts and when it stops, and
+    /// returns its path there for a request with <see cref="ComfyImageFolder.Temp"/>. The file is named by its content,
+    /// so sending the same image again replaces it with the same bytes.
+    /// </summary>
+    public async Task<string> UploadReferenceAsync(byte[] png, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(png);
+        if (png.Length is < 8 or > ImageReference.MaxPngBytes || !png.AsSpan(0, PngSignature.Length).SequenceEqual(PngSignature))
+            throw new ArgumentException("Reference images must be PNG files of at most 16 MiB.", nameof(png));
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(png);
+        file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        form.Add(file, "image", ReferenceUploadName(png));
+        form.Add(new StringContent("temp"), "type");
+        form.Add(new StringContent(ReferenceSubfolder), "subfolder");
+        form.Add(new StringContent("true"), "overwrite");
+        using var response = await _http.PostAsync(new Uri(_endpoint, "upload/image"), form, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw await CreateApiExceptionAsync("send the reference image to ComfyUI", response).ConfigureAwait(false);
+        using var saved = await ReadResponseJsonAsync(response, cancellationToken).ConfigureAwait(false);
+        string? Text(string property) => saved.RootElement.ValueKind == JsonValueKind.Object &&
+            saved.RootElement.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        var name = Text("name");
+        var subfolder = Text("subfolder") ?? "";
+        var path = string.IsNullOrEmpty(subfolder) ? name : subfolder + "/" + name;
+        if (Text("type") != "temp" || string.IsNullOrWhiteSpace(name) || path is null || !IsSafeRelativeImagePath(path))
+            throw new ImageGenerationException("ComfyUI didn't store the reference image in its temporary folder under a safe name, so Aqua won't use it.");
+        return path;
+    }
+
+    internal static string ReferenceUploadName(ReadOnlySpan<byte> png) => "aqua-ref-" + ImageReference.IdFor(png) + ".png";
 
     /// <summary>Requests model unloading only when ComfyUI reports both queues empty.</summary>
     public async Task<bool> ReleaseModelsAsync(CancellationToken cancellationToken = default)
@@ -319,7 +357,7 @@ public sealed class ComfyImageClient
         {
             nodes["16"] = Node("LoadImage", new JsonObject
             {
-                ["image"] = request.ReferenceImage + " [output]"
+                ["image"] = request.ReferenceImage + (request.ReferenceFolder == ComfyImageFolder.Temp ? " [temp]" : " [output]")
             });
             nodes["17"] = Node("VAEEncode", new JsonObject
             {
@@ -355,17 +393,19 @@ public sealed class ComfyImageClient
         return nodes;
     }
 
-    private async Task EnsureReferenceImageExistsAsync(string relativePath, CancellationToken cancellationToken)
+    private async Task EnsureReferenceImageExistsAsync(string relativePath, ComfyImageFolder folder, CancellationToken cancellationToken)
     {
         var separator = relativePath.LastIndexOf('/');
         var fileName = separator < 0 ? relativePath : relativePath[(separator + 1)..];
         var subfolder = separator < 0 ? "" : relativePath[..separator];
         var query = "view?filename=" + Uri.EscapeDataString(fileName) +
-                    "&subfolder=" + Uri.EscapeDataString(subfolder) + "&type=output";
+                    "&subfolder=" + Uri.EscapeDataString(subfolder) + (folder == ComfyImageFolder.Temp ? "&type=temp" : "&type=output");
         using var response = await _http.GetAsync(new Uri(_endpoint, query), HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
-            throw new ImageGenerationException("The reference image is no longer available in ComfyUI's output folder. Restore its exported PNG there with the same name, or clear the reference and regenerate from a full description.");
+            throw new ImageGenerationException(folder == ComfyImageFolder.Temp
+                ? "ComfyUI no longer has the image this edit starts from: it empties its temporary folder when it restarts. Apply the edit again and Aqua sends it again."
+                : "The reference image is no longer available in ComfyUI's output folder. Restore its exported PNG there with the same name, or clear the reference and regenerate from a full description.");
         if (!response.IsSuccessStatusCode)
             throw await CreateApiExceptionAsync("check the selected reference image in ComfyUI", response).ConfigureAwait(false);
     }
@@ -555,8 +595,7 @@ public sealed class ComfyImageClient
         if (!response.IsSuccessStatusCode)
             throw await CreateApiExceptionAsync("retrieve generated image", response).ConfigureAwait(false);
         var bytes = await ReadBoundedAsync(response.Content, _options.MaximumImageBytes, cancellationToken).ConfigureAwait(false);
-        byte[] pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
-        if (bytes.Length < pngSignature.Length || !bytes.AsSpan(0, pngSignature.Length).SequenceEqual(pngSignature))
+        if (bytes.Length < PngSignature.Length || !bytes.AsSpan(0, PngSignature.Length).SequenceEqual(PngSignature))
             throw new ImageGenerationException("ComfyUI returned an image that is not a valid PNG.");
         return bytes;
     }
@@ -673,6 +712,8 @@ public sealed class ComfyImageClient
         if (request.Seed is ulong seed && seed > 0x7fff_ffff_ffff_ffff) throw new ArgumentOutOfRangeException(nameof(request), "Seed must be a non-negative signed 64-bit value.");
         if (request.ReferenceImage is not null && !IsSafeRelativeImagePath(request.ReferenceImage))
             throw new ArgumentException("Reference images must be safe relative ComfyUI output paths (subfolder/name).", nameof(request));
+        if (!Enum.IsDefined(request.ReferenceFolder))
+            throw new ArgumentOutOfRangeException(nameof(request), "Reference images are read from ComfyUI's output or temporary folder.");
         if (request.Guidance is float guidance && (guidance is < 0 or > 20 || float.IsNaN(guidance) || float.IsInfinity(guidance)))
             throw new ArgumentOutOfRangeException(nameof(request), "Guidance must be from 0 through 20.");
     }

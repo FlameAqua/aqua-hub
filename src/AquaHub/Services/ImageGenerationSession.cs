@@ -1,6 +1,7 @@
 using System.Net.Http;
 using AquaHub.Core.Ai.Imaging;
 using AquaHub.Core.Util;
+using AquaHub.Platform;
 using System.Windows.Threading;
 
 namespace AquaHub.Services;
@@ -13,13 +14,39 @@ public sealed class ImageGenerationSession
     private DispatcherTimer? _retentionTimer;
     private IDisposable? _gpuLease;
     private ImageGenerationOptions? _recoveryOptions;
+    private string? _referenceImage;
+    private string? _editingReferenceId;
     public bool RecoveryNeeded => _gpuLease is not null && !Busy;
     public event Action? Changed;
     public bool Busy { get; private set; }
     public bool Checking { get; private set; }
     public bool ManagingImages { get; private set; }
+    /// <summary>An added image is being read and prepared.</summary>
+    public bool Attaching { get; private set; }
     public string Draft { get; set; } = "";
-    public string? ReferenceImage { get; set; }
+
+    /// <summary>
+    /// The image the next generation edits, as a path in ComfyUI's output folder: how gallery records made before
+    /// <see cref="Reference"/> are edited again. Setting one replaces <see cref="Reference"/>.
+    /// </summary>
+    public string? ReferenceImage
+    {
+        get => _referenceImage;
+        set
+        {
+            _referenceImage = value;
+            if (value is not null) Reference = null;
+        }
+    }
+
+    /// <summary>
+    /// The image the next generation edits: one you added, or a copy of a generated image (Edit image). Aqua keeps it,
+    /// so the edit doesn't depend on what ComfyUI still has; it's sent to ComfyUI's temporary folder for each job.
+    /// </summary>
+    public ImageReference? Reference { get; private set; }
+
+    /// <summary>The next generation edits an image rather than starting from the prompt alone.</summary>
+    public bool Editing => Reference is not null || ReferenceImage is not null;
     public string Status { get; private set; } = "Connect your local image server below to get started.";
     public bool Error { get; private set; }
     public ImageModelInventory? Inventory { get; private set; }
@@ -76,6 +103,7 @@ public sealed class ImageGenerationSession
         {
             var settings = Hub.S.ImageGeneration;
             var result = await Task.Run(() => Archive.Prune(settings.RetentionDays, DateTimeOffset.Now, settings.OutputFolder));
+            await PruneReferencesAsync();
             await ReloadGalleryAsync();
             if (result.Failures.Count > 0)
                 Message($"Couldn't remove {result.Failures.Count} expired image(s). Check the ComfyUI output folder and file permissions; Aqua will retry.", true);
@@ -97,12 +125,132 @@ public sealed class ImageGenerationSession
             var outputFolder = Hub.S.ImageGeneration.OutputFolder;
             await Task.Run(() => Archive.Delete(image, outputFolder));
             if (ReferenceImage == image.ComfyOutputPath) ReferenceImage = null;
+            await PruneReferencesAsync();
             await ReloadGalleryAsync();
             Message(string.IsNullOrWhiteSpace(outputFolder) && image.ComfyOutputPath is not null
                 ? "Deleted from Aqua. The ComfyUI copy remains because its output folder isn't configured." : "Image deleted.");
         }
         catch (Exception ex) { Message("Couldn't delete the image: " + ex.Message, true); }
         finally { _archiveGate.Release(); ManagingImages = false; Changed?.Invoke(); }
+    }
+
+    /// <summary>Makes an image file (picked or dropped) the image to edit. False, with a message, when it can't be used.</summary>
+    public Task<bool> AttachFileAsync(string path)
+    {
+        var name = Path.GetFileName(path);
+        return AttachAsync(name, ImageReferenceSource.Photo, async () =>
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists) throw new InvalidDataException($"“{ImageReference.ShortName(name)}” isn't there any more.");
+            if (file.Length > ReferenceImages.MaxFileBytes) throw new InvalidDataException(ReferenceImages.TooLarge(name));
+            return await File.ReadAllBytesAsync(path);
+        });
+    }
+
+    /// <summary>Makes image data (a paste, or a picture dragged from another app) the image to edit.</summary>
+    public Task<bool> AttachImageAsync(byte[] bytes, string name) =>
+        AttachAsync(name, ImageReferenceSource.Photo, () => Task.FromResult(bytes));
+
+    /// <summary>
+    /// Edit image: a copy of one of your generated images becomes the image to edit. Unlike <see cref="ReferenceImage"/>,
+    /// this works for any image in the gallery, whether or not ComfyUI still has its output.
+    /// </summary>
+    public Task<bool> EditGalleryImageAsync(GeneratedImage item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return AttachAsync(item.Prompt, ImageReferenceSource.Gallery, () => File.ReadAllBytesAsync(Archive.ImagePath(item)));
+    }
+
+    private async Task<bool> AttachAsync(string name, ImageReferenceSource source, Func<Task<byte[]>> read)
+    {
+        if (Busy || Attaching) return false;
+        Attaching = true;
+        Message(source == ImageReferenceSource.Gallery ? "Preparing a copy of this image…" : "Preparing your image…");
+        try
+        {
+            var bytes = await read();
+            var prepared = await Task.Run(() => ReferenceImages.Prepare(bytes, name));
+            string id;
+            await _archiveGate.WaitAsync();
+            try { id = await Archive.SaveReferenceAsync(prepared.Png); }
+            finally { _archiveGate.Release(); }
+            var replaced = Reference?.Id;
+            _referenceImage = null;
+            Reference = new ImageReference(id, ImageReference.ShortName(name), prepared.Width, prepared.Height) { Source = source };
+            Message(source == ImageReferenceSource.Gallery
+                ? "Describe your changes. Aqua edits a copy of this image and saves the result as a new one."
+                : $"Added {Reference.Name} · {prepared.Width} × {prepared.Height}. Describe what should change, and what should stay.");
+            if (replaced is not null && replaced != id) _ = TidyReferencesAsync();
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Message(ex is InvalidDataException ? ex.Message : $"Couldn't open “{ImageReference.ShortName(name)}”: {ex.Message}", true);
+            return false;
+        }
+        finally { Attaching = false; Changed?.Invoke(); }
+    }
+
+    /// <summary>
+    /// For Regenerate: makes the image <paramref name="item"/> was edited from the image to edit again, or clears it
+    /// for an image made from a prompt alone. False, with a message, when Aqua no longer has that image: regenerating
+    /// would then ignore it, so don't.
+    /// </summary>
+    public bool RestoreReference(GeneratedImage item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var replaced = Reference?.Id;
+        _referenceImage = null;
+        Reference = null;
+        var restored = true;
+        if (item.EditedFrom is { } from)
+        {
+            if (from.IsWellFormed && File.Exists(Archive.ReferencePath(from.Id))) Reference = from;
+            else
+            {
+                restored = false;
+                Message("Aqua no longer has the image this one was edited from, so it can't repeat the edit. Add that image again to edit it.", true);
+            }
+        }
+        else _referenceImage = item.ReferenceImage;
+        Changed?.Invoke();
+        if (replaced is not null && replaced != Reference?.Id) _ = TidyReferencesAsync();
+        return restored;
+    }
+
+    /// <summary>Back to creating from the prompt alone.</summary>
+    public void ClearReference()
+    {
+        var replaced = Reference?.Id;
+        _referenceImage = null;
+        Reference = null;
+        Changed?.Invoke();
+        if (replaced is not null) _ = TidyReferencesAsync();
+    }
+
+    private async Task TidyReferencesAsync()
+    {
+        await _archiveGate.WaitAsync();
+        try { await PruneReferencesAsync(); }
+        finally { _archiveGate.Release(); }
+    }
+
+    /// <summary>
+    /// Deletes Aqua's kept copies of images to edit once no gallery record, waiting edit or running job needs them, so
+    /// they follow the gallery's expiry and deletion. Callers hold the archive gate.
+    /// </summary>
+    private async Task PruneReferencesAsync()
+    {
+        string?[] keep = [Reference?.Id, _editingReferenceId];
+        try
+        {
+            var result = await Task.Run(() => Archive.PruneReferences(keep));
+            foreach (var failure in result.Failures) Log.Warn("images", $"Kept reference image {failure.ImageId}: {failure.Message}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warn("images", "Couldn't tidy the kept reference images", ex);
+        }
     }
 
     public async Task StartServerAsync(ImageGenerationOptions options)
@@ -167,9 +315,13 @@ public sealed class ImageGenerationSession
         finally { Checking = false; Changed?.Invoke(); }
     }
 
+    /// <summary>
+    /// Generates an image, or edits one: the request's own ComfyUI output path when it has one (older gallery records),
+    /// otherwise <see cref="Reference"/>, which is sent to ComfyUI's temporary folder before the GPU is reserved.
+    /// </summary>
     public async Task GenerateAsync(ImageGenerationOptions options, ImageGenerationRequest request)
     {
-        if (Busy || Checking || ManagingImages || RecoveryNeeded) return;
+        if (Busy || Checking || ManagingImages || RecoveryNeeded || Attaching) return;
         if (Sandbox.Intercept("image-generate", options.SelectedDiffusionModel))
         { Message("Image generation is intercepted in this test profile."); return; }
         if (Hub.S.Ai.Enabled && Hub.S.Ai.Provider != "llamacpp")
@@ -177,7 +329,9 @@ public sealed class ImageGenerationSession
             Message("Select Aqua's own runtime in AI settings for shared GPU use, or turn AI off before using a separately managed image server.", true);
             return;
         }
+        var reference = request.ReferenceImage is null ? Reference : null;
         Busy = true;
+        _editingReferenceId = reference?.Id;
         using var cts = new CancellationTokenSource();
         _cancellation = cts;
         Message("Checking local image models…");
@@ -185,9 +339,21 @@ public sealed class ImageGenerationSession
         {
             using var http = CreateHttp();
             var client = new ComfyImageClient(http, options with { UnloadModelAfterGeneration = false });
-            Inventory = await client.DiscoverAsync(request.ReferenceImage is not null, cts.Token);
+            var referencePng = reference is null ? null
+                : await Task.Run(() => Archive.ReadReference(reference.Id), cts.Token)
+                  ?? throw new ImageGenerationException("Aqua no longer has the image to edit. Add it again, or clear it to create from your description alone.");
+            Inventory = await client.DiscoverAsync(request.ReferenceImage is not null || reference is not null, cts.Token);
             if (!Inventory.IsReady)
                 throw new ImageGenerationException("Still needed: " + string.Join(", ", Inventory.MissingRequiredNodes.Concat(Inventory.MissingRequiredModels)));
+            if (referencePng is not null)
+            {
+                Message("Sending your image to ComfyUI…");
+                request = request with
+                {
+                    ReferenceImage = await client.UploadReferenceAsync(referencePng, cts.Token),
+                    ReferenceFolder = ComfyImageFolder.Temp,
+                };
+            }
             Message("Waiting for the GPU. Any current answer will finish first…");
             _gpuLease = await Hub.Core.Llm.ReserveForImageAsync(cts.Token);
             _recoveryOptions = options;
@@ -202,7 +368,8 @@ public sealed class ImageGenerationSession
                     Steps = request.Steps ?? (options.Variant == ImageModelVariant.Base4B ? 20 : 4),
                     Variant = options.Variant == ImageModelVariant.Base4B ? "base" : "distilled",
                     TextEncoder = options.TextEncoderModel, Vae = options.VaeModel,
-                    ComfyOutputPath = result.ComfyOutputPath, ReferenceImage = request.ReferenceImage,
+                    ComfyOutputPath = result.ComfyOutputPath,
+                    ReferenceImage = reference is null ? request.ReferenceImage : null, EditedFrom = reference,
                 };
                 await Archive.SaveAsync(item, result.PngBytes, cts.Token);
                 Recent = new[] { item }.Concat(Recent).Take(30).ToArray();
@@ -228,7 +395,7 @@ public sealed class ImageGenerationSession
         catch (Exception ex) { Log.Warn("images", "Image generation failed", ex); Message(Friendly(ex), true); }
         finally
         {
-            _cancellation = null; Busy = false;
+            _cancellation = null; Busy = false; _editingReferenceId = null;
             if (RecoveryNeeded) Message(Status + " GPU stays reserved until ComfyUI finishes and releases its models. Use Check GPU release below.", true);
             else Changed?.Invoke();
         }
