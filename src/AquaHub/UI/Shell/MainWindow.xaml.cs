@@ -131,6 +131,8 @@ public partial class MainWindow : Window
 
         if (_current != page)
         {
+            CloseDeckSurfaces();
+            WorkspaceFeedback.Hide();
             (PageHost.Content as IPage)?.OnNavigatedFrom();
             // Visited pages stay warm while the window is open (scroll position, filters, chosen symbol…);
             // they only listen for updates while shown, and all of them are released when the window closes.
@@ -261,7 +263,6 @@ public partial class MainWindow : Window
             UpdateBar.Visibility = Visibility.Collapsed;
             return;
         }
-        UpdateBar.CornerRadius = OfflineBar.Visibility == Visibility.Visible ? new CornerRadius(0) : new CornerRadius(10, 0, 0, 0);
         UpdateBarText.Text = banner.Text;
         UpdateBarProgress.Value = u.Percent;
         UpdateBarProgress.Visibility = banner.Progress ? Visibility.Visible : Visibility.Collapsed;
@@ -312,6 +313,14 @@ public partial class MainWindow : Window
         ("news", "News"), ("social", "Social"), ("markets", "Markets"), ("predictions", "Predictions"), ("events", "Agenda"), ("weather", "Weather"),
     };
 
+    private bool _offlineNoticeDismissed;
+
+    private void OnOfflineBarDismiss(object sender, RoutedEventArgs e)
+    {
+        _offlineNoticeDismissed = true;
+        OfflineBar.Visibility = Visibility.Collapsed;
+    }
+
     /// <summary>"News updated 4m ago" from the collectors' last successful fetch — not from UI or telemetry updates.</summary>
     private void UpdateFreshness()
     {
@@ -328,9 +337,10 @@ public partial class MainWindow : Window
             OfflineText.Text = news is { } n
                 ? $"You're offline. Showing what was collected up to {n.ToLocalTime():HH:mm}."
                 : "You're offline. Aqua catches up when you're back.";
-            OfflineBar.Visibility = Visibility.Visible;
+            OfflineBar.Visibility = _offlineNoticeDismissed ? Visibility.Collapsed : Visibility.Visible;
             return;
         }
+        _offlineNoticeDismissed = false;
         OfflineBar.Visibility = Visibility.Collapsed;
         var stale = news is { } s && DateTimeOffset.Now - s > TimeSpan.FromMinutes(Math.Max(45, Hub.S.News.RefreshMinutes * 3));
         SyncText.Foreground = Fmt.Res(stale ? "B.Warn" : "B.Text3");
@@ -587,6 +597,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Escape && AlertsPopup.IsOpen) { AlertsPopup.IsOpen = false; e.Handled = true; return; }
         if (e.Key == Key.Escape && AiPopup.IsOpen) { AiPopup.IsOpen = false; e.Handled = true; return; }
         if (e.Key == Key.Escape && Overlay.Visibility == Visibility.Visible && OverlayHost.Content is not Onboarding) { HideOverlay(); e.Handled = true; return; }
+        if (e.Key == Key.Escape && CloseDeckSurfaces()) { DeckHandle.Focus(); e.Handled = true; return; }
         if (ctrl && e.Key == Key.OemComma) { Navigate("settings"); e.Handled = true; return; }
         if (ctrl && e.Key is >= Key.D1 and <= Key.D9)
         {

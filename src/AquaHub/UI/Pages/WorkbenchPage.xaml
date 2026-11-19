@@ -86,7 +86,6 @@
                                     <StackPanel Orientation="Horizontal"><c:Icon Kind="wand" Width="14" Height="14"/><TextBlock Text="Draft the skill" Margin="8,0,0,0"/></StackPanel>
                                 </Button>
                                 <Button Style="{StaticResource Btn.Standard}" Margin="8,0,0,0" Content="Write it myself" Click="OnScratch" AutomationProperties.AutomationId="wb-scratch"/>
-                                <TextBlock x:Name="TeachStatus" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" MaxWidth="520"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -157,7 +156,6 @@
                                     <StackPanel Orientation="Horizontal"><c:Icon Kind="play" Width="12" Height="12"/><TextBlock Text="Save and try it" Margin="6,0,0,0"/></StackPanel>
                                 </Button>
                                 <Button Style="{StaticResource Btn.Subtle}" Margin="8,0,0,0" Content="Discard" Click="OnDiscard" AutomationProperties.AutomationId="wb-discard"/>
-                                <TextBlock x:Name="EditorStatus" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap" MaxWidth="420"/>
                             </StackPanel>
                         </StackPanel>
                     </c:GroupBorder>
@@ -321,5 +319,6 @@
                 </StackPanel>
             </Grid>
         </ScrollViewer>
+        <c:FeedbackPopup x:Name="WorkbenchFeedback" Grid.RowSpan="3"/>
     </Grid>
 </UserControl>

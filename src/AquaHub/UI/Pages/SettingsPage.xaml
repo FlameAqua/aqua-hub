@@ -15,7 +15,6 @@
                 <TextBlock Text="Changes apply instantly and are saved automatically." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <TextBlock x:Name="SavedText" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,12,0"/>
                 <Button Style="{StaticResource Btn.Standard}" Click="OnEditJson" ToolTip="Open settings.json in Notepad (power users)">
                     <StackPanel Orientation="Horizontal"><c:Icon Kind="copy" Width="14" Height="14"/><TextBlock Text="Edit JSON" Margin="8,0,0,0"/></StackPanel>
                 </Button>
@@ -135,9 +134,7 @@
                                 </Button>
                             </StackPanel>
                         </c:SettingRow>
-                        <TextBlock x:Name="HotkeyProblem" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="4,0,0,8" TextWrapping="Wrap" Visibility="Collapsed"
-                                   AutomationProperties.LiveSetting="Assertive" AutomationProperties.AutomationId="hotkey-problem"/>
-                        <TextBlock x:Name="HotkeyErrors" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="4,0,0,8" TextWrapping="Wrap"/>
+
                         <TextBlock Text="In Aqua" Style="{StaticResource T.CardTitle}" Margin="2,14,0,10"/>
                         <Border Style="{StaticResource Card}">
                             <ItemsControl x:Name="InAppShortcuts" Focusable="False">
@@ -284,7 +281,6 @@
                                         </ComboBox>
                                         <Button Grid.Column="3" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddSource"/>
                                     </Grid>
-                                    <TextBlock x:Name="SourceError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0"/>
                                 </StackPanel>
                             </c:SettingRow.Below>
                         </c:SettingRow>
@@ -317,7 +313,9 @@
                                     <TextBlock Text="Connect Google to import your subscription list, then choose channels for live checks. Google grants read-only YouTube access; Aqua won't change your subscriptions. Sync is manual. New uploads still use the saved YouTube channels list further below."
                                                TextWrapping="Wrap" Style="{StaticResource T.Caption}"/>
                                     <WrapPanel Margin="0,10,0,0">
-                                        <Button Content="Google setup guide" Click="OnGoogleSetup" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6"/>
+                                        <Button Content="Google setup guide" Click="OnGoogleSetup" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6"
+                                                ToolTip="Enable YouTube Data API v3, create a Desktop OAuth client, and add your account as a test user if required."
+                                                AutomationProperties.HelpText="Enable YouTube Data API v3, create a Desktop OAuth client, and add your account as a test user if required."/>
                                         <Button x:Name="GoogleImport" Content="Import Desktop client JSON…" Click="OnImportGoogleClient" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" AutomationProperties.AutomationId="settings-google-import"/>
                                         <Button x:Name="GoogleConnect" Content="Connect Google…" Click="OnConnectGoogle" Style="{StaticResource Btn.Accent}" Margin="0,0,6,6" AutomationProperties.AutomationId="settings-google-connect"/>
                                         <Button x:Name="GoogleSync" Content="Sync subscriptions" Click="OnSyncGoogle" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-google-sync"/>
@@ -462,7 +460,6 @@
                                                  AutomationProperties.Name="YouTube channel link or handle" KeyDown="OnChannelKey"/>
                                         <Button x:Name="AddChannelButton" Grid.Column="1" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddChannel" MinWidth="64"/>
                                     </Grid>
-                                    <TextBlock x:Name="ChannelError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </c:SettingRow.Below>
                         </c:SettingRow>
@@ -505,7 +502,6 @@
                                         <CheckBox x:Name="NewFeedLocal" Grid.Column="2" Content="Local" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                         <Button Grid.Column="3" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddExtraFeed"/>
                                     </Grid>
-                                    <TextBlock x:Name="ExtraFeedError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0"/>
                                 </StackPanel>
                             </c:SettingRow.Below>
                         </c:SettingRow>
@@ -642,7 +638,6 @@
                                         <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Content="Browse…" Click="OnBrowseIcs" Margin="0,0,6,0"/>
                                         <Button Grid.Column="3" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddCalendar"/>
                                     </Grid>
-                                    <TextBlock x:Name="CalError" Foreground="{DynamicResource B.Warn}" FontSize="12" Margin="0,6,0,0"/>
                                 </StackPanel>
                             </c:SettingRow.Below>
                         </c:SettingRow>
@@ -709,7 +704,6 @@
                                 </ComboBox>
                             </c:SettingRow.Below>
                         </c:SettingRow>
-                        <TextBlock x:Name="ProviderNotice" Foreground="{DynamicResource B.Warn}" TextWrapping="Wrap" Margin="4,6,4,0" AutomationProperties.LiveSetting="Polite"/>
                         <c:RuntimeSettings x:Name="RuntimeCard"/>
                         <c:SettingRow x:Name="EndpointRow" Icon="cube" Title="Server address">
                             <TextBox Text="{Binding Ai.Endpoint, UpdateSourceTrigger=PropertyChanged}" Width="260"/>
@@ -860,12 +854,8 @@
                             </StackPanel>
                             <c:SettingRow.Below>
                                 <StackPanel>
-                                    <ProgressBar x:Name="WhisperProgress" Height="6" Maximum="1" Margin="0,2,0,8" Visibility="Collapsed"
-                                                 AutomationProperties.Name="Whisper download" AutomationProperties.AutomationId="whisper-progress"/>
                                     <TextBlock x:Name="WhisperStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap" AutomationProperties.AutomationId="whisper-status"/>
                                     <WrapPanel Margin="0,6,0,0">
-                                        <Button x:Name="WhisperCancelButton" Style="{StaticResource Btn.Standard}" Content="Cancel" Click="OnWhisperCancel" Visibility="Collapsed"
-                                                Margin="0,0,6,0" AutomationProperties.AutomationId="whisper-cancel"/>
                                         <Button x:Name="WhisperRemoveButton" Style="{StaticResource Btn.Standard}" Content="Remove Whisper" Click="OnWhisperRemove" Visibility="Collapsed"
                                                 Margin="0,0,6,0" AutomationProperties.AutomationId="whisper-remove"/>
                                     </WrapPanel>
@@ -903,7 +893,6 @@
                                         <Border CornerRadius="3" Background="{DynamicResource B.Track}"/>
                                         <Border x:Name="VoiceLevelFill" CornerRadius="3" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
                                     </c:GroupGrid>
-                                    <TextBlock x:Name="VoiceTestStatus" Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
                                     <TextBox x:Name="VoiceTestHeard" Style="{StaticResource ReadOnlyText}" Margin="0,6,0,0" Visibility="Collapsed" AutomationProperties.Name="What Aqua heard"/>
                                     <TextBox x:Name="VoiceTestTidied" Style="{StaticResource ReadOnlyText}" Margin="0,4,0,0" Visibility="Collapsed" Foreground="{DynamicResource B.Accent}"
                                              AutomationProperties.Name="After the tidy-up"/>
@@ -1194,5 +1183,19 @@
                 </Grid>
             </ScrollViewer>
         </Grid>
+        <c:GroupBorder x:Name="WhisperProgressCard" Grid.RowSpan="2" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}"
+                       BorderThickness="1" CornerRadius="12" Padding="14,10" Width="340" Margin="16"
+                       HorizontalAlignment="Left" VerticalAlignment="Bottom" Visibility="Collapsed">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Standard}" Content="Cancel" Click="OnWhisperCancel"
+                            Margin="10,0,0,0" AutomationProperties.AutomationId="whisper-cancel"/>
+                    <TextBlock x:Name="WhisperProgressText" Style="{StaticResource T.Caption}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                </DockPanel>
+                <ProgressBar x:Name="WhisperProgress" Height="5" Maximum="1" Margin="0,8,0,2"
+                             AutomationProperties.Name="Whisper download" AutomationProperties.AutomationId="whisper-progress"/>
+            </StackPanel>
+        </c:GroupBorder>
+        <c:FeedbackPopup x:Name="SettingsFeedback" Grid.RowSpan="2"/>
     </Grid>
 </UserControl>

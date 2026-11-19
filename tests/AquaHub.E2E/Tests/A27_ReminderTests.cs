@@ -58,7 +58,7 @@ public sealed class A27_ReminderTests(AppFixture fixture, ITestOutputHelper outp
     {
         root["apps"] = new JsonArray(new JsonObject
         {
-            ["id"] = "fixture-app", ["name"] = "Fixture app", ["kind"] = "exe", ["target"] = @"C:\Fixture\App.exe",
+            ["id"] = "fixture-app", ["name"] = "Fixture app", ["kind"] = "exe", ["target"] = @"C:\Fixture\App.exe", ["pinned"] = true,
         });
         root["scenes"] = new JsonArray(
             new JsonObject
@@ -91,8 +91,14 @@ public sealed class A27_ReminderTests(AppFixture fixture, ITestOutputHelper outp
         ((TransformPattern)grip.GetCurrentPattern(TransformPattern.Pattern)).Move(initial.X - 150, initial.Y - 90);
         Wait.For(() => Field("deck-move").Current.BoundingRectangle.X < initial.X - 80, "deck moves by UIA");
         GoTo("upcoming");
+        Assert.Null(Ui.Find(Main, Ui.Id("deck-add-reminder")));
+        Press("deck-move");
         Assert.False(Ui.IsOffscreen(Field("deck-add-reminder")));
         Shot("deck-dark");
+        Assert.Null(App.Journal.Find(0, "launch", id => id == "fixture-app"));
+        Ui.Invoke(Action("deck-app-1", "Open Fixture app"));
+        App.Journal.WaitFor(0, "launch", id => id == "fixture-app");
+        Press("deck-move");
         Press("deck-hide");
         App.Settings.WaitForBool("deck.hidden", true);
         GoTo("today");
@@ -142,8 +148,10 @@ public sealed class A27_ReminderTests(AppFixture fixture, ITestOutputHelper outp
             Press("agenda-today");
             Wait.For(() => Has("Fixture calendar event"), "return to today");
             Press("agenda-add-reminder");
+            var titleBounds = Field("reminder-title").Current.BoundingRectangle;
             Press("reminder-save");
             Wait.For(() => Ui.NameOf(Field("reminder-editor-status")).Contains("Enter a title", StringComparison.Ordinal), "title validation");
+            Assert.Equal(titleBounds, Field("reminder-title").Current.BoundingRectangle);
             Ui.SetValue(Field("reminder-title"), "Bins fixture");
             var defaultTime = Ui.ValueOf(Field("reminder-time"));
             Ui.SetValue(Field("reminder-time"), "27:01");
@@ -182,13 +190,25 @@ public sealed class A27_ReminderTests(AppFixture fixture, ITestOutputHelper outp
             Wait.For(() => Has("Fixture calendar event"), "today's calendar");
             Press("agenda-next");
             Wait.For(() => !Has("Fixture calendar event"), "another day");
-            Press("deck-quick-5");
+            Press("deck-move");
+            Press("deck-timer");
+            Ui.SetRange(Field("deck-timer-duration"), 5);
+            Press("deck-timer-command");
             Wait.For(() => Ui.NameOf(Field("deck-status")).StartsWith("Reminder set for", StringComparison.Ordinal), "saved quick reminder");
+            Wait.For(() => Ui.NameOf(Field("deck-timer-readout")).StartsWith("4:", StringComparison.Ordinal), "timer counts down");
+            Shot("deck-countdown");
+            Press("deck-move");
+            Press("deck-move");
             Press("deck-today");
             Wait.For(() => Has("Fixture calendar event"), "deck jumped to today's agenda");
             Press("agenda-all-reminders");
             Wait.For(() => Has("Quick reminder · 5 min"), "quick reminder in all reminders");
             Assert.Single(Ui.Texts(PageRoot("upcoming")), title => title == "Quick reminder · 5 min");
+            Press("deck-move");
+            Press("deck-timer");
+            Assert.Equal("Stop timer", Ui.NameOf(Field("deck-timer-command")));
+            Press("deck-timer-command");
+            Wait.For(() => !Has("Quick reminder · 5 min"), "stopped timer removed from reminders");
         });
     }
 

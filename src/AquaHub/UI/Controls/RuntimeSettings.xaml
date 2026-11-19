@@ -1,6 +1,7 @@
 <UserControl x:Class="AquaHub.UI.Controls.RuntimeSettings"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:c="clr-namespace:AquaHub.UI.Controls" xmlns:ui="clr-namespace:AquaHub.UI">
+ <Grid>
  <StackPanel>
   <c:GroupBorder Style="{StaticResource Card}" Margin="0,12,0,12" AutomationProperties.AutomationId="settings-ai-runtime" AutomationProperties.Name="Aqua runtime">
    <StackPanel>
@@ -20,13 +21,7 @@
       </ComboBox>
      </StackPanel>
     </Expander>
-    <StackPanel x:Name="ProgressPanel" Margin="0,10,0,0">
-     <TextBlock x:Name="ProgressText" Style="{StaticResource T.Caption}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
-     <ProgressBar x:Name="Progress" Height="5" Maximum="100" Margin="0,8,0,10" AutomationProperties.Name="Runtime installation progress"/>
-     <Button Content="Cancel" Style="{StaticResource Btn.Standard}" Click="OnCancel" HorizontalAlignment="Left"/>
-    </StackPanel>
     <TextBlock x:Name="DeviceText" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,8,0,0"/>
-    <TextBlock x:Name="ErrorText" Foreground="{DynamicResource B.Down}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
    </StackPanel>
   </c:GroupBorder>
   <Expander Header="Advanced runtime settings" Foreground="{DynamicResource B.Text}" Margin="0,0,0,14" AutomationProperties.AutomationId="settings-ai-advanced">
@@ -73,4 +68,15 @@
    </StackPanel>
   </Expander>
  </StackPanel>
+ <c:GroupBorder x:Name="ProgressPanel" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}"
+  BorderThickness="1" CornerRadius="12" Padding="14,10" Margin="8" Width="300" HorizontalAlignment="Right" VerticalAlignment="Top" Visibility="Collapsed">
+  <StackPanel>
+   <DockPanel>
+    <Button DockPanel.Dock="Right" Content="Cancel" Style="{StaticResource Btn.Standard}" Click="OnCancel" Margin="10,0,0,0"/>
+    <TextBlock x:Name="ProgressText" Style="{StaticResource T.Caption}" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
+   </DockPanel>
+   <ProgressBar x:Name="Progress" Height="5" Maximum="100" Margin="0,8,0,2" AutomationProperties.Name="Runtime installation progress"/>
+  </StackPanel>
+ </c:GroupBorder>
+ </Grid>
 </UserControl>

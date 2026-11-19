@@ -76,6 +76,7 @@ public partial class WorkbenchPage : UserControl, IPage
     {
         Hub.Core.Workbench.Changed -= OnChanged;
         _cts?.Cancel();
+        WorkbenchFeedback.Hide();
     }
 
     private void OnChanged() => Hub.OnUi(Refresh);
@@ -138,51 +139,61 @@ public partial class WorkbenchPage : UserControl, IPage
         var request = TeachInput.Text.Trim();
         if (request.Length < 8)
         {
-            TeachStatus.Text = "Describe the skill in a sentence or two first.";
+            WorkbenchFeedback.Show("Describe the skill in a sentence or two first.", error: true);
             TeachInput.Focus();
             return;
         }
-        await DraftAsync(request, current: null, feedback: null, TeachStatus, DraftButton);
+        await DraftAsync(request, current: null, feedback: null);
     }
 
     private async void OnImprove(object sender, RoutedEventArgs e)
     {
         var feedback = FeedbackInput.Text.Trim();
-        if (feedback.Length < 3) { EditorStatus.Text = "Say what should change first."; FeedbackInput.Focus(); return; }
+        if (feedback.Length < 3) { WorkbenchFeedback.Show("Say what should change first.", error: true); FeedbackInput.Focus(); return; }
         var current = FromEditor();
-        await DraftAsync(current.TaughtAs.Length > 0 ? current.TaughtAs : current.Description, current, feedback, EditorStatus, ImproveButton);
-        FeedbackInput.Text = "";
+        await DraftAsync(current.TaughtAs.Length > 0 ? current.TaughtAs : current.Description, current, feedback);
     }
 
-    private async Task DraftAsync(string request, AskSkill? current, string? feedback, TextBlock status, Button button)
+    private async Task DraftAsync(string request, AskSkill? current, string? feedback)
     {
         if (!Hub.Core.Llm.Health.Available)
         {
-            status.Text = "The local model is needed to draft skills — start it (Agents › AI), or use “Write it myself”.";
+            WorkbenchFeedback.Show("Start the local model in Agents › AI, or choose Write it myself.", error: true);
             return;
         }
         _cts?.Cancel();
-        _cts = new CancellationTokenSource();
-        button.IsEnabled = false;
-        status.Text = current is null ? "Drafting — Aqua is working out the steps…" : "Revising…";
+        using var cancellation = new CancellationTokenSource();
+        _cts = cancellation;
+        DraftButton.IsEnabled = ImproveButton.IsEnabled = false;
+        WorkbenchFeedback.Show(current is null ? "Drafting the skill…" : "Revising the skill…", "workbench-draft", busy: true);
         try
         {
-            var (skill, notes) = await Task.Run(() => Hub.Core.SkillDrafter.DraftAsync(request, Catalogue, current, feedback, _cts.Token));
-            status.Text = "";
+            var (skill, notes) = await Task.Run(() => Hub.Core.SkillDrafter.DraftAsync(request, Catalogue, current, feedback, cancellation.Token), cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            WorkbenchFeedback.Hide("workbench-draft");
             OpenEditor(skill, notes, current is null ? "New skill — check it, then save" : "Revised — check it, then save");
             if (current is null) TeachInput.Text = "";
         }
-        catch (OperationCanceledException) { status.Text = ""; }
+        catch (OperationCanceledException) { if (ReferenceEquals(_cts, cancellation)) WorkbenchFeedback.Hide("workbench-draft"); }
         catch (Exception ex)
         {
             Log.Warn("workbench", "Drafting failed", ex);
-            status.Text = "Couldn't draft it: " + (ex is LlmUnavailableException ? "the local model isn't available." : ex.Message);
+            if (!cancellation.IsCancellationRequested)
+                WorkbenchFeedback.Show("Couldn't draft it: " + (ex is LlmUnavailableException ? "the local model isn't available." : ex.Message), error: true);
         }
-        finally { button.IsEnabled = true; }
+        finally
+        {
+            if (ReferenceEquals(_cts, cancellation))
+            {
+                _cts = null;
+                DraftButton.IsEnabled = ImproveButton.IsEnabled = true;
+            }
+        }
     }
 
     private void OnScratch(object sender, RoutedEventArgs e)
     {
+        _cts?.Cancel();
         var text = TeachInput.Text.Trim();
         OpenEditor(new AskSkill { Name = "", Description = text, Instructions = text, TaughtAs = text }, Array.Empty<string>(), "New skill");
     }
@@ -199,7 +210,7 @@ public partial class WorkbenchPage : UserControl, IPage
         ShowSteps();
         EditorNotes.Text = string.Join(" ", notes);
         EditorNotes.Visibility = notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        EditorStatus.Text = "";
+        WorkbenchFeedback.Hide();
         FeedbackInput.Text = "";
         Editor.Visibility = Visibility.Visible;
         TeachCard.Visibility = Visibility.Collapsed;
@@ -241,20 +252,21 @@ public partial class WorkbenchPage : UserControl, IPage
     private AskSkill? SaveDraft()
     {
         var skill = FromEditor();
-        if (skill.Name.Length == 0) { EditorStatus.Text = "Give the skill a name."; SkillName.Focus(); return null; }
-        if (skill.Instructions.Length == 0 && skill.Steps.Count == 0) { EditorStatus.Text = "Say what Aqua should do."; SkillInstructions.Focus(); return null; }
-        if (skill.Triggers.Count == 0 && skill.Description.Length == 0) { EditorStatus.Text = "Add when to use it, or a few things you might say."; SkillWhen.Focus(); return null; }
+        if (skill.Name.Length == 0) { WorkbenchFeedback.Show("Give the skill a name.", error: true); SkillName.Focus(); return null; }
+        if (skill.Instructions.Length == 0 && skill.Steps.Count == 0) { WorkbenchFeedback.Show("Say what Aqua should do.", error: true); SkillInstructions.Focus(); return null; }
+        if (skill.Triggers.Count == 0 && skill.Description.Length == 0) { WorkbenchFeedback.Show("Add when to use it, or a few things you might say.", error: true); SkillWhen.Focus(); return null; }
         var notes = Workbench.Validate(skill, Catalogue);
         try
         {
             var saved = Hub.Core.Workbench.SaveSkill(skill);
+            _cts?.Cancel();
             _draft = null;
             Editor.Visibility = Visibility.Collapsed;
             TeachCard.Visibility = Visibility.Visible;
-            TeachStatus.Text = $"Saved “{saved.Name}”." + (notes.Count > 0 ? " " + string.Join(" ", notes) : "") + " Ask uses it when a request fits.";
+            WorkbenchFeedback.Show($"Saved “{saved.Name}”." + (notes.Count > 0 ? " " + string.Join(" ", notes) : ""));
             return saved;
         }
-        catch (InvalidOperationException ex) { EditorStatus.Text = ex.Message; return null; }
+        catch (InvalidOperationException ex) { WorkbenchFeedback.Show(ex.Message, error: true); return null; }
     }
 
     private void OnSaveSkill(object sender, RoutedEventArgs e) => SaveDraft();
@@ -266,10 +278,11 @@ public partial class WorkbenchPage : UserControl, IPage
 
     private void OnDiscard(object sender, RoutedEventArgs e)
     {
+        _cts?.Cancel();
         _draft = null;
         Editor.Visibility = Visibility.Collapsed;
         TeachCard.Visibility = Visibility.Visible;
-        TeachStatus.Text = "";
+        WorkbenchFeedback.Hide();
     }
 
     private static void TryIt(AskSkill skill)

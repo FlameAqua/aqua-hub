@@ -3,7 +3,7 @@ namespace AquaHub.Core.Reminders;
 public enum ReminderRepeat { Once, Daily, Weekly }
 public enum ReminderStatus { Scheduled, Due, Missed, Snoozed }
 
-public sealed record ReminderDraft(string Title, DateTime LocalTime, ReminderRepeat Repeat, string? SceneId = null);
+public sealed record ReminderDraft(string Title, DateTime LocalTime, ReminderRepeat Repeat, string? SceneId = null, int? QuickMinutes = null);
 public sealed record ReminderOccurrence(DateTime Nominal, DateTimeOffset At, ReminderStatus Status, int Delivery = 0,
     bool SceneRunRequested = false);
 public sealed record Reminder(Guid Id, Guid ScheduleId, ReminderDraft Draft, DateTimeOffset FirstInstant,

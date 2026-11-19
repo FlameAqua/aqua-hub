@@ -13,7 +13,6 @@ public partial class SettingsPage
 {
     private CancellationTokenSource? _googleCts;
     private bool _googleBusy;
-    private string _googleMessage = "";
     private sealed class YouTubeChoice(ChannelRef channel, bool selected, string label, Func<ChannelRef, bool, bool> choose) : ObservableObject
     {
         private bool _selected = selected;
@@ -38,10 +37,9 @@ public partial class SettingsPage
         GoogleDisconnect.Visibility = account.Connected ? Visibility.Visible : Visibility.Collapsed;
         GoogleDisconnect.IsEnabled = !_googleBusy;
         GoogleCancel.Visibility = _googleBusy && _googleCts is not null ? Visibility.Visible : Visibility.Collapsed;
-        if (_googleBusy) return;
-        GoogleStatus.Text = _googleMessage.Length > 0 ? _googleMessage : account.Connected
-            ? account.LastSynced is { } synced ? $"Google connected · {account.Channels.Count} subscriptions · synced {synced.ToLocalTime():g}." + (account.Truncated ? " Showing the first 1,000 subscriptions." : "") : "Google connected. Sync subscriptions to load your channel list."
-            : account.Configured ? "Desktop client configured. Connect Google to import subscriptions." : "First enable YouTube Data API v3 in Google Cloud, create a Desktop app OAuth client, and import its JSON configuration. Add your Google account as a test user if the project is in Testing.";
+        GoogleStatus.Text = account.Connected
+            ? account.LastSynced is { } synced ? $"Google connected · {account.Channels.Count} subscriptions · synced {synced.ToLocalTime():g}" + (account.Truncated ? " · first 1,000 shown" : "") : "Google connected · awaiting first sync"
+            : account.Configured ? "Desktop client configured" : "Desktop client configuration required";
     }
     private void OnGoogleSetup(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl("https://developers.google.com/youtube/data/guides/auth/installed-apps");
     private async void OnImportGoogleClient(object sender, RoutedEventArgs e)
@@ -49,13 +47,13 @@ public partial class SettingsPage
         if (_googleBusy || Sandbox.Intercept("google-client-import", "Desktop OAuth client configuration picker")) return;
         var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Google client configuration (*.json)|*.json", Title = "Choose Google Desktop OAuth client JSON" };
         if (picker.ShowDialog() != true) return;
-        await RunGoogleAsync(async _ =>
+        await RunGoogleAsync(async ct =>
         {
             await using var file = new FileStream(picker.FileName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
             if (file.Length > 16384) throw new GoogleYouTubeException("That file is too large for a Google Desktop client configuration.");
             var buffer = new char[16385];
             using var reader = new StreamReader(file);
-            var length = await reader.ReadBlockAsync(buffer.AsMemory(), _googleCts!.Token);
+            var length = await reader.ReadBlockAsync(buffer.AsMemory(), ct);
             if (length > 16384) throw new GoogleYouTubeException("That file is too large for a Google Desktop client configuration.");
             Hub.Core.YouTubeAccount.Configure(new string(buffer, 0, length));
         }, "Importing Google client configuration…", "Desktop client configured. Connect Google to import subscriptions.");
@@ -64,11 +62,11 @@ public partial class SettingsPage
     {
         if (_googleBusy) return;
         SaveNow();
-        if (Sandbox.Intercept("google-connect", "read-only YouTube subscriptions")) { _googleMessage = "Google sign-in is intercepted in this test profile."; ShowYouTubeAccount(); return; }
+        if (Sandbox.Intercept("google-connect", "read-only YouTube subscriptions")) { SettingsFeedback.Show("Google sign-in is intercepted in this test profile.", "google-feedback"); return; }
         await RunGoogleAsync(ct => Hub.Core.YouTubeAccount.ConnectAsync(uri => Hub.Ui.InvokeAsync(() =>
         {
             ct.ThrowIfCancellationRequested();
-            GoogleStatus.Text = "Finish Google sign-in in your browser. Waiting for read-only YouTube approval…";
+            SettingsFeedback.Show("Finish Google sign-in in your browser.", "google-feedback", busy: true);
             if (!AppLauncher.OpenUrl(uri.AbsoluteUri)) throw new GoogleYouTubeException("Couldn't open your browser. Check your default browser, then connect Google again.");
         }).Task, ct), "Starting Google sign-in…");
     }
@@ -88,15 +86,19 @@ public partial class SettingsPage
     }
     private async Task RunGoogleAsync(Func<CancellationToken, Task> operation, string busyText, string success = "")
     {
-        _googleBusy = true; _googleMessage = "";
+        _googleBusy = true;
         using var cancellation = new CancellationTokenSource();
         _googleCts = cancellation;
-        ShowYouTubeAccount(); GoogleStatus.Text = busyText;
-        try { await operation(cancellation.Token); _googleMessage = success; }
-        catch (OperationCanceledException) { _googleMessage = Hub.Core.YouTubeAccount.Connected ? "Sync cancelled. Google remains connected; the last successful subscription list is kept." : "Google connection cancelled."; }
-        catch (GoogleYouTubeException ex) { _googleMessage = ex.Message; }
+        ShowYouTubeAccount();
+        SettingsFeedback.Show(busyText, "google-feedback", busy: true);
+        try { await operation(cancellation.Token); SettingsFeedback.Show(success, "google-feedback"); }
+        catch (OperationCanceledException)
+        {
+            if (_streamsActive) SettingsFeedback.Show(Hub.Core.YouTubeAccount.Connected ? "Sync cancelled. Your subscription list was kept." : "Google connection cancelled.", "google-feedback");
+        }
+        catch (GoogleYouTubeException ex) { SettingsFeedback.Show(ex.Message, "google-feedback", error: true); }
         // Provider/file exceptions can contain authorization URLs or local paths. Keep this boundary out of logs.
-        catch (Exception) { _googleMessage = "Couldn't complete the Google connection. Check your connection and client configuration, then try again."; }
+        catch (Exception) { SettingsFeedback.Show("Couldn't complete the Google connection. Check your connection and client configuration, then try again.", "google-feedback", error: true); }
         finally { _googleCts = null; _googleBusy = false; ShowYouTubeAccount(); RefreshYouTubeChoices(); }
     }
     private void OnFilterYouTubeChannels(object sender, TextChangedEventArgs e) { if (YouTubeLiveChoices is not null && _s is not null) RefreshYouTubeChoices(); }
@@ -121,7 +123,7 @@ public partial class SettingsPage
         {
             if (selected.Count >= StreamsSession.MaxYouTubeChannels)
             {
-                YouTubeSelectionStatus.Text = "Six channels are already selected. Uncheck a channel before choosing another.";
+                SettingsFeedback.Show("Six channels are already selected. Uncheck a channel before choosing another.", "youtube-selection-feedback", error: true);
                 return false;
             }
             selected.Add(channel);
@@ -130,7 +132,8 @@ public partial class SettingsPage
         _s.Social.Streams.YouTubeSelection = selected;
         SaveNow();
         // Keep the current row/focus in place while its saved state changes.
-        YouTubeSelectionStatus.Text = $"{selected.Count} of {StreamsSession.MaxYouTubeChannels} live channels selected. Changes saved.";
+        SettingsFeedback.Hide("youtube-selection-feedback");
+        YouTubeSelectionStatus.Text = $"{selected.Count} of {StreamsSession.MaxYouTubeChannels} live channels selected.";
         return include;
     }
 }

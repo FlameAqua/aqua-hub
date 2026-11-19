@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows;
-using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -27,7 +26,7 @@ public partial class UpcomingPage
     private bool _settingDay;
     private bool _busy;
     private int _eventOffset;
-    private string? _commandError;
+    private string? _storageError;
 
     private DateOnly SelectedDay => _selectedDay ?? _reminders.Snapshot.Today;
 
@@ -78,13 +77,6 @@ public partial class UpcomingPage
         _settingDay = false;
         AllReminders.Content = _allReminders ? "Back to day" : "All reminders";
         AgendaHeading.Text = _allReminders ? "All reminders" : day.ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture);
-        var showCalendarSetup = !_allReminders && !Hub.S.Events.Calendars.Any(calendar => calendar.Enabled);
-        if (_vm.NoCalendars != showCalendarSetup)
-        {
-            _vm.NoCalendars = showCalendarSetup;
-            _vm.Changed();
-        }
-
         var rows = new List<AgendaData>();
         var events = _allReminders ? [] : Hub.State.Events.Where(e => OnDay(e, day, snapshot)).Skip(_eventOffset).Take(EventsPerPage + 1).ToArray();
         if (!_allReminders && events.Length == 0 && _eventOffset > 0)
@@ -111,11 +103,14 @@ public partial class UpcomingPage
         MoreAgendaItems.Visibility = events.Length > EventsPerPage ? Visibility.Visible : Visibility.Collapsed;
         PreviousAgendaItems.Visibility = !_allReminders && _eventOffset > 0 ? Visibility.Visible : Visibility.Collapsed;
         AgendaRetry.Visibility = snapshot.Error is not null ? Visibility.Visible : Visibility.Collapsed;
-        var status = _busy ? "Working…" : _commandError ?? snapshot.Error
-            ?? (snapshot.Loading ? "Loading saved reminders…" : "");
-        if (status.Length == 0 && rows.Count == 0)
-            status = _allReminders ? "No reminders yet. Add one to get started." : "Nothing on the agenda for this day.";
-        SetStatus(AgendaStatus, status);
+        if (_storageError != snapshot.Error)
+        {
+            _storageError = snapshot.Error;
+            if (_storageError is not null) AgendaFeedback.Show(_storageError, "agenda-storage-error", error: true);
+            else AgendaFeedback.Hide("agenda-storage-error");
+        }
+        AgendaEmpty.Text = _allReminders ? "No reminders yet." : "Nothing scheduled for this day.";
+        AgendaEmpty.Visibility = rows.Count == 0 && !snapshot.Loading && snapshot.Error is null ? Visibility.Visible : Visibility.Collapsed;
         if (_allReminders || !Hub.S.Events.Calendars.Any(c => c.Enabled)) return;
         if (Hub.State.FreshAt("events") is not { } refreshed)
             AgendaHeading.Text += " · Calendar hasn’t refreshed yet";
@@ -157,14 +152,6 @@ public partial class UpcomingPage
 
     private static string FormatTime(DateTimeOffset at, bool use24) => at.ToString(use24 ? "HH:mm" : "h:mm tt", CultureInfo.CurrentCulture);
 
-    private static void SetStatus(TextBlock block, string text)
-    {
-        block.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (block.Text == text) return;
-        block.Text = text;
-        if (text.Length > 0) UIElementAutomationPeer.CreatePeerForElement(block)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-    }
-
     private void SetAgendaRows(IEnumerable<AgendaData> ordered)
     {
         var items = ordered.ToArray();
@@ -190,7 +177,6 @@ public partial class UpcomingPage
     {
         _selectedDay = value == _reminders.Snapshot.Today ? null : value;
         _allReminders = false;
-        _commandError = null;
         _eventOffset = 0;
         RefreshAgenda();
     }
@@ -202,21 +188,20 @@ public partial class UpcomingPage
     private void OnToday(object sender, RoutedEventArgs e) => SetDay(null);
     private void OnPreviousDay(object sender, RoutedEventArgs e) { if (SelectedDay > DateOnly.MinValue) SetDay(SelectedDay.AddDays(-1)); }
     private void OnNextDay(object sender, RoutedEventArgs e) { if (SelectedDay < DateOnly.MaxValue) SetDay(SelectedDay.AddDays(1)); }
-    private void OnAllReminders(object sender, RoutedEventArgs e) { _allReminders = !_allReminders; _commandError = null; RefreshAgenda(); }
+    private void OnAllReminders(object sender, RoutedEventArgs e) { _allReminders = !_allReminders; RefreshAgenda(); }
     private void OnMoreAgendaItems(object sender, RoutedEventArgs e) { _eventOffset += EventsPerPage; RefreshAgenda(); }
     private void OnPreviousAgendaItems(object sender, RoutedEventArgs e) { _eventOffset = Math.Max(0, _eventOffset - EventsPerPage); RefreshAgenda(); }
     private void OnAddReminder(object sender, RoutedEventArgs e) => NavigateAgenda("new-reminder");
     private void OnAgendaDateInvalid(object? sender, DatePickerDateValidationErrorEventArgs e)
     {
         e.ThrowException = false;
-        _commandError = "Enter a valid agenda date.";
-        RefreshAgenda();
+        AgendaFeedback.Show("Enter a valid agenda date.", "agenda-status", error: true);
     }
     private void OnReminderDateInvalid(object? sender, DatePickerDateValidationErrorEventArgs e)
     {
         e.ThrowException = false;
         ReminderDate.SelectedDate = null;
-        SetStatus(EditorStatus, "Enter a valid date.");
+        AgendaFeedback.Show("Enter a valid date.", "reminder-editor-status", error: true);
     }
 
     private void OnReminderEdit(object sender, RoutedEventArgs e)
@@ -240,7 +225,7 @@ public partial class UpcomingPage
         ReminderRepeatBox.SelectedIndex = (int)draft.Repeat;
         LoadSceneChoices(draft.SceneId);
         EditorHeading.Text = original is null ? "New reminder" : "Edit reminder";
-        SetStatus(EditorStatus, "");
+        AgendaFeedback.Hide("reminder-editor-status");
         ReminderEditor.Visibility = Visibility.Visible;
         Dispatcher.BeginInvoke(() => { ReminderEditor.BringIntoView(); ReminderTitle.Focus(); ReminderTitle.SelectAll(); }, DispatcherPriority.Loaded);
         RefreshAgenda();
@@ -249,6 +234,7 @@ public partial class UpcomingPage
     private void CloseEditor(bool focus)
     {
         ReminderEditor.Visibility = Visibility.Collapsed;
+        AgendaFeedback.Hide("reminder-editor-status");
         _editing = null;
         ReminderSceneBox.ItemsSource = null;
         ReminderTitle.Clear();
@@ -276,10 +262,10 @@ public partial class UpcomingPage
 
     private async void OnSaveReminder(object sender, RoutedEventArgs e)
     {
-        if (ReminderDate.SelectedDate is not { } date) { SetStatus(EditorStatus, "Choose a date."); ReminderDate.Focus(); return; }
+        if (ReminderDate.SelectedDate is not { } date) { AgendaFeedback.Show("Choose a date.", "reminder-editor-status", error: true); ReminderDate.Focus(); return; }
         if (!TimeOnly.TryParseExact(ReminderTime.Text.Trim(), ["HH:mm", "H:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
         {
-            SetStatus(EditorStatus, "Enter a 24-hour time, such as 19:00.");
+            AgendaFeedback.Show("Enter a 24-hour time, such as 19:00.", "reminder-editor-status", error: true);
             ReminderTime.Focus();
             return;
         }
@@ -320,18 +306,21 @@ public partial class UpcomingPage
         if (_busy || _visible is null) return;
         var ct = _visible.Token;
         _busy = true;
-        _commandError = null;
+        var noticeId = editor ? "reminder-editor-status" : "agenda-status";
         EditorFields.IsEnabled = AddReminder.IsEnabled = AgendaList.IsEnabled = AgendaRetry.IsEnabled = false;
-        if (editor) SetStatus(EditorStatus, "Saving…");
+        AgendaFeedback.Show(editor ? "Saving reminder…" : "Working…", noticeId, busy: true);
         RefreshAgenda();
-        try { await work(ct); }
-        catch (OperationCanceledException) { }
+        try
+        {
+            await work(ct);
+            if (!ct.IsCancellationRequested) AgendaFeedback.Hide(noticeId);
+        }
+        catch (OperationCanceledException) { if (!ct.IsCancellationRequested) AgendaFeedback.Hide(noticeId); }
         catch (ReminderException ex)
         {
             if (!ct.IsCancellationRequested)
             {
-                if (editor) SetStatus(EditorStatus, ex.Message);
-                else _commandError = ex.Message;
+                AgendaFeedback.Show(ex.Message, noticeId, error: true);
                 if (ex.Field == "title") _ = Dispatcher.BeginInvoke(() => ReminderTitle.Focus(), DispatcherPriority.Input);
                 if (ex.Field == "time") _ = Dispatcher.BeginInvoke(() => ReminderTime.Focus(), DispatcherPriority.Input);
             }

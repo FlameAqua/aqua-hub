@@ -38,7 +38,6 @@ public partial class SettingsPage : UserControl, IPage
     private CancellationTokenSource? _cityCts;
     private CancellationTokenSource? _twitchCts;
     private bool _twitchBusy, _streamsActive;
-    private string _twitchMessage = "";
 
     private static readonly SectionVM[] SectionDefs =
     {
@@ -266,6 +265,7 @@ public partial class SettingsPage : UserControl, IPage
     public void OnNavigatedFrom()
     {
         _streamsActive = false;
+        SettingsFeedback.Hide();
         _twitchCts?.Cancel();
         _googleCts?.Cancel();
         Hub.Core.Streams.Changed -= OnStreamConnectionChanged;
@@ -378,8 +378,7 @@ public partial class SettingsPage : UserControl, IPage
         TwitchCancel.Visibility = _twitchBusy && _twitchCts is not null ? Visibility.Visible : Visibility.Collapsed;
         TwitchDisconnect.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
         TwitchDisconnect.IsEnabled = !_twitchBusy;
-        if (!_twitchBusy) TwitchStatus.Text = _twitchMessage.Length > 0 ? _twitchMessage
-            : connected ? "Connected as " + Hub.Core.Streams.TwitchLogin + ". Tokens are kept in Windows Credential Manager." : "Not connected.";
+        TwitchStatus.Text = connected ? "Connected as " + Hub.Core.Streams.TwitchLogin : "Not connected";
     }
     private void OnRegisterTwitch(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl("https://dev.twitch.tv/console/apps");
     private void OnCancelTwitch(object sender, RoutedEventArgs e) { _twitchCts?.Cancel(); Hub.Core.Streams.CancelConnect(); }
@@ -388,50 +387,47 @@ public partial class SettingsPage : UserControl, IPage
         if (_twitchBusy) return;
         if (!TwitchClient.ValidClientId(TwitchClientId.Text.Trim()))
         {
-            _twitchMessage = "Enter the public Twitch client ID: in Twitch's developer console, click Manage and copy Client ID. The app name isn't the Client ID.";
-            ShowTwitchConnection();
-            TwitchStatus.SetResourceReference(TextBlock.ForegroundProperty, "B.Warn");
+            SettingsFeedback.Show("Enter the public Twitch client ID: in Twitch's developer console, click Manage and copy Client ID. The app name isn't the Client ID.", "twitch-feedback", error: true);
             TwitchClientId.Focus();
             return;
         }
-        TwitchStatus.SetResourceReference(TextBlock.ForegroundProperty, "B.Text");
         SaveNow();
-        if (Sandbox.Intercept("twitch-connect", "public client · followed live channels")) { TwitchStatus.Text = "Twitch sign-in is intercepted in this test profile."; return; }
+        if (Sandbox.Intercept("twitch-connect", "public client · followed live channels")) { SettingsFeedback.Show("Twitch sign-in is intercepted in this test profile.", "twitch-feedback"); return; }
         _twitchBusy = true;
-        _twitchMessage = "";
         using var cancellation = new CancellationTokenSource();
         _twitchCts = cancellation;
         Hub.Core.Settings.Update(s => s.Social.Streams.Twitch = true);
         ShowTwitchConnection();
-        TwitchStatus.Text = "Requesting a Twitch sign-in code…";
+        SettingsFeedback.Show("Requesting a Twitch sign-in code…", "twitch-feedback", busy: true);
         try
         {
             await Hub.Core.Streams.ConnectAsync(code => Hub.Ui.InvokeAsync(() =>
             {
                 cancellation.Token.ThrowIfCancellationRequested();
-                TwitchStatus.Text = $"In your browser, sign in and enter {code.UserCode} if asked. Waiting for your approval…";
+                SettingsFeedback.Show($"In your browser, sign in and enter {code.UserCode} if asked.", "twitch-feedback", busy: true);
                 if (!AppLauncher.OpenUrl(code.VerificationUri.AbsoluteUri)) throw new TwitchException("Couldn't open your browser. Check your default browser, then connect Twitch again.");
             }).Task, cancellation.Token);
-            _twitchMessage = "Connected as " + Hub.Core.Streams.TwitchLogin + ". Open Social to check your followed live channels.";
+            SettingsFeedback.Show("Twitch connected. Open Social to see your followed channels.", "twitch-feedback");
         }
-        catch (OperationCanceledException) { _twitchMessage = "Twitch sign-in cancelled."; }
-        catch (TwitchException ex) { _twitchMessage = ex.Message; }
-        catch (Exception ex) { Log.Warn("streams", "Twitch sign-in failed", ex); _twitchMessage = "Couldn't connect to Twitch. Check your connection and try again."; }
+        catch (OperationCanceledException) { if (_streamsActive) SettingsFeedback.Show("Twitch sign-in cancelled.", "twitch-feedback"); }
+        catch (TwitchException ex) { SettingsFeedback.Show(ex.Message, "twitch-feedback", error: true); }
+        catch (Exception ex) { Log.Warn("streams", "Twitch sign-in failed", ex); SettingsFeedback.Show("Couldn't connect to Twitch. Check your connection and try again.", "twitch-feedback", error: true); }
         finally { _twitchCts = null; _twitchBusy = false; ShowTwitchConnection(); }
     }
     private async void OnDisconnectTwitch(object sender, RoutedEventArgs e)
     {
         if (_twitchBusy) return;
         _twitchBusy = true; ShowTwitchConnection();
+        SettingsFeedback.Show("Disconnecting Twitch…", "twitch-feedback", busy: true);
         try
         {
             var disconnect = Hub.Core.Streams.DisconnectAsync();
             Hub.Core.Settings.Update(s => s.Social.Streams.Twitch = false);
             await disconnect;
-            _twitchMessage = "Disconnected. Saved Twitch credentials and stream observations were removed.";
+            SettingsFeedback.Show("Twitch disconnected. Saved credentials and stream observations were removed.", "twitch-feedback");
         }
-        catch (TwitchException ex) { _twitchMessage = ex.Message; }
-        catch (Exception) { _twitchMessage = "Disconnected on this PC. Twitch couldn't confirm revocation; you can remove Aqua Hub in Twitch's Connections settings."; }
+        catch (TwitchException ex) { SettingsFeedback.Show(ex.Message, "twitch-feedback", error: true); }
+        catch (Exception) { SettingsFeedback.Show("Disconnected on this PC. Twitch couldn't confirm revocation; remove Aqua Hub in Twitch's Connections settings.", "twitch-feedback", error: true); }
         finally { _twitchBusy = false; ShowTwitchConnection(); }
     }
 
@@ -489,7 +485,7 @@ public partial class SettingsPage : UserControl, IPage
             _original = SettingsStore.DeepCopy(_s);
         }
         finally { _saving = false; }
-        SavedText.Text = "Saved " + DateTime.Now.ToString("HH:mm:ss", CultureInfo.CurrentCulture);
+
         Dispatcher.BeginInvoke(ShowHotkeyErrors, System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -518,8 +514,8 @@ public partial class SettingsPage : UserControl, IPage
 
     private void ShowHotkeyProblem(string? problem)
     {
-        HotkeyProblem.Text = problem ?? "";
-        HotkeyProblem.Visibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
+        if (problem is null) SettingsFeedback.Hide("hotkey-problem");
+        else SettingsFeedback.Show(problem, "hotkey-problem", error: true);
     }
 
     private void OnResetHotkey(object sender, RoutedEventArgs e)
@@ -527,10 +523,14 @@ public partial class SettingsPage : UserControl, IPage
         if ((sender as FrameworkElement)?.Tag is HotkeyBox box) box.Reset();
     }
 
+    private string _lastHotkeyError = "";
     private void ShowHotkeyErrors()
     {
-        HotkeyErrors.Text = string.Join("\n", App.HotkeyErrors);
-        HotkeyErrors.Visibility = App.HotkeyErrors.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var message = string.Join("\n", App.HotkeyErrors);
+        if (_lastHotkeyError == message) return;
+        _lastHotkeyError = message;
+        if (message.Length != 0) SettingsFeedback.Show(message, "hotkey-registration", error: true);
+        else SettingsFeedback.Hide("hotkey-registration");
     }
 
     private void OnSection(object sender, SelectionChangedEventArgs e)
@@ -633,13 +633,13 @@ public partial class SettingsPage : UserControl, IPage
     {
         var url = NewSourceUrl.Text.Trim();
         var name = NewSourceName.Text.Trim();
-        if (!SettingsStore.IsSafeHttpUrl(url)) { SourceError.Text = "Please enter an https:// feed URL."; return; }
+        if (!SettingsStore.IsSafeHttpUrl(url)) { SettingsFeedback.Show("Please enter an https:// feed URL.", "SourceError", error: true); return; }
         if (name.Length == 0) name = new Uri(url).Host.Replace("www.", "");
         var id = "custom-" + Hash.Short(url)[..8];
-        if (_s.News.Sources.Any(s => s.Url == url)) { SourceError.Text = "That feed is already added."; return; }
+        if (_s.News.Sources.Any(s => s.Url == url)) { SettingsFeedback.Show("That feed is already added.", "SourceError", error: true); return; }
         var category = (NewSourceCat.SelectedItem as ComboBoxItem)?.Content as string ?? "world";
         _s.News.Sources.Add(new NewsSource { Id = id, Name = name, Url = url, Category = category, Tier = 2, Local = category == "local" });
-        SourceError.Text = "";
+        SettingsFeedback.Hide("SourceError");
         NewSourceUrl.Text = NewSourceName.Text = "";
         RefreshLists();
         Save();
@@ -679,7 +679,7 @@ public partial class SettingsPage : UserControl, IPage
         var url = NewCalUrl.Text.Trim();
         if (url.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase)) url = "https://" + url[9..];
         var isFile = Path.IsPathFullyQualified(url) && url.EndsWith(".ics", StringComparison.OrdinalIgnoreCase) && File.Exists(url);
-        if (!isFile && !SettingsStore.IsSafeHttpUrl(url)) { CalError.Text = "Enter an https:// ICS link or pick a .ics file."; return; }
+        if (!isFile && !SettingsStore.IsSafeHttpUrl(url)) { SettingsFeedback.Show("Enter an https:// ICS link or pick a .ics file.", "CalError", error: true); return; }
         var palette = new[] { "#4CC2FF", "#FF8FB1", "#8BD17C", "#F5B84B", "#B892FF" };
         _s.Events.Calendars.Add(new CalendarSource
         {
@@ -687,7 +687,7 @@ public partial class SettingsPage : UserControl, IPage
             Url = url,
             Color = palette[_s.Events.Calendars.Count % palette.Length],
         });
-        CalError.Text = "";
+        SettingsFeedback.Hide("CalError");
         NewCalName.Text = NewCalUrl.Text = "";
         RefreshLists();
         Save();
@@ -717,14 +717,15 @@ public partial class SettingsPage : UserControl, IPage
     {
         var handle = _s.Social.BlueskyHandle.Trim().TrimStart('@');
         var password = BskyPassword.Password.Trim();
-        if (handle.Length == 0 || password.Length == 0) { BskyStatus.Text = "Enter your handle and an app password first."; return; }
-        BskyStatus.Text = "Signing in…";
+        if (handle.Length == 0 || password.Length == 0) { SettingsFeedback.Show("Enter your Bluesky handle and app password.", "bsky-feedback", error: true); return; }
+        SettingsFeedback.Show("Signing in to Bluesky…", "bsky-feedback", busy: true);
         var who = await BlueskySource.TestSignInAsync(Hub.Core.Http, handle, password);
-        if (who is null) { BskyStatus.Text = "Sign-in failed — check the handle and that you used an app password (not your main password)."; return; }
+        if (who is null) { SettingsFeedback.Show("Bluesky sign-in failed. Check your handle and app password.", "bsky-feedback", error: true); return; }
         Hub.Core.Secrets.Set(SecretKeys.BlueskyAppPassword, password);
         BskyPassword.Password = "";
         Save();
         ShowConnections();
+        SettingsFeedback.Show("Bluesky connected.", "bsky-feedback");
         Hub.Core.Agents.RunNow("social-scout");
     }
 
@@ -738,14 +739,15 @@ public partial class SettingsPage : UserControl, IPage
     {
         var token = MastodonToken.Password.Trim();
         var instance = _s.Social.MastodonInstance.Trim().Replace("https://", "").TrimEnd('/');
-        if (token.Length == 0 || instance.Length == 0) { MastodonStatus.Text = "Enter your server (above) and an access token first."; return; }
-        MastodonStatus.Text = "Checking…";
+        if (token.Length == 0 || instance.Length == 0) { SettingsFeedback.Show("Enter your Mastodon server and access token.", "masto-feedback", error: true); return; }
+        SettingsFeedback.Show("Checking the Mastodon token…", "masto-feedback", busy: true);
         var account = await MastodonSource.VerifyAsync(Hub.Core.Http, instance, token);
-        if (account is null) { MastodonStatus.Text = "The server didn't accept that token — it needs the read:statuses scope."; return; }
+        if (account is null) { SettingsFeedback.Show("The Mastodon server rejected the token. It needs the read:statuses scope.", "masto-feedback", error: true); return; }
         Hub.Core.Secrets.Set(SecretKeys.MastodonToken, token);
         MastodonToken.Password = "";
         Save();
-        MastodonStatus.Text = $"Connected as @{account}@{instance}";
+        ShowConnections();
+        SettingsFeedback.Show($"Connected as @{account}@{instance}.", "masto-feedback");
         Hub.Core.Agents.RunNow("social-scout");
     }
 
@@ -817,23 +819,23 @@ public partial class SettingsPage : UserControl, IPage
         var (id, page) = YouTubeChannels.Parse(input);
         if (id is null && page is null)
         {
-            ChannelError.Text = "That doesn't look like a YouTube channel — paste its link (youtube.com/@name), its @handle, a video link or its UC… ID.";
+            SettingsFeedback.Show("That doesn't look like a YouTube channel — paste its link (youtube.com/@name), its @handle, a video link or its UC… ID.", "ChannelError", error: true);
             return;
         }
-        if (id is not null && _s.Social.YouTubeChannels.Any(c => c.ChannelId == id)) { ChannelError.Text = "That channel is already added."; return; }
+        if (id is not null && _s.Social.YouTubeChannels.Any(c => c.ChannelId == id)) { SettingsFeedback.Show("That channel is already added.", "ChannelError", error: true); return; }
         AddChannelButton.IsEnabled = false;
-        ChannelError.Text = "Looking up the channel…";
+        SettingsFeedback.Show("Looking up the channel…", "ChannelError", busy: true);
         YouTubeChannelInfo? info = null;
         try { info = await YouTubeChannels.ResolveAsync(Hub.Core.Http, input); }
         catch (Exception ex) { Core.Util.Log.Warn("settings", "YouTube lookup failed", ex); }
         finally { AddChannelButton.IsEnabled = true; }
         if (info is null && id is null)
         {
-            ChannelError.Text = "Couldn't find that channel. Check the link, or paste the channel's UC… ID (on the channel page: About › Share › Copy channel ID).";
+            SettingsFeedback.Show("Couldn't find that channel. Check the link, or paste the channel's UC… ID (on the channel page: About › Share › Copy channel ID).", "ChannelError", error: true);
             return;
         }
         var channelId = info?.ChannelId ?? id!;
-        if (_s.Social.YouTubeChannels.Any(c => c.ChannelId == channelId)) { ChannelError.Text = "That channel is already added."; return; }
+        if (_s.Social.YouTubeChannels.Any(c => c.ChannelId == channelId)) { SettingsFeedback.Show("That channel is already added.", "ChannelError", error: true); return; }
         _s.Social.YouTubeChannels.Add(new ChannelRef
         {
             ChannelId = channelId,
@@ -841,7 +843,8 @@ public partial class SettingsPage : UserControl, IPage
             Handle = info?.Handle ?? "",
             AvatarUrl = info?.AvatarUrl ?? "",
         });
-        ChannelError.Text = info is null ? "Added — the name couldn't be looked up right now (offline?), so it shows as “YouTube channel”." : "";
+        if (info is null) SettingsFeedback.Show("Channel saved. Its name is temporarily unavailable.", "ChannelError");
+        else SettingsFeedback.Hide("ChannelError");
         NewChannelId.Text = "";
         RefreshLists();
         Save();
@@ -860,11 +863,11 @@ public partial class SettingsPage : UserControl, IPage
     private void OnAddExtraFeed(object sender, RoutedEventArgs e)
     {
         var url = NewFeedUrl.Text.Trim();
-        if (!SettingsStore.IsSafeHttpUrl(url)) { ExtraFeedError.Text = "Please enter an https:// RSS or Atom feed URL."; return; }
-        if (_s.Social.ExtraFeeds.Any(f => f.Url == url)) { ExtraFeedError.Text = "That feed is already added."; return; }
+        if (!SettingsStore.IsSafeHttpUrl(url)) { SettingsFeedback.Show("Please enter an https:// RSS or Atom feed URL.", "ExtraFeedError", error: true); return; }
+        if (_s.Social.ExtraFeeds.Any(f => f.Url == url)) { SettingsFeedback.Show("That feed is already added.", "ExtraFeedError", error: true); return; }
         var name = NewFeedName.Text.Trim() is { Length: > 0 } n ? n : new Uri(url).Host.Replace("www.", "");
         _s.Social.ExtraFeeds.Add(new NewsSource { Id = "feed-" + Hash.Short(url)[..8], Name = name, Url = url, Category = "social", Tier = 3, Local = NewFeedLocal.IsChecked == true });
-        ExtraFeedError.Text = "";
+        SettingsFeedback.Hide("ExtraFeedError");
         NewFeedUrl.Text = NewFeedName.Text = "";
         NewFeedLocal.IsChecked = false;
         RefreshLists();
@@ -883,13 +886,13 @@ public partial class SettingsPage : UserControl, IPage
     private void OnSaveAiKey(object sender, RoutedEventArgs e)
     {
         Hub.Core.Secrets.Set(SecretKeys.OpenAiCompatibleKey, AiKey.Password.Trim());
-        SavedText.Text = "API key saved to Credential Manager";
+        SettingsFeedback.Show("API key saved to Credential Manager");
     }
 
     private void OnSaveBraveKey(object sender, RoutedEventArgs e)
     {
         Hub.Core.Secrets.Set(SecretKeys.BraveSearchKey, BraveKey.Password.Trim());
-        SavedText.Text = "API key saved to Credential Manager";
+        SettingsFeedback.Show("API key saved to Credential Manager");
     }
 
     private void OnSearchEngineChanged(object sender, SelectionChangedEventArgs e) => UpdateSearchEngineRows();
@@ -908,7 +911,7 @@ public partial class SettingsPage : UserControl, IPage
         var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Choose a folder Ask may search and read" };
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
         var folder = dialog.FolderName;
-        if (LocalFiles.IsSensitiveRoot(folder)) { SavedText.Text = "That folder holds app data or credentials, which Ask never reads."; return; }
+        if (LocalFiles.IsSensitiveRoot(folder)) { SettingsFeedback.Show("That folder contains protected app or credential data.", error: true); return; }
         if (_s.Ask.Folders.Any(f => string.Equals(LocalFiles.ExpandFolders(new[] { f }, Hub.Ask.Platform.KnownFolder).FirstOrDefault(), folder, StringComparison.OrdinalIgnoreCase))) return;
         _s.Ask.Folders.Add(folder);
         RefreshLists();
@@ -926,7 +929,7 @@ public partial class SettingsPage : UserControl, IPage
     private void OnSaveFinnhub(object sender, RoutedEventArgs e)
     {
         Hub.Core.Secrets.Set(SecretKeys.FinnhubApiKey, FinnhubKey.Password.Trim());
-        SavedText.Text = "API key saved to Credential Manager";
+        SettingsFeedback.Show("API key saved to Credential Manager");
         Hub.Core.Agents.RunNow("events-scout");
     }
 
@@ -938,7 +941,7 @@ public partial class SettingsPage : UserControl, IPage
         RuntimeCard.WantsRuntime = provider == "llamacpp";
         if (provider == "llamacpp" && !Hub.LocalAi.RuntimeReady)
         {
-            ProviderNotice.Text = "Install Aqua's runtime below to use it. Your current provider stays active until installation finishes.";
+            SettingsFeedback.Show("Install Aqua’s runtime to switch to it.", "provider-feedback", persistent: true);
             _loading = true;
             AiProvider.SelectedValue = _s.Ai.Provider;
             _loading = false;
@@ -951,7 +954,8 @@ public partial class SettingsPage : UserControl, IPage
     private async void SwitchProvider(string provider)
     {
         if (_switchingProvider || provider == Hub.S.Ai.Provider) return;
-        _switchingProvider = true; AiProvider.IsEnabled = false; ProviderNotice.Text = "";
+        _switchingProvider = true; AiProvider.IsEnabled = false;
+        SettingsFeedback.Show("Switching AI provider…", "provider-feedback", busy: true);
         try
         {
             SaveNow();
@@ -965,8 +969,9 @@ public partial class SettingsPage : UserControl, IPage
             }
             await Hub.Core.Llm.CheckAsync();
             Load();
+            SettingsFeedback.Hide("provider-feedback");
         }
-        catch (Exception ex) { ProviderNotice.Text = ex.Message; Load(); }
+        catch (Exception ex) { Load(); SettingsFeedback.Show(ex.Message, "provider-feedback", error: true); }
         finally { _switchingProvider = false; AiProvider.IsEnabled = true; RuntimeCard.Update(); }
     }
 
@@ -1190,7 +1195,7 @@ public partial class SettingsPage : UserControl, IPage
         catch (System.ComponentModel.Win32Exception ex)
         {
             Log.Warn("voice", "Couldn't open Windows' speech wizard", ex);
-            SavedText.Text = "Couldn't open Windows' speech setup: " + ex.Message;
+            SettingsFeedback.Show("Couldn't open Windows' speech setup: " + ex.Message, error: true);
         }
     }
 
@@ -1242,7 +1247,6 @@ public partial class SettingsPage : UserControl, IPage
 
     private void OnAutoUpdateToggled(object sender, RoutedEventArgs e) => UpdateUpdates();
 
-    private string? _whisperError;
     private int _whisperUiPending;
 
     private void OnWhisperChanged() => Hub.OnUi(UpdateWhisper);
@@ -1256,7 +1260,7 @@ public partial class SettingsPage : UserControl, IPage
     private void OnWhisperModelChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading || DataContext is null) return;
-        _whisperError = null;
+        SettingsFeedback.Hide("whisper-feedback");
         UpdateWhisper();
     }
 
@@ -1274,32 +1278,31 @@ public partial class SettingsPage : UserControl, IPage
         var choice = WhisperCatalog.Choice(_s.Ask.WhisperModel);
         var wanted = choice.For(_s.Location.Language);
         var runtime = WhisperCatalog.Runtime(RuntimeInformation.OSArchitecture);
-        WhisperProgress.Visibility = WhisperCancelButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-        WhisperRemoveButton.Visibility = install is not null ? Visibility.Visible : Visibility.Collapsed;
+        WhisperProgressCard.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         WhisperModelCombo.IsEnabled = !busy;
+        WhisperRemoveButton.IsEnabled = !busy;
         if (busy)
         {
             var p = setup.Current;
             WhisperProgress.Value = p is { Total: > 0 } ? (double)p.Done / p.Total : 0;
-            WhisperStatus.Text = p is null ? "Starting…" : $"{p.Step}… {WhisperCatalog.Megabytes(p.Done)} of {WhisperCatalog.Megabytes(p.Total)}";
-            WhisperInstallButton.Content = "Installing…";
+            WhisperProgress.IsIndeterminate = p is not { Total: > 0 };
+            WhisperProgressText.Text = p is null ? "Preparing Whisper…" : $"{p.Step} · {WhisperCatalog.Megabytes(p.Done)} of {WhisperCatalog.Megabytes(p.Total)}";
             WhisperInstallButton.IsEnabled = false;
             return;
         }
+        WhisperRemoveButton.Visibility = install is not null ? Visibility.Visible : Visibility.Collapsed;
         var same = install is not null && install.ChoiceId == choice.Id
                    && Path.GetFileName(install.Model).Equals(wanted.FileName, StringComparison.OrdinalIgnoreCase);
         WhisperInstallButton.Content = install is null ? "Install" : same ? "Installed" : "Switch model";
         WhisperInstallButton.IsEnabled = !same && runtime is not null;
         var download = (install is null ? runtime?.Size ?? 0 : 0) + wanted.Download.Size;
-        WhisperStatus.Text = _whisperError
-            ?? (runtime is null ? "Whisper isn't available for this PC's processor."
-            : install is null
-                ? $"Not installed. Installing downloads about {WhisperCatalog.Megabytes(download)}."
-                  + (_s.Ask.Voice == "whisper" ? " Voice input is set to Whisper, so the microphone button needs it installed first." : "")
-                : $"Installed: {install.Name}, whisper.cpp {install.Version}."
-                  + (_s.Ask.Voice == "whisper" ? " Voice input uses it." : " Choose Whisper under Voice input to use it.")
-                  + (install.EnglishOnly && !WhisperCatalog.IsEnglish(_s.Location.Language) ? " This model only knows English; “Switch model” gets one for your language." : "")
-                  + (same ? "" : $" Switching downloads {WhisperCatalog.Megabytes(download)} and removes the current model."));
+        WhisperStatus.Text = runtime is null ? "Unavailable on this processor"
+            : install is null ? $"Download · {WhisperCatalog.Megabytes(download)}"
+            : $"{install.Name} · whisper.cpp {install.Version}" + (install.EnglishOnly ? " · English only" : "");
+        var help = install is not null && !same ? $"Downloads {WhisperCatalog.Megabytes(download)} and replaces the installed model."
+            : "Whisper transcribes speech on this PC.";
+        WhisperInstallButton.ToolTip = help;
+        System.Windows.Automation.AutomationProperties.SetHelpText(WhisperInstallButton, help);
     }
 
     /// <summary>Downloads and checks Whisper (it carries on if you leave the page), then makes it the voice input.</summary>
@@ -1307,10 +1310,10 @@ public partial class SettingsPage : UserControl, IPage
     {
         if (Sandbox.Intercept("whisper-install", _s.Ask.WhisperModel))
         {
-            WhisperStatus.Text = "Installing Whisper is simulated in this test session.";
+            SettingsFeedback.Show("Installing Whisper is simulated in this test session.", "whisper-feedback");
             return;
         }
-        _whisperError = null;
+        SettingsFeedback.Hide("whisper-feedback");
         try
         {
             var install = Hub.Core.Whisper.InstallAsync(_s.Ask.WhisperModel, _s.Location.Language);
@@ -1320,7 +1323,11 @@ public partial class SettingsPage : UserControl, IPage
             if (IsLoaded) VoiceCombo.SelectedValue = "whisper";
             else Hub.Core.Settings.Update(x => x.Ask.Voice = "whisper");
         }
-        catch (WhisperSetupException ex) { _whisperError = ex.Message; }
+        catch (WhisperSetupException ex)
+        {
+            var feedback = _streamsActive ? SettingsFeedback : Hub.Windows.Main?.WorkspaceFeedback;
+            feedback?.Show(ex.Message, "whisper-feedback", error: true);
+        }
         UpdateWhisper();
     }
 
@@ -1337,10 +1344,10 @@ public partial class SettingsPage : UserControl, IPage
         try
         {
             Hub.Core.Whisper.Remove();
-            _whisperError = null;
+            SettingsFeedback.Show("Whisper removed.", "whisper-feedback");
             if (_s.Ask.Voice == "whisper") VoiceCombo.SelectedValue = "offline";
         }
-        catch (WhisperSetupException ex) { _whisperError = ex.Message; }
+        catch (WhisperSetupException ex) { SettingsFeedback.Show(ex.Message, "whisper-feedback", error: true); }
         UpdateWhisper();
     }
 
@@ -1352,30 +1359,29 @@ public partial class SettingsPage : UserControl, IPage
             _voiceTest.Stop();
             return;
         }
+        if (_s.Ask.Voice == "off")
+        {
+            SettingsFeedback.Show("Choose a voice input before starting a test.", "voice-test-feedback", error: true);
+            return;
+        }
         VoiceTestPanel.Visibility = Visibility.Visible;
         VoiceTestHeard.Visibility = VoiceTestTidied.Visibility = Visibility.Collapsed;
         VoiceLevelFill.Width = 0;
-        if (_s.Ask.Voice == "off")
-        {
-            VoiceTestStatus.Text = "Voice input is off — choose one above first.";
-            return;
-        }
         if (Hub.Ask.Voice.IsListening) Hub.Ask.Voice.Stop();
-        _voiceTest ??= NewVoiceTest();
-        VoiceTestStatus.Text = "Starting…";
+        var voice = _voiceTest ??= NewVoiceTest();
+        SettingsFeedback.Show("Starting the voice test…", "voice-test-feedback", busy: true);
         VoiceTestButton.IsEnabled = false;
-        var error = await _voiceTest.StartAsync(_s.Ask.Voice, _s.Location.Language, _s.Ask.Microphone);
-        VoiceTestButton.IsEnabled = true;
+        string? error;
+        try { error = await voice.StartAsync(_s.Ask.Voice, _s.Location.Language, _s.Ask.Microphone); }
+        finally { VoiceTestButton.IsEnabled = true; }
+        if (!ReferenceEquals(_voiceTest, voice)) return;
         if (error is not null)
         {
-            VoiceTestStatus.Text = error;
+            SettingsFeedback.Show(error, "voice-test-feedback", error: true);
             return;
         }
         VoiceTestButton.Content = "Stop";
-        VoiceTestStatus.Text = "Listening · " + _voiceTest.Describe + ". Say a sentence, e.g. “What's the weather like tomorrow?”"
-                               + (_s.Ask.Voice == "whisper" ? ", then pause or click Stop — Whisper writes it down then." : "")
-                               + (_voiceTest.Note is { } note ? " " + note : "")
-                               + (_s.Ask.Voice == "online" ? "" : " The bar shows how loud you are: aim for the middle.");
+        SettingsFeedback.Show("Listening · " + voice.Describe + ". Say a sentence." + (voice.Note is { } note ? " " + note : ""), "voice-test-feedback", busy: true);
     }
 
     private VoiceInput NewVoiceTest()
@@ -1384,11 +1390,11 @@ public partial class SettingsPage : UserControl, IPage
         voice.Level += level => VoiceLevelFill.Width = Math.Clamp(level, 0, 1) * VoiceLevelTrack.ActualWidth;
         voice.Partial += text => ShowHeard("Hearing: " + text);
         voice.Phrase += _ => ShowHeard("Heard: " + DictationTidy.Joined(voice.Heard));
-        voice.Problem += advice => VoiceTestStatus.Text = advice;
+        voice.Problem += advice => SettingsFeedback.Show(advice, "voice-test-feedback", error: true);
         voice.Transcribing += () =>
         {
             VoiceLevelFill.Width = 0;
-            VoiceTestStatus.Text = "Writing down what you said…";
+            SettingsFeedback.Show("Transcribing…", "voice-test-feedback", busy: true);
         };
         voice.Ended += error => _ = VoiceTestEndedAsync(voice, error);
         return voice;
@@ -1402,48 +1408,43 @@ public partial class SettingsPage : UserControl, IPage
 
     private async Task VoiceTestEndedAsync(VoiceInput voice, string? error)
     {
+        if (!ReferenceEquals(_voiceTest, voice)) return;
         VoiceTestButton.Content = "Start test";
         VoiceLevelFill.Width = 0;
         if (error is not null)
         {
-            VoiceTestStatus.Text = error;
+            SettingsFeedback.Show(error, "voice-test-feedback", error: true);
             return;
         }
         var heard = voice.Heard.ToList();
         if (heard.Count == 0)
         {
-            VoiceTestStatus.Text = "Nothing was heard. If the bar didn't move when you spoke, pick another microphone or check it in Sound settings.";
+            SettingsFeedback.Show("Nothing was heard. If the level stayed flat, check your microphone in Sound settings.", "voice-test-feedback", error: true);
             return;
         }
         if (_s.Ask.Voice == "whisper")
         {
             ShowHeard("Heard: " + DictationTidy.Joined(heard));
-            VoiceTestStatus.Text = "Done — that's what Whisper wrote. It goes in the Ask box as it is.";
+            SettingsFeedback.Hide("voice-test-feedback");
             return;
         }
         var sure = heard.Average(h => h.Confidence);
         ShowHeard($"Heard: {DictationTidy.Joined(heard)}   ({sure:P0} sure)");
         if (!_s.Ask.VoiceTidy || !Hub.Core.Llm.Health.Available || DictationTidy.Skip(heard) is { })
         {
-            VoiceTestStatus.Text = (!_s.Ask.VoiceTidy ? "Done. Tidy-up is off."
-                : DictationTidy.Skip(heard) is { } why ? $"Done. No tidy-up needed: {why}."
-                : "Done. The tidy-up needs the local model, which isn't running.") + WhisperHint();
+            SettingsFeedback.Show(!_s.Ask.VoiceTidy ? "Tidy-up is off."
+                : DictationTidy.Skip(heard) is { } why ? $"No tidy-up needed: {why}."
+                : "Start the local model to use tidy-up.", "voice-test-feedback");
             return;
         }
-        VoiceTestStatus.Text = "Tidying up…";
+        SettingsFeedback.Show("Tidying up…", "voice-test-feedback", busy: true);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var tidied = await Task.Run(() => DictationTidy.TidyAsync(Hub.Core.Llm, heard, cts.Token));
+        if (!ReferenceEquals(_voiceTest, voice) || voice.IsListening) return;
         VoiceTestTidied.Text = "After tidy-up: " + (tidied ?? DictationTidy.Joined(heard) + "  (no change)");
         VoiceTestTidied.Visibility = Visibility.Visible;
-        VoiceTestStatus.Text = (sure < 0.5 ? "Done. The recognizer was unsure — “Train my voice” below or a closer microphone may help." : "Done.")
-                               + WhisperHint();
+        SettingsFeedback.Show(sure < 0.5 ? "Low confidence. Try a closer microphone or Train my voice." : "", "voice-test-feedback");
     }
-
-    /// <summary>After a test with Windows' recognizers, when Whisper isn't in use: where much better results are.</summary>
-    private string WhisperHint() =>
-        _s.Ask.Voice == "whisper" ? ""
-        : Hub.Core.Whisper.Installed() is not null ? " Whisper is installed: choose it under Voice input."
-        : " Not right? Whisper (above) is far more accurate.";
 
     // ───────────── Data ─────────────
     private void OnOpenData(object sender, RoutedEventArgs e)
@@ -1505,19 +1506,19 @@ public partial class SettingsPage : UserControl, IPage
         var problems = Log.RecentProblems;
         CopyText(problems.Count == 0 ? "No warnings or errors since Aqua started." : string.Join("\n\n", problems.Reverse().Take(30).Select(p =>
             $"{p.Time:yyyy-MM-dd HH:mm:ss.fff} {p.Level.ToString().ToUpperInvariant()} [{p.Area}] {p.Message}" + (p.Detail is { Length: > 0 } d ? "\n" + d : ""))));
-        SavedText.Text = $"Copied {Plural.Of(Math.Min(30, problems.Count), "problem")}";
+        SettingsFeedback.Show($"Copied {Plural.Of(Math.Min(30, problems.Count), "problem")}");
     }
 
     private void OnCopyDiagnostics(object sender, RoutedEventArgs e)
     {
         CopyText(DiagnosticsSummary.Build());
-        SavedText.Text = "Diagnostics summary copied";
+        SettingsFeedback.Show("Diagnostics summary copied");
     }
 
     private void OnClearCaches(object sender, RoutedEventArgs e)
     {
         Hub.Core.Db.ClearCaches();
-        SavedText.Text = "Caches cleared";
+        SettingsFeedback.Show("Caches cleared");
         Hub.Core.Agents.RunAll();
     }
 
@@ -1531,8 +1532,8 @@ public partial class SettingsPage : UserControl, IPage
         _watcher.Changed += (_, _) => Dispatcher.BeginInvoke(async () =>
         {
             await Task.Delay(300);
-            if (Hub.Core.Settings.Reload(out var error)) { Load(); SavedText.Text = "Reloaded from settings.json"; }
-            else SavedText.Text = "settings.json has an error: " + error;
+            if (Hub.Core.Settings.Reload(out var error)) { Load(); SettingsFeedback.Show("Reloaded from settings.json"); }
+            else SettingsFeedback.Show("settings.json has an error: " + error, error: true);
         });
         Process.Start(new ProcessStartInfo("notepad.exe", $"\"{path}\"") { UseShellExecute = true });
     }

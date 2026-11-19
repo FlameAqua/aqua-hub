@@ -11,6 +11,28 @@
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="32" GlassFrameThickness="-1" ResizeBorderThickness="6" UseAeroCaptionButtons="True" CornerRadius="0"/>
     </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <Style x:Key="Deck.Action" TargetType="Button">
+            <Setter Property="Width" Value="44"/><Setter Property="Height" Value="44"/>
+            <Setter Property="Foreground" Value="{DynamicResource B.AccentText}"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
+            <Setter Property="ToolTipService.ShowsToolTipOnKeyboardFocus" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Circle" CornerRadius="22" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Circle" Property="Background" Value="{DynamicResource B.AccentSoft}"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Circle" Property="BorderBrush" Value="{DynamicResource B.Accent}"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Circle" Property="Background" Value="{DynamicResource B.ControlHover}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
     <Grid x:Name="Root">
         <Grid.ColumnDefinitions>
@@ -134,9 +156,9 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <StackPanel>
+                    <StackPanel Grid.Row="1" Panel.ZIndex="2" VerticalAlignment="Top" HorizontalAlignment="Center" MaxWidth="720" Margin="16,12,16,0">
                         <!-- Offline notice: the hub keeps working from what it already collected -->
-                        <c:GroupBorder x:Name="OfflineBar" Background="{DynamicResource B.WarnSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
+                        <c:GroupBorder x:Name="OfflineBar" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="12" Padding="14,9" Margin="0,0,0,8" Visibility="Collapsed"
                                 AutomationProperties.AutomationId="offline-bar" AutomationProperties.Name="Offline">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -146,11 +168,17 @@
                                 </Grid.ColumnDefinitions>
                                 <c:Icon Kind="wifi-off" Width="16" Height="16" Foreground="{DynamicResource B.Warn}" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="OfflineText" Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13"/>
-                                <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Padding="12,4" FontSize="12.5" Click="OnRefreshClick" Content="Try again"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource Btn.Standard}" Padding="12,4" FontSize="12.5" Click="OnRefreshClick" Content="Try again"/>
+                                    <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Margin="6,0,0,0" Click="OnOfflineBarDismiss"
+                                            ToolTip="Dismiss offline notice" AutomationProperties.Name="Dismiss offline notice">
+                                        <c:Icon Kind="close" Width="12" Height="12"/>
+                                    </Button>
+                                </StackPanel>
                             </Grid>
                         </c:GroupBorder>
                         <!-- A new version: on offer, downloading, ready to install ("Not now" puts it away until the next step) -->
-                        <c:GroupBorder x:Name="UpdateBar" Background="{DynamicResource B.AccentSoft}" CornerRadius="10,0,0,0" Padding="20,9" Visibility="Collapsed"
+                        <c:GroupBorder x:Name="UpdateBar" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1" CornerRadius="12" Padding="14,9" Visibility="Collapsed"
                                 AutomationProperties.AutomationId="update-bar" AutomationProperties.Name="Update">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -183,59 +211,70 @@
                         </ContentControl.RenderTransform>
                     </ContentControl>
                     <Canvas x:Name="DeckSurface" Grid.Row="1" ClipToBounds="True" SizeChanged="OnDeckSizeChanged">
-                        <c:GroupBorder x:Name="DailyDeck" Width="222" CornerRadius="12" Padding="10" BorderThickness="1"
-                                Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.CardStroke}"
-                                SizeChanged="OnDeckSizeChanged" AutomationProperties.AutomationId="daily-deck"
-                                AutomationProperties.Name="Daily deck" Visibility="Collapsed">
+                        <Canvas x:Name="DeckActions" Visibility="Collapsed" Width="{Binding ActualWidth, ElementName=DeckSurface}" Height="{Binding ActualHeight, ElementName=DeckSurface}">
+                            <Button x:Name="DeckAsk" Style="{StaticResource Deck.Action}" Click="OnDeckAsk" ToolTip="Ask Aqua" AutomationProperties.Name="Ask Aqua" AutomationProperties.AutomationId="deck-ask"><c:Icon Kind="sparkle" Width="19" Height="19"/></Button>
+                            <Button x:Name="DeckLaunchpad" Style="{StaticResource Deck.Action}" Click="OnDeckLaunchpad" ToolTip="Launchpad" AutomationProperties.Name="Launchpad" AutomationProperties.AutomationId="deck-launchpad"><c:Icon Kind="launchpad" Width="18" Height="18"/></Button>
+                            <Button x:Name="DeckToday" Style="{StaticResource Deck.Action}" Click="OnDeckToday" ToolTip="Today's agenda" AutomationProperties.Name="Today's agenda" AutomationProperties.AutomationId="deck-today"><c:Icon Kind="upcoming" Width="18" Height="18"/></Button>
+                            <Button x:Name="DeckAdd" Style="{StaticResource Deck.Action}" Click="OnDeckAddReminder" ToolTip="Add reminder" AutomationProperties.Name="Add reminder" AutomationProperties.AutomationId="deck-add-reminder"><c:Icon Kind="bell" Width="18" Height="18"/></Button>
+                            <Button x:Name="DeckTimer" Style="{StaticResource Deck.Action}" Click="OnDeckTimer" ToolTip="Quick timer" AutomationProperties.Name="Quick timer" AutomationProperties.AutomationId="deck-timer"><c:Icon Kind="clock" Width="18" Height="18"/></Button>
+                            <Button x:Name="DeckHide" Style="{StaticResource Deck.Action}" Click="OnHideDeck" ToolTip="Hide deck" AutomationProperties.Name="Hide deck" AutomationProperties.AutomationId="deck-hide"><c:Icon Kind="close" Width="16" Height="16"/></Button>
+                            <Button x:Name="DeckApp1" Style="{StaticResource Deck.Action}" Click="OnDeckPinnedApp" AutomationProperties.AutomationId="deck-app-1"/>
+                            <Button x:Name="DeckApp2" Style="{StaticResource Deck.Action}" Click="OnDeckPinnedApp" AutomationProperties.AutomationId="deck-app-2"/>
+                        </Canvas>
+                        <c:GroupBorder x:Name="DeckTimerPanel" Width="164" Height="194" CornerRadius="20"
+                                       Padding="12" BorderThickness="1" Visibility="Collapsed"
+                                       Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}"
+                                       AutomationProperties.Name="Quick timer" AutomationProperties.AutomationId="deck-timer-panel">
                             <StackPanel>
-                                <DockPanel LastChildFill="True" Margin="0,0,0,4">
-                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Icon}" Width="27" Height="27"
-                                            Click="OnHideDeck" ToolTip="Hide deck" AutomationProperties.Name="Hide deck"
-                                            AutomationProperties.AutomationId="deck-hide">
-                                        <c:Icon Kind="close" Width="13" Height="13"/>
-                                    </Button>
-                                    <c:DeckGrip x:Name="DeckHandle" Focusable="True" Cursor="SizeAll" Height="27"
-                                           DragDelta="OnDeckDrag" DragCompleted="OnDeckDragCompleted"
-                                           PreviewKeyDown="OnDeckMoveKey" ToolTip="Drag or use the arrow keys to move the deck"
-                                           AutomationProperties.Name="Move deck" AutomationProperties.AutomationId="deck-move"
-                                           AutomationProperties.HelpText="Use the arrow keys to move the deck">
-                                        <c:DeckGrip.Template>
-                                            <ControlTemplate TargetType="Thumb">
-                                                <Border x:Name="Grip" Padding="7,2" Background="Transparent" CornerRadius="5">
-                                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Deck"
-                                                               Foreground="{DynamicResource B.Text}"/>
-                                                </Border>
-                                                <ControlTemplate.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Subtle}"/>
-                                                    </Trigger>
-                                                    <Trigger Property="IsKeyboardFocused" Value="True">
-                                                        <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.AccentSoft}"/>
-                                                    </Trigger>
-                                                </ControlTemplate.Triggers>
-                                            </ControlTemplate>
-                                        </c:DeckGrip.Template>
-                                    </c:DeckGrip>
+                                <DockPanel Margin="0,0,0,4">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Icon}" Width="26" Height="26" Click="OnCloseDeckTimer"
+                                            ToolTip="Close timer" AutomationProperties.Name="Close timer"><c:Icon Kind="close" Width="13" Height="13"/></Button>
+                                    <TextBlock Text="Timer" Style="{StaticResource T.CardTitle}" VerticalAlignment="Center"/>
                                 </DockPanel>
-                                <Button Style="{StaticResource Btn.Standard}" Content="Add reminder" Click="OnDeckAddReminder"
-                                        AutomationProperties.AutomationId="deck-add-reminder"/>
-                                <Button Style="{StaticResource Btn.Link}" Content="Today’s agenda" HorizontalAlignment="Left"
-                                        Margin="0,4,0,3" Click="OnDeckToday" AutomationProperties.AutomationId="deck-today"/>
-                                <TextBlock Style="{StaticResource T.Caption}" Text="Remind me in" Margin="0,2,0,4"/>
-                                <UniformGrid x:Name="DeckQuickTimes" Rows="1">
-                                    <Button Style="{StaticResource Btn.Subtle}" Padding="4" Content="5 min" Tag="5" Click="OnDeckQuickReminder"
-                                            AutomationProperties.Name="Remind me in 5 minutes" AutomationProperties.AutomationId="deck-quick-5"/>
-                                    <Button Style="{StaticResource Btn.Subtle}" Padding="4" Content="15 min" Tag="15" Click="OnDeckQuickReminder"
-                                            AutomationProperties.Name="Remind me in 15 minutes" AutomationProperties.AutomationId="deck-quick-15"/>
-                                    <Button Style="{StaticResource Btn.Subtle}" Padding="4" Content="30 min" Tag="30" Click="OnDeckQuickReminder"
-                                            AutomationProperties.Name="Remind me in 30 minutes" AutomationProperties.AutomationId="deck-quick-30"/>
-                                </UniformGrid>
-                                <TextBlock x:Name="DeckStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,5,0,0"
-                                           Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="deck-status"/>
+                                <Grid Width="92" Height="92" Margin="0,5,0,8">
+                                    <c:RingGauge x:Name="DeckTimerRing" ValueBrush="{DynamicResource B.Accent}" TrackBrush="{DynamicResource B.Track}"
+                                                 TextBrush="{DynamicResource B.Text}" Thickness="5" IsHitTestVisible="False"
+                                                 AutomationProperties.AutomationId="deck-timer-readout"/>
+                                    <c:TimerDial x:Name="DeckDial" Minimum="1" Maximum="60" Value="5" SmallChange="1" LargeChange="5"
+                                                 FocusVisualStyle="{StaticResource Focus}" ValueChanged="OnDeckDurationChanged"
+                                                 AutomationProperties.Name="Timer duration in minutes" AutomationProperties.AutomationId="deck-timer-duration"
+                                                 ToolTip="Turn the dial or use the arrow keys to choose minutes">
+                                        <c:TimerDial.Template><ControlTemplate TargetType="c:TimerDial"><Border Background="Transparent" CornerRadius="46" Cursor="Hand"/></ControlTemplate></c:TimerDial.Template>
+                                    </c:TimerDial>
+                                </Grid>
+                                <Button x:Name="DeckTimerCommand" Style="{StaticResource Btn.Accent}" Content="Start" Click="OnDeckTimerCommand"
+                                        AutomationProperties.AutomationId="deck-timer-command"/>
                             </StackPanel>
                         </c:GroupBorder>
+                        <c:DeckGrip x:Name="DeckHandle" Width="56" Height="56" Focusable="True" Cursor="Hand"
+                                    DragStarted="OnDeckDragStarted" DragDelta="OnDeckDrag" DragCompleted="OnDeckDragCompleted"
+                                    PreviewKeyDown="OnDeckMoveKey" ToolTip="Open Deck · drag to move"
+                                    AutomationProperties.Name="Open Deck" AutomationProperties.AutomationId="deck-move"
+                                    AutomationProperties.HelpText="Press Enter to open Deck. Use the arrow keys to move it.">
+                            <c:DeckGrip.Template>
+                                <ControlTemplate TargetType="Thumb">
+                                    <Border x:Name="Grip" CornerRadius="28" Background="{DynamicResource B.AccentSoft}" BorderBrush="{DynamicResource B.Accent}" BorderThickness="1.5">
+                                        <Grid>
+                                            <c:Icon x:Name="DeckLogo" Kind="bolt" Width="22" Height="22" Foreground="{DynamicResource B.AccentText}"/>
+                                            <TextBlock Text="{Binding ToolTip, RelativeSource={RelativeSource TemplatedParent}}" x:Name="Countdown"
+                                                       VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource B.AccentText}" Visibility="Collapsed"/>
+                                        </Grid>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Popup}"/></Trigger>
+                                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Grip" Property="BorderThickness" Value="3"/></Trigger>
+                                        <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Value="timer">
+                                            <Setter TargetName="DeckLogo" Property="Visibility" Value="Collapsed"/>
+                                            <Setter TargetName="Countdown" Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </c:DeckGrip.Template>
+                        </c:DeckGrip>
                     </Canvas>
                     <StackPanel x:Name="Banners" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,24" Width="380"/>
+                    <c:FeedbackPopup x:Name="WorkspaceFeedback" Grid.Row="1" Panel.ZIndex="3"/>
                 </Grid>
             </Border>
         </Grid>

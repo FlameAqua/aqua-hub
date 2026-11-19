@@ -8,7 +8,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <Grid x:Name="Header" Margin="0,0,0,18">
@@ -18,7 +17,6 @@
             </Grid.RowDefinitions>
             <StackPanel>
                 <TextBlock Text="Roleplay" Style="{StaticResource T.Title}"/>
-                <TextBlock Text="Shape a scene together, one turn at a time." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
             </StackPanel>
             <StackPanel x:Name="HeaderActions" Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Button Style="{StaticResource Btn.Standard}" Content="Copy transcript" Click="OnCopy" Margin="0,0,8,0"/>
@@ -34,7 +32,13 @@
             </Grid.ColumnDefinitions>
             <Border x:Name="SceneSetup" Grid.Column="0" Style="{StaticResource Card}" Padding="16" CornerRadius="14">
                 <StackPanel>
-                    <TextBlock Text="SCENE SETUP" Style="{StaticResource T.Overline}" Margin="0,0,0,12"/>
+                    <DockPanel Margin="0,0,0,12">
+                        <Button x:Name="ModelHint" DockPanel.Dock="Right" Style="{StaticResource Btn.Icon}" Width="26" Height="26"
+                                AutomationProperties.Name="About Roleplay" Click="OnRoleplayHint">
+                            <c:Icon Kind="info" Width="14" Height="14"/>
+                        </Button>
+                        <TextBlock Text="Scene" Style="{StaticResource T.CardTitle}" VerticalAlignment="Center"/>
+                    </DockPanel>
                     <TextBlock Text="Persona" Style="{StaticResource T.Caption}" Margin="0,0,0,5"/>
                     <TextBox x:Name="PersonaBox" ui:UiProps.Placeholder="Who should the model play?" TextChanged="OnSceneEdited" MaxLength="300"
                              MinHeight="36" Padding="10,7" ui:UiProps.CornerRadius="8" AutomationProperties.AutomationId="roleplay-persona"/>
@@ -42,7 +46,6 @@
                     <TextBox x:Name="ScenarioBox" ui:UiProps.Placeholder="Where does the scene begin?" TextChanged="OnSceneEdited" MaxLength="1200"
                              AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="116" MaxHeight="190"
                              Padding="10,8" ui:UiProps.CornerRadius="8" AutomationProperties.AutomationId="roleplay-scenario"/>
-                    <TextBlock x:Name="ModelLabel" Text="Uses your configured AI model" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,14,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -72,12 +75,6 @@
                         </Grid>
                     </ScrollViewer>
                     <Grid Grid.Row="1" Margin="0,14,0,0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <TextBlock x:Name="StatusText" Text="Ready when you are." Style="{StaticResource T.Caption}" Margin="2,0,0,7"/>
-                        <Grid Grid.Row="1">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -89,10 +86,10 @@
                                     Margin="10,0,0,0" Click="OnSend" AutomationProperties.AutomationId="roleplay-send"/>
                             <Button x:Name="CancelButton" Grid.Column="1" Style="{StaticResource Btn.Standard}" Content="Stop" MinWidth="76" Height="42"
                                     Margin="10,0,0,0" Click="OnCancel" Visibility="Collapsed" AutomationProperties.AutomationId="roleplay-cancel"/>
-                        </Grid>
                     </Grid>
                 </Grid>
             </Border>
         </Grid>
+        <c:FeedbackPopup x:Name="RoleplayFeedback" Grid.RowSpan="2" NoticeAlignment="Left" AlignBottom="True"/>
     </Grid>
 </UserControl>

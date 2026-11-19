@@ -14,15 +14,12 @@ public sealed class FeedRefresh : StackPanel
     public string AfterId { get; set; } = "";
     public string Label { get; set; } = "feed";
     private readonly Button _button = new() { Content = "Refresh", MinWidth = 110 };
-    private readonly TextBlock _status = new() { FontSize = 11, Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap, MaxWidth = 180 };
     private bool _requested;
 
     public FeedRefresh()
     {
         _button.SetResourceReference(StyleProperty, "Btn.Standard");
-        _status.SetResourceReference(TextBlock.ForegroundProperty, "B.Text3");
-        AutomationProperties.SetLiveSetting(_status, AutomationLiveSetting.Polite);
-        Children.Add(_button); Children.Add(_status);
+        Children.Add(_button);
         _button.Click += async (_, _) => await RefreshAsync();
         Loaded += (_, _) =>
         {
@@ -47,42 +44,40 @@ public sealed class FeedRefresh : StackPanel
         var busy = _requested || Running;
         _button.IsEnabled = !busy;
         _button.Content = busy ? "Refreshing…" : "Refresh";
-        if (busy) { _status.Text = "Checking your sources"; return; }
         var status = Hub.Core.Agents.Statuses.FirstOrDefault(s => s.Id == AgentId);
-        _status.Text = status?.State switch
-        {
-            AgentState.Error => "Refresh failed",
-            AgentState.Disabled => "Sources disabled",
-            _ => status?.LastRun is { } at ? $"Checked {at.ToLocalTime():HH:mm}" : "",
-        };
-        _status.ToolTip = status?.LastMessage;
+        _button.ToolTip = status?.LastMessage;
+        AutomationProperties.SetHelpText(_button, status?.LastMessage ?? "");
     }
 
     public async Task RefreshAsync()
     {
         if (_requested || Running) return;
         _requested = true; Update();
-        string? message = null;
-        string? error = null;
+        var id = AgentId + "-refresh-notice";
+        var feedback = IsVisible ? Hub.Windows.Main?.WorkspaceFeedback : null;
+        feedback?.Show($"Refreshing {Label}…", id, busy: true);
+        string message;
+        var error = false;
         try
         {
             var report = await Hub.Core.Agents.RunAndWaitAsync(AgentId, TimeSpan.FromSeconds(60), CancellationToken.None);
             if (report is { End: AgentRunEnd.Finished, Status.State: not AgentState.Error } && AfterId.Length > 0)
                 await Hub.Core.Agents.RunAndWaitAsync(AfterId, TimeSpan.FromSeconds(30), CancellationToken.None);
+            error = report is null || report.Status.State == AgentState.Error;
             message = report?.End switch
             {
-                AgentRunEnd.Paused => "Agents paused · resume in Agents",
+                AgentRunEnd.Paused => "Agents paused. Resume them in Agents.",
                 AgentRunEnd.Disabled => "Sources disabled",
-                null => "Refresh unavailable",
-                _ => null,
+                AgentRunEnd.StillRunning => "Refresh is still running. Check back shortly.",
+                AgentRunEnd.Finished when error => report.Status.LastMessage is { Length: > 0 } detail ? detail : "Refresh failed.",
+                AgentRunEnd.Finished when report.Status.State == AgentState.Waiting => "Waiting for sources. The last available results are kept.",
+                AgentRunEnd.Finished => "Sources refreshed.",
+                _ => "Refresh is unavailable.",
             };
         }
-        catch (Exception ex) { message = "Refresh failed"; error = ex.Message; }
-        finally
-        {
-            _requested = false; Update();
-            if (message is not null) _status.Text = message;
-            if (error is not null) _status.ToolTip = error;
-        }
+        catch (Exception) { message = "Refresh failed."; error = true; }
+        finally { _requested = false; Update(); }
+        if (IsVisible) feedback?.Show(message, id, error: error);
+        else feedback?.Hide(id);
     }
 }

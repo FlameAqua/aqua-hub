@@ -9,13 +9,18 @@ namespace AquaHub.UI.Controls;
 public sealed class DeckGrip : Thumb
 {
     internal Action<Point>? MoveRequested { get; set; }
+    internal Action? ToggleRequested { get; set; }
 
     protected override AutomationPeer OnCreateAutomationPeer() => new GripPeer(this);
 
-    private sealed class GripPeer(DeckGrip owner) : ThumbAutomationPeer(owner), ITransformProvider
+    private sealed class GripPeer(DeckGrip owner) : ThumbAutomationPeer(owner), ITransformProvider, IInvokeProvider
     {
         public override object? GetPattern(PatternInterface patternInterface) =>
-            patternInterface == PatternInterface.Transform ? this : base.GetPattern(patternInterface);
+            patternInterface is PatternInterface.Transform or PatternInterface.Invoke ? this : base.GetPattern(patternInterface);
+
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Button;
+
+        public void Invoke() => owner.Dispatcher.BeginInvoke(() => owner.ToggleRequested?.Invoke());
 
         public bool CanMove => true;
         public bool CanResize => false;

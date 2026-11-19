@@ -128,9 +128,9 @@ These ship independently of reactions, interest decay or a For You ranking layer
 
 ## Phase 7: everyday wins
 
-- Today opens the floating deck, which stays within Aqua's main window across navigation. Move it, hide it and reopen
-  it from Today. It offers **Add reminder**, **Today’s agenda**, and one-tap 5-, 15- and 30-minute reminders.
-  Position and visibility are profile settings.
+- Today reopens the floating Deck, which stays within Aqua's main window across navigation. The movable bubble
+  expands to Ask, Launchpad, up to two pinned apps, today's agenda, a new reminder, a 1–60 minute countdown and Hide.
+  Position and visibility are profile settings. The countdown uses the local reminders store.
 - Upcoming shows scheduled reminders alongside read-only events for a selected day. It offers an all-reminders view,
   editing and deletion, and **Done** or **Snooze 10 minutes** for due items. One-offs keep their instant. Daily and weekly
   repeats follow the local PC clock. On launch or wake, the latest occurrence within five minutes can
@@ -144,6 +144,13 @@ These ship independently of reactions, interest decay or a For You ranking layer
   large-day responsiveness workload remain manual acceptance.
 - Adrian deferred Trading 212. When resumed, it starts with a redacted sample and a locally validated CSV preview.
   Calendar writes, additional account connections and sync need separate agreement.
+
+## UI refinement between phases
+
+- Image Gen now opens on the prompt and canvas, with generation parameters and ComfyUI setup available in a drawer.
+  Verify the setup, generation and error recovery with the installed ComfyUI engine in dark and light themes.
+- Apply the [interaction and feedback standard](DEVELOPMENT.md#interaction-and-feedback) to subsequent UI work.
+  Verify the Deck's physical drag, keyboard traversal, reduced motion and screen-reader announcements in a normal build.
 
 ## Then Phase 8: find anything
 

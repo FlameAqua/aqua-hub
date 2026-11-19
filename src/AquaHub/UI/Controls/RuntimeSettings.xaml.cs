@@ -54,7 +54,11 @@ public partial class RuntimeSettings : UserControl
         RemoveButton.Visibility = ai.Installed is not null && ai.Build != "custom" ? Visibility.Visible : Visibility.Collapsed;
         UseButton.IsEnabled = DevicesButton.IsEnabled = RemoveButton.IsEnabled = !_busy && !ai.Installing;
         ProgressPanel.Visibility = ai.Installing ? Visibility.Visible : Visibility.Collapsed;
-        if (ai.Installing && ai.InstallProgress is { } p) OnProgress(p);
+        if (ai.Installing)
+        {
+            if (ai.InstallProgress is { } p) OnProgress(p);
+            else { ProgressText.Text = "Preparing installation…"; Progress.IsIndeterminate = true; }
+        }
     }
 
     private void OnBuildChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) Update(); }
@@ -74,7 +78,8 @@ public partial class RuntimeSettings : UserControl
         {
             var result = await Hub.LocalAi.InstallRuntimeAsync(BuildChoice.SelectedItem as LlamaBuild);
             if (result is not null && WantsRuntime) UseRequested?.Invoke();
-            if (Sandbox.Enabled) ErrorText.Text = "Installation recorded in the test journal.";
+            if (Sandbox.Enabled) Feedback("Installation recorded in the test journal.");
+            else if (result is not null) Feedback("Runtime installed.");
         });
     }
     private void OnCancel(object sender, RoutedEventArgs e) => Hub.LocalAi.CancelInstall();
@@ -83,8 +88,9 @@ public partial class RuntimeSettings : UserControl
         _devices?.Dispose(); _devices = new CancellationTokenSource();
         await Run(async () =>
         {
-            DeviceText.Text = "Checking devices…";
+            Hub.Windows.Main?.WorkspaceFeedback.Show("Checking devices…", "runtime-devices", busy: true);
             var devices = await Hub.LocalAi.DevicesAsync(_devices.Token);
+            Hub.Windows.Main?.WorkspaceFeedback.Hide("runtime-devices");
             DeviceText.Text = devices.Count == 0 ? "It will run on the processor only. Is the graphics driver up to date?" : string.Join(Environment.NewLine, devices);
         });
     }
@@ -92,15 +98,21 @@ public partial class RuntimeSettings : UserControl
     {
         if (MessageBox.Show(Window.GetWindow(this), "Remove Aqua's runtime? Your models are kept.", "Remove runtime", MessageBoxButton.YesNo,
             MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
-        await Run(() => Hub.LocalAi.RemoveRuntimeAsync());
+        await Run(async () =>
+        {
+            await Hub.LocalAi.RemoveRuntimeAsync();
+            Feedback("Runtime removed.");
+        });
     }
     private async Task Run(Func<Task> action)
     {
         if (_busy) return;
-        _busy = true; ErrorText.Text = ""; Update();
+        _busy = true; Update();
         try { await action(); }
-        catch (OperationCanceledException) { ErrorText.Text = "Stopped."; DeviceText.Text = ""; }
-        catch (Exception ex) { ErrorText.Text = ex.Message; }
+        catch (OperationCanceledException) { Feedback("Operation stopped."); }
+        catch (Exception ex) { Feedback(ex.Message, error: true); }
         finally { _busy = false; Update(); }
     }
+
+    private static void Feedback(string message, bool error = false) => Hub.Windows.Main?.WorkspaceFeedback.Show(message, "runtime-feedback", error: error);
 }

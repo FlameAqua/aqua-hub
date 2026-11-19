@@ -48,6 +48,7 @@ public sealed class ReminderTests
         await f.ReopenAsync();
         f.Time.Now = item.FirstInstant;
         await f.Service.RefreshAsync();
+        Assert.Equal(15, Assert.Single(f.Service.Snapshot.Items).Draft.QuickMinutes);
         Assert.Equal("Break", Assert.Single(f.Platform.Delivered).Title);
     }
 

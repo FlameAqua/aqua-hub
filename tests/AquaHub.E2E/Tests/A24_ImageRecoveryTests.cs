@@ -37,9 +37,10 @@ public sealed class A24_ImageRecoveryTests(AppFixture fixture, ITestOutputHelper
     {
         using var server = new ComfyFixture();
         StartWith(server);
+        Ui.Invoke(Field("image-settings"));
         Ui.Invoke(Field("image-check"));
         Wait.For(() => Status.Contains("Connected · models ready"), "fixture inventory populated");
-        Ui.Expand(Field("image-setup"));
+        Ui.Invoke(Field("image-settings"));
         Ui.SelectComboItem(Field("image-encoder"), "qwen_3_8b.safetensors", Pid);
         Ui.Invoke(Field("image-check"));
         Wait.For(() => Status.Contains("4B", StringComparison.OrdinalIgnoreCase) && !Status.StartsWith("Checking"), "pairing mismatch visible");
@@ -78,6 +79,7 @@ public sealed class A24_ImageRecoveryTests(AppFixture fixture, ITestOutputHelper
     {
         using var server = new ComfyFixture { HoldPath = "object_info" };
         StartWith(server);
+        Ui.Invoke(Field("image-settings"));
         Ui.Invoke(Field("image-check"));
         Assert.True(server.RequestHeld.Task.Wait(TimeSpan.FromSeconds(10)), "fixture did not observe the in-flight request");
         var app = App;

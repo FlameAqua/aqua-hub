@@ -31,11 +31,15 @@
             </Setter>
         </Style>
     </UserControl.Resources>
+    <Grid>
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="32,26,32,36" MaxWidth="1560">
             <DockPanel Margin="0,0,0,18">
                 <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Standard}" Margin="12,0,0,0"
-                        Content="Add calendar" VerticalAlignment="Center" Click="OnAddCalendar"/>
+                        Content="Add calendar" VerticalAlignment="Center" Click="OnAddCalendar"
+                        AutomationProperties.HelpText="Add a calendar using an ICS link or a local .ics file.">
+                    <Button.ToolTip><TextBlock Text="Add an ICS link from your calendar provider or choose a local .ics file." Width="240" TextWrapping="Wrap"/></Button.ToolTip>
+                </Button>
                 <TextBlock Text="Upcoming &amp; predictions" Style="{StaticResource T.Title}" TextWrapping="Wrap"/>
             </DockPanel>
 
@@ -110,8 +114,6 @@
                                 <Label Content="Scene action (optional)" Target="{Binding ElementName=ReminderSceneBox}"/>
                                 <ComboBox x:Name="ReminderSceneBox" DisplayMemberPath="Name" HorizontalContentAlignment="Stretch"
                                           AutomationProperties.Name="Scene action" AutomationProperties.AutomationId="reminder-scene"/>
-                                <TextBlock x:Name="EditorStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap"
-                                           AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="reminder-editor-status"/>
                                 <WrapPanel Margin="0,8,0,0">
                                     <Button Style="{StaticResource Btn.Accent}" Content="Save" Click="OnSaveReminder"
                                             AutomationProperties.AutomationId="reminder-save"/>
@@ -143,14 +145,7 @@
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
-                        <TextBlock x:Name="SceneRunStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,0,0,6"
-                                   Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="reminder-scene-status"/>
-                        <Button x:Name="CancelSceneRun" Style="{StaticResource Btn.Link}" Content="Stop scene" Click="OnStopScene"
-                                Visibility="Collapsed" HorizontalAlignment="Left" Margin="0,0,0,6" AutomationProperties.AutomationId="reminder-scene-stop"/>
-                        <TextBlock x:Name="AgendaStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,0,0,8"
-                                   AutomationProperties.AutomationId="agenda-status" AutomationProperties.LiveSetting="Polite"/>
-                        <Button x:Name="AgendaRetry" Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" Margin="0,0,0,8"
-                                Content="Retry reminders" Click="OnRetryReminders" Visibility="Collapsed" AutomationProperties.AutomationId="agenda-retry"/>
+                        <TextBlock x:Name="AgendaEmpty" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                         <ItemsControl x:Name="AgendaList" AutomationProperties.Name="Agenda entries" AutomationProperties.AutomationId="agenda-entries">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -190,14 +185,6 @@
                             <Button x:Name="MoreAgendaItems" Style="{StaticResource Btn.Link}" Content="Next events"
                                     Click="OnMoreAgendaItems" Visibility="Collapsed"/>
                         </WrapPanel>
-                        <Border Style="{StaticResource CardInner}" Visibility="{Binding NoCalendars, Converter={StaticResource Vis}}">
-                            <StackPanel>
-                                <TextBlock Text="Connect your calendar" FontWeight="SemiBold"/>
-                                <TextBlock Style="{StaticResource T.Body2}" Margin="0,4,0,8"
-                                           Text="Paste the private ICS address from Google Calendar (Settings → Integrate calendar → Secret address in iCal format) or Outlook (Publish calendar → ICS), or pick a local .ics file."/>
-                                <Button Style="{StaticResource Btn.Accent}" HorizontalAlignment="Left" Click="OnAddCalendar" Content="Add a calendar"/>
-                            </StackPanel>
-                        </Border>
                     </StackPanel>
                 </c:Card>
 
@@ -274,4 +261,12 @@
             </ItemsControl>
         </StackPanel>
     </ScrollViewer>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,16">
+        <Button x:Name="CancelSceneRun" Style="{StaticResource Btn.Standard}" Content="Stop scene" Click="OnStopScene"
+                Visibility="Collapsed" Margin="4,0" AutomationProperties.AutomationId="reminder-scene-stop"/>
+        <Button x:Name="AgendaRetry" Style="{StaticResource Btn.Standard}" Content="Retry reminders" Click="OnRetryReminders"
+                Visibility="Collapsed" Margin="4,0" AutomationProperties.AutomationId="agenda-retry"/>
+    </StackPanel>
+    <c:FeedbackPopup x:Name="AgendaFeedback"/>
+    </Grid>
 </UserControl>

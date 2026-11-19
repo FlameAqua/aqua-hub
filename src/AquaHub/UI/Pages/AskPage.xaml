@@ -731,7 +731,10 @@
                                           ToolTip="Use my PC: find and read files in your allowed folders, see your screen, and with your OK open things and work in apps">
                                 <StackPanel Orientation="Horizontal"><c:Icon Kind="computer" Width="12" Height="12"/><TextBlock Text="Use my PC" Margin="5,0,0,0"/></StackPanel>
                             </ToggleButton>
-                            <TextBlock x:Name="ModeHint" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="4,0,0,0" TextWrapping="Wrap" MaxWidth="360"/>
+                            <Button x:Name="ModeHelp" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Margin="4,0,0,0"
+                                    Click="OnModeHelp" AutomationProperties.Name="About Ask modes">
+                                <c:Icon Kind="info" Width="14" Height="14"/>
+                            </Button>
                             <Button x:Name="TidyUndo" Style="{StaticResource Btn.Link}" Content="Undo" Visibility="Collapsed" Click="OnUndoTidy" VerticalAlignment="Center"
                                     Margin="6,0,0,0" FontSize="12" AutomationProperties.AutomationId="ask-tidy-undo" ToolTip="Put back the words exactly as the recognizer heard them"/>
                         </WrapPanel>
@@ -791,8 +794,12 @@
                             </Border>
                         </Popup>
                     </Grid>
-                    <!-- While dictating: how loud you are, and with Windows' recognizers a pointer to Whisper -->
-                    <c:GroupGrid x:Name="VoiceBar" Margin="10,0,4,2" Visibility="Collapsed" AutomationProperties.AutomationId="ask-voice-bar" AutomationProperties.Name="Dictation">
+                </StackPanel>
+            </Border>
+            <c:GroupBorder x:Name="VoiceBar" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,0,6"
+                           Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1"
+                           CornerRadius="12" Padding="12,6" Visibility="Collapsed" AutomationProperties.AutomationId="ask-voice-bar" AutomationProperties.Name="Dictation">
+                    <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
@@ -802,17 +809,16 @@
                             <Border CornerRadius="2.5" Background="{DynamicResource B.Track}"/>
                             <Border x:Name="VoiceMeterFill" CornerRadius="2.5" Background="{DynamicResource B.Accent}" HorizontalAlignment="Left" Width="0"/>
                         </c:GroupGrid>
-                        <TextBlock x:Name="VoiceTip" Grid.Column="1" Style="{StaticResource T.Caption}" TextWrapping="Wrap" VerticalAlignment="Center"
-                                   AutomationProperties.AutomationId="ask-voice-tip"/>
+                        <TextBlock Text="Listening" Grid.Column="1" Style="{StaticResource T.Caption}" VerticalAlignment="Center"/>
                         <StackPanel x:Name="WhisperTipLinks" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Style="{StaticResource Btn.Link}" FontSize="12" Content="Set up Whisper" Click="OnWhisperSetup"
+                            <Button Style="{StaticResource Btn.Link}" FontSize="12" Margin="6,0,0,0" Content="Whisper settings" Click="OnWhisperSetup"
                                     AutomationProperties.AutomationId="ask-whisper-setup" ToolTip="Settings › Ask Aqua › Voice"/>
                             <Button Style="{StaticResource Btn.Link}" FontSize="12" Content="Hide" Click="OnHideWhisperTip" Foreground="{DynamicResource B.Text3}"
                                     AutomationProperties.AutomationId="ask-whisper-tip-hide" ToolTip="Don't suggest Whisper again (Settings › Ask Aqua › Voice)"/>
                         </StackPanel>
-                    </c:GroupGrid>
-                </StackPanel>
-            </Border>
+                    </Grid>
+            </c:GroupBorder>
+            <c:FeedbackPopup x:Name="AskFeedback" Grid.RowSpan="3"/>
         </Grid>
 
         <!-- ═══ Notes for this chat (its scratchpad) ═══ -->

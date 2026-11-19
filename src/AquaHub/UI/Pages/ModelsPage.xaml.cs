@@ -65,14 +65,15 @@ public partial class ModelsPage : UserControl, IPage
         _timer.Stop();
         _browse?.Cancel();
         _preview?.Cancel();
+        ModelsFeedback.Hide();
     }
 
     private void OnSettingsChanged(HubSettings _) => Hub.OnUi(() => { if (_active) Refresh(); });
     private void OnSettings(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "ai");
     private void OnCopyMatrix(object sender, RoutedEventArgs e)
     {
-        try { var matrix = Hub.LocalAi.CompatibilityMatrix(); if (!Sandbox.Intercept("clipboard", matrix)) Clipboard.SetText(matrix); LibraryError.Text = "Compatibility matrix copied."; }
-        catch (System.Runtime.InteropServices.COMException) { LibraryError.Text = "Couldn't copy. Try again when the clipboard is available."; }
+        try { var matrix = Hub.LocalAi.CompatibilityMatrix(); if (!Sandbox.Intercept("clipboard", matrix)) Clipboard.SetText(matrix); ModelsFeedback.Show("Compatibility matrix copied."); }
+        catch (System.Runtime.InteropServices.COMException) { ModelsFeedback.Show("Couldn't copy. Try again when the clipboard is available.", error: true); }
     }
 
     private void UpdateHardware()
@@ -92,7 +93,7 @@ public partial class ModelsPage : UserControl, IPage
             var ai = Hub.LocalAi;
             UpdateHardware();
             var models = ai.Models;
-            // Reuse row objects so async errors and pending actions survive runtime/library notifications.
+            // Reuse row objects so pending actions survive runtime/library notifications.
             foreach (var id in _rows.Keys.Except(models.Select(m => m.Id)).ToList()) _rows.Remove(id);
             foreach (var model in models)
             {
@@ -163,9 +164,7 @@ public partial class ModelsPage : UserControl, IPage
 
     public abstract class ActionRow : ObservableObject
     {
-        private string _error = "";
         private bool _available = true;
-        public string Error { get => _error; set => Set(ref _error, value); }
         public bool Available { get => _available; set => Set(ref _available, value); }
         public void Notify() => RaiseAll();
     }
@@ -237,19 +236,20 @@ public partial class ModelsPage : UserControl, IPage
             if (!await Hub.LocalAi.RemoveModelAsync(row.Model) && !Sandbox.Enabled) throw new InvalidOperationException("The model couldn't be removed. Refresh the library and try again.");
         });
     }
-    private static async Task Act(ActionRow row, Func<Task> action)
+    private async Task Act(ActionRow row, Func<Task> action)
     {
         if (!row.Available) return;
-        row.Available = false; row.Error = "";
+        row.Available = false;
         try { await action(); }
-        catch (Exception ex) { row.Error = ex.Message; }
+        catch (Exception ex) { Report(ex.Message, error: true); }
         finally { row.Available = true; }
     }
     private async void OnRefresh(object sender, RoutedEventArgs e)
     {
-        RefreshButton.IsEnabled = false; LibraryError.Text = "";
-        try { await Hub.LocalAi.RefreshAsync(); }
-        catch (Exception ex) { LibraryError.Text = ex.Message; }
+        RefreshButton.IsEnabled = false;
+        ModelsFeedback.Show("Refreshing the model library…", "models-refresh-status", busy: true);
+        try { await Hub.LocalAi.RefreshAsync(); ModelsFeedback.Hide("models-refresh-status"); }
+        catch (Exception ex) { Report(ex.Message, error: true); }
         finally { RefreshButton.IsEnabled = true; }
     }
 
@@ -282,46 +282,58 @@ public partial class ModelsPage : UserControl, IPage
         DiscardButton.IsEnabled = !busy;
         CancelDownload.IsEnabled = Hub.LocalAi.Downloading;
     }
-    private async Task Download(ActionRow row, Func<Task> action)
+    private async Task Download(Func<Task> action)
     {
         if (_downloadAction || Hub.LocalAi.Downloading) return;
-        _downloadAction = true; row.Error = "";
+        _downloadAction = true;
         _cancelRequested = false;
         _rateStep = ""; _rateClock.Reset();
         UpdateDownloadButtons();
         DownloadPanel.Visibility = Visibility.Visible;
         DownloadStep.Text = "Preparing download…";
+        DownloadDetail.Text = "";
+        DownloadProgress.IsIndeterminate = true;
         try
         {
             await action();
-            DownloadStep.Text = Sandbox.Enabled ? "Download recorded in the test journal." : "Downloaded and verified. Ready in your library.";
+            Report(Sandbox.Enabled ? "Download recorded in the test journal." : "Downloaded and verified. Ready in your library.");
         }
-        catch (OperationCanceledException) { DownloadStep.Text = "Stopped. It carries on where it left off next time."; }
+        catch (OperationCanceledException) { Report("Download stopped. You can resume it later."); }
         catch (Exception ex)
         {
             // The backend wraps a CancelDownload request in a DownloadException for its other callers.
-            if (_cancelRequested) DownloadStep.Text = "Stopped. It carries on where it left off next time.";
-            else { row.Error = ex.Message; DownloadStep.Text = ex.Message; }
+            if (_cancelRequested) Report("Download stopped. You can resume it later.");
+            else Report(ex.Message, error: true);
         }
-        finally { _downloadAction = false; Refresh(); DownloadProgress.IsIndeterminate = false; }
+        finally { _downloadAction = false; DownloadPanel.Visibility = Visibility.Collapsed; Refresh(); }
     }
     private async void OnSuggestion(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: SuggestionRow row }) await Download(row, () => Hub.LocalAi.DownloadAsync(row.Recommendation));
+        if (sender is FrameworkElement { DataContext: SuggestionRow row }) await Download(() => Hub.LocalAi.DownloadAsync(row.Recommendation));
     }
     private async void OnFileDownload(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: FileRow row } || _repo is null || _repo.Gated) return;
         var repo = _repo; var projector = VisionOption.IsChecked == true ? _projector : null;
-        await Download(row, () => Hub.LocalAi.DownloadAsync(repo, row.File, projector));
+        await Download(() => Hub.LocalAi.DownloadAsync(repo, row.File, projector));
     }
     private void OnCancel(object sender, RoutedEventArgs e) { _cancelRequested = true; Hub.LocalAi.CancelDownload(); CancelDownload.IsEnabled = false; }
     private void OnDiscard(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(Window.GetWindow(this), "Discard all unfinished downloads? Their saved progress will be lost.", "Discard downloads",
             MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
-        try { LibraryError.Text = Hub.LocalAi.DiscardUnfinished() ? "Unfinished downloads discarded." : "Wait for the current download to stop first."; }
-        catch (Exception ex) { LibraryError.Text = ex.Message; }
+        try
+        {
+            var discarded = Hub.LocalAi.DiscardUnfinished();
+            ModelsFeedback.Show(discarded ? "Unfinished downloads discarded." : "Wait for the current download to stop first.", error: !discarded);
+        }
+        catch (Exception ex) { ModelsFeedback.Show(ex.Message, error: true); }
+    }
+
+    private void Report(string message, bool error = false)
+    {
+        var feedback = _active ? ModelsFeedback : Hub.Windows.Main?.WorkspaceFeedback;
+        feedback?.Show(message, error: error);
     }
     private void OnProgress(ModelDownloadProgress? p)
     {
@@ -347,24 +359,27 @@ public partial class ModelsPage : UserControl, IPage
     private async void OnSearch(object sender, RoutedEventArgs e)
     {
         var query = SearchBox.Text.Trim();
-        if (query.Length == 0) { SearchStatus.Text = "Enter a model or publisher to search."; return; }
+        if (query.Length == 0) { ModelsFeedback.Show("Enter a model or publisher to search.", error: true); return; }
         var request = BeginBrowse();
-        SearchStatus.Text = "Searching Hugging Face…"; Repos.ItemsSource = null; RepoPanel.Visibility = Visibility.Collapsed;
+        ModelsFeedback.Show("Searching Hugging Face…", "models-browse", busy: true);
+        Repos.ItemsSource = null; RepoPanel.Visibility = Visibility.Collapsed;
         try
         {
             var results = await Hub.LocalAi.SearchAsync(query, request.Token);
             if (request.IsCancellationRequested) return;
             Repos.ItemsSource = results.Select(r => new RepoRow(r.Id, $"{r.Downloads:N0} downloads · {r.Likes:N0} likes" + (r.Updated is { } t ? $" · updated {t:dd MMM yyyy}" : ""))).ToList();
-            SearchStatus.Text = results.Count == 0 ? "No public GGUF repositories found. Try a different name." : $"{results.Count} repositories · choose one to see its files";
+            if (results.Count == 0) ModelsFeedback.Show("No public GGUF repositories found. Try a different name.");
+            else ModelsFeedback.Hide("models-browse");
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!request.IsCancellationRequested) SearchStatus.Text = ex.Message; }
+        catch (Exception ex) { if (!request.IsCancellationRequested) ModelsFeedback.Show(ex.Message, error: true); }
     }
     private async void OnRepo(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: RepoRow row }) return;
         var request = BeginBrowse(); _repo = null; _projector = null; _files.Clear();
-        RepoPanel.Visibility = Visibility.Visible; RepoTitle.Text = row.Id; RepoStatus.Text = "Reading files…";
+        RepoPanel.Visibility = Visibility.Collapsed; RepoTitle.Text = row.Id;
+        ModelsFeedback.Show("Reading repository files…", "models-browse", busy: true);
         _fileItems.Clear(); VisionOption.Visibility = ProjectorChoice.Visibility = Visibility.Collapsed;
         try
         {
@@ -381,9 +396,11 @@ public partial class ModelsPage : UserControl, IPage
             ProjectorChoice.SelectedItem = _projector;
             VisionOption.IsChecked = false;
             FillFiles();
+            RepoPanel.Visibility = Visibility.Visible;
+            ModelsFeedback.Hide("models-browse");
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!request.IsCancellationRequested) RepoStatus.Text = ex.Message; }
+        catch (Exception ex) { if (!request.IsCancellationRequested) ModelsFeedback.Show(ex.Message, error: true); }
     }
     private async void OnVisionChanged(object sender, RoutedEventArgs e)
     {
@@ -413,7 +430,7 @@ public partial class ModelsPage : UserControl, IPage
         var request = _preview = new CancellationTokenSource();
         _previewRow = row;
         var projector = VisionOption.IsChecked == true ? _projector : null;
-        row.Detail = "Checking the GGUF header…"; row.Error = "";
+        ModelsFeedback.Show("Checking the GGUF header…", "models-preview", busy: true);
         var entered = false;
         try
         {
@@ -424,11 +441,15 @@ public partial class ModelsPage : UserControl, IPage
             row.Detail = $"{Fmt.Bytes(model.Bytes)} · {FitText(Hub.LocalAi.Fit(model))} (header estimate) · " +
                 string.Join(" · ", new[] { model.Vision ? "Vision" : null, model.Thinking ? "Thinking" : null, model.Tools ? "Tools" : null, model.Embedding ? "Embedding" : null }.OfType<string>()) +
                 "\n" + (Hub.LocalAi.Engine(model)?.Label ?? "No engine available") + ". Full-file verification happens on download; inference is not verified.";
-            row.Error = Hub.LocalAi.Problem(model) ?? "";
+            if (Hub.LocalAi.Problem(model) is { Length: > 0 } problem) ModelsFeedback.Show(problem, error: true);
         }
         catch (OperationCanceledException) { if (ReferenceEquals(request, _preview)) FillFiles(); }
-        catch (Exception ex) { if (!request.IsCancellationRequested) { FillFiles(); row.Error = "Header unavailable; weights-only estimate. " + ex.Message; } }
-        finally { if (entered) _previewGate.Release(); }
+        catch (Exception ex) { if (!request.IsCancellationRequested) { FillFiles(); ModelsFeedback.Show("Header unavailable. " + ex.Message, error: true); } }
+        finally
+        {
+            if (entered) _previewGate.Release();
+            if (ReferenceEquals(request, _preview)) ModelsFeedback.Hide("models-preview");
+        }
     }
     private void FillFiles()
     {

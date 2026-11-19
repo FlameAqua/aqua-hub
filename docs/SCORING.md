@@ -985,3 +985,29 @@ Reminders cases and the selected close/reopen/quit Lifecycle case passed. The fi
 the editor, the absence of a launch at the due time or on cancelling the review, one intercepted launch after
 confirmation, and stopping before a later action. Real scene effects remain manual acceptance. Documentation,
 selection and whitespace checks passed. Committed main CI remains green on b4ac28f and predates this local work.
+
+## 19 November 2026 · Inter-phase UI refinement
+
+Adrian asked for stronger visual hierarchy, less explanatory copy and pop-up feedback that leaves surrounding controls
+in place. Image Gen now opens on the prompt, Generate and the canvas. Parameters and local ComfyUI setup share an
+on-demand drawer. The gallery and preview controls are grouped with the image. The Deck is a persistent draggable
+bubble that opens direct shortcuts, including up to two pinned Launchpad apps. Its 1–60 minute dial starts a local
+reminder and reads the remaining time from the stored deadline.
+
+`FeedbackPopup` centralizes transient validation, progress and confirmations in the updated surfaces. Model, runtime
+and Whisper downloads have separate progress cards with Cancel. Compatibility records, collected results and account
+connection details remain available in their views. Review caught the Deck covering a notice's dismiss button in the
+earlier Image Gen layout. The notice now opens between the title and toolbar. Review also caught a feed refresh that
+could leave a stale busy notice after navigation and a Workbench draft continuation that could apply after cancellation.
+
+The normal Debug suite passed **1,287** cases, with **23** opt-in live cases skipped. Scratch Release app and harness
+builds had zero warnings and errors. The offline `Phase4,Reminders,Streams` selection passed **26** cases. A final
+`Streams` run passed **6** cases after the feedback lifecycle fix. UI Automation checked prompt and reminder field
+bounds during validation, the narrow light studio and its drawer, Deck move and visibility, a pinned launch through
+the effect intercept, timer cancellation and the existing reminder scene workflow. The reminder test also confirmed
+the duration survives store reopen with the original elapsed deadline. Scratch captures were reviewed in dark and
+light themes. Documentation and whitespace checks passed.
+
+Legacy Settings, Feeds and Workbench desktop runs were skipped. Physical Deck drag and dial use, screen-reader speech,
+real ComfyUI inference and real Windows notification behavior remain manual acceptance. The current committed CI
+baseline was green at `96c216b`, before this local refinement.

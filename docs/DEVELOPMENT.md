@@ -18,6 +18,19 @@ agent handoffs, screenshots, scratch binaries and run artifacts do not belong in
 - Publish replacement snapshots. Keep stable item IDs and UI rows; update changed properties/sections. New collections
   and query results need bounds or paging, especially file indexes, galleries and long chats.
 
+## Interaction and feedback
+
+- Use layout, spacing and contrast to make the primary action and its input obvious. Group related controls and reveal
+  secondary settings on demand. Use the existing theme resources and check the narrowest supported window.
+- Keep action labels and information people need to make a decision visible. Put supplementary explanation behind a
+  named hint icon or a control tooltip. Give icon-only controls accessible names and expose important help through UI
+  Automation. Mouse hover, keyboard focus and activation should all make help discoverable.
+- Show transient progress, validation errors and confirmations in a pop-up over the owning surface. Use `FeedbackPopup`
+  for short notices and an overlay outside the layout flow when progress needs its own Cancel action. Keep focus in the
+  current task, provide dismissal and announce changes through live regions. A notice appearing or clearing must leave
+  the position of the surrounding controls the same. Keep real content such as a gallery item, a transcript, a result
+  list or a recorded compatibility observation in its view.
+
 ## Async work and resource lifetime
 
 The dispatcher is for presentation. Keep HTTP, GGUF/document/image parsing, hashing, directory scans and process waits

@@ -67,14 +67,14 @@ public sealed class A26_StreamsTests(AppFixture fixture, ITestOutputHelper outpu
         GoTo("social"); Ui.Invoke(Field("streams-sources")); PageRoot("settings");
         Ui.SetValue(Field("settings-twitch-client-id"), "");
         Ui.Invoke(Field("settings-twitch-connect"));
-        Wait.For(() => Ui.NameOf(Field("settings-twitch-status")).Contains("public Twitch client ID"), "client ID explanation");
+        Wait.For(() => Ui.NameOf(Field("twitch-feedback")).Contains("public Twitch client ID"), "client ID explanation");
         Ui.SetValue(Field("settings-twitch-client-id"), "FlameAqua-AquaHub");
         Ui.Invoke(Field("settings-twitch-connect"));
-        Wait.For(() => Ui.NameOf(Field("settings-twitch-status")).Contains("app name isn't the Client ID"), "app name explanation");
+        Wait.For(() => Ui.NameOf(Field("twitch-feedback")).Contains("app name isn't the Client ID"), "app name explanation");
         Ui.SetValue(Field("settings-twitch-client-id"), "fixtureClient");
         ExpectJournal("twitch-connect", () => Ui.Invoke(Field("settings-twitch-connect")));
         App.Settings.WaitForString("social.streams.twitchClientId", "fixtureClient");
-        Assert.Contains("intercepted", Ui.NameOf(Field("settings-twitch-status")));
+        Assert.Contains("intercepted", Ui.NameOf(Field("twitch-feedback")));
         Shot("streams-settings");
     });
 
@@ -120,7 +120,7 @@ public sealed class A26_StreamsTests(AppFixture fixture, ITestOutputHelper outpu
             ((TransformPattern)Main.GetCurrentPattern(TransformPattern.Pattern)).Resize(1000, 760);
             GoTo("social"); Ui.Invoke(Field("streams-sources")); PageRoot("settings");
             ExpectJournal("google-connect", () => Ui.Invoke(Field("settings-google-connect")));
-            Assert.Contains("intercepted", Ui.NameOf(Field("settings-google-status")));
+            Assert.Contains("intercepted", Ui.NameOf(Field("google-feedback")));
             Ui.SetValue(Field("settings-youtube-filter"), "Fixture");
             ShowChoice(Field("settings-youtube-live-choice"));
             Shot("google-channel-chooser-light");
@@ -152,7 +152,7 @@ public sealed class A26_StreamsTests(AppFixture fixture, ITestOutputHelper outpu
             Ui.SetValue(Field("settings-youtube-filter"), "Channel G");
             var seventh = Field("settings-youtube-live-choice");
             Ui.Toggle(seventh);
-            Wait.For(() => Ui.ToggleStateOf(seventh) == ToggleState.Off && Ui.NameOf(Field("settings-youtube-selection-status")).Contains("Six channels"), "seventh choice rejected with explanation");
+            Wait.For(() => Ui.ToggleStateOf(seventh) == ToggleState.Off && Ui.NameOf(Field("youtube-selection-feedback")).Contains("Six channels"), "seventh choice rejected with explanation");
             Ui.SetValue(Field("settings-youtube-filter"), "Channel A");
             Ui.SetToggle(Field("settings-youtube-live-choice"), false);
             Ui.SetValue(Field("settings-youtube-filter"), "Channel G");

@@ -384,7 +384,7 @@ public sealed class A11_SettingsTests : E2ETestBase
             if (category is not null) Ui.SelectComboItem(Ui.WaitFind(Page, Ui.Id("NewSourceCat"), "category"), category, Pid);
             Ui.Invoke(Ui.WaitFind(Page, Ui.Button("Add"), "Add"));
         }
-        string Error() => Ui.NameOf(Ui.WaitFind(Page, Ui.Id("SourceError"), "source error"));
+        string Error() => Ui.Find(Page, Ui.Id("SourceError")) is { } notice ? Ui.NameOf(notice) : "";
 
         Check("Settings news", "add https feed (tech) → news.sources", () =>
         {
@@ -477,7 +477,7 @@ public sealed class A11_SettingsTests : E2ETestBase
     {
         Section("Agenda");
         bool HasCalendar(string u) => (App.Settings.Get("events.calendars") as JsonArray)!.OfType<JsonObject>().Any(c => (string?)c["url"] == u);
-        string CalError() => Ui.NameOf(Ui.WaitFind(Page, Ui.Id("CalError"), "calendar error"));
+        string CalError() => Ui.Find(Page, Ui.Id("CalError")) is { } notice ? Ui.NameOf(notice) : "";
         void Add(string name, string url)
         {
             Ui.SetValue(Ui.WaitFind(Page, Ui.Id("NewCalName"), "calendar name"), name);
@@ -572,7 +572,7 @@ public sealed class A11_SettingsTests : E2ETestBase
             Ui.SetValue(Ui.WaitFind(Page, Ui.Id("FinnhubKey"), "key box"), "e2e-test-key-000");
             var save = Ui.ButtonWithText(Page, "Save key") ?? Ui.WaitFind(Page, Ui.Button("Earnings dates (Finnhub) (2)"), "save key");
             Ui.Invoke(save);
-            Wait.For(() => Ui.NameOf(Ui.WaitFind(Page, Ui.Id("SavedText"), "saved text")) == "API key saved to Credential Manager", "confirmation text");
+            Wait.For(() => Ui.Find(Page, Ui.Text("API key saved to Credential Manager")) is not null, "confirmation text");
             Expect(!(App.Settings.Read().ToJsonString().Contains("e2e-test-key-000")), "the API key was written to settings.json");
         });
         Number("Settings agenda", "Remind me before events (minutes)", "15", "events.reminderMinutes", 15);
@@ -776,7 +776,7 @@ public sealed class A11_SettingsTests : E2ETestBase
         {
             var mark = App.Log.Mark();
             Ui.Invoke(Ui.ButtonWithText(Page, "Clear caches") ?? Field("Local database (2)", ControlType.Button));
-            Wait.For(() => Ui.NameOf(Ui.WaitFind(Page, Ui.Id("SavedText"), "saved text")) == "Caches cleared", "'Caches cleared'");
+            Wait.For(() => Ui.Find(Page, Ui.Text("Caches cleared")) is not null, "'Caches cleared'");
             App.Log.WaitForLine(mark, l => l.Contains("[agents] "), "agents rerun", TimeSpan.FromSeconds(30));
         });
         Check("Settings privacy", "Edit JSON → journal edit-json", () =>

@@ -69,12 +69,12 @@ public sealed class ReminderService
                 throw new ReminderException($"Enter a title of 1–{TitleLimit} characters.", "title");
             if (!ValidSceneId(draft.SceneId))
                 throw new ReminderException("Choose a saved scene or leave the scene blank.", "scene");
-            draft = draft with { Title = title, LocalTime = DateTime.SpecifyKind(draft.LocalTime, DateTimeKind.Unspecified) };
+            draft = draft with { Title = title, LocalTime = DateTime.SpecifyKind(draft.LocalTime, DateTimeKind.Unspecified), QuickMinutes = null };
             Reminder? current = original is null ? null : Find(items, original);
             if (current is not null && current.Draft.LocalTime == draft.LocalTime && current.Draft.Repeat == draft.Repeat)
             {
                 if (current.Draft.Title != draft.Title) Withdraw(current, withdrawn);
-                var updated = current with { Draft = draft };
+                var updated = current with { Draft = draft with { QuickMinutes = current.Draft.QuickMinutes } };
                 items[items.IndexOf(current)] = updated;
                 return updated;
             }
@@ -97,14 +97,14 @@ public sealed class ReminderService
     public Task<Reminder> SaveQuickAsync(int minutes, CancellationToken ct = default) =>
         Queue(() => Change((items, now, zone, _) =>
         {
-            if (minutes is not (5 or 15 or 30))
-                throw new ReminderException("Choose a 5-, 15- or 30-minute reminder.");
+            if (minutes is < 1 or > 60)
+                throw new ReminderException("Choose between 1 and 60 minutes.");
 
             var instant = now.AddMinutes(minutes);
             var local = TimeZoneInfo.ConvertTime(instant, zone);
             // Keep the editor's minute precision while retaining the exact elapsed deadline.
             var nominal = new DateTime(local.Year, local.Month, local.Day, local.Hour, local.Minute, 0);
-            var draft = new ReminderDraft($"Quick reminder · {minutes} min", nominal, ReminderRepeat.Once);
+            var draft = new ReminderDraft($"Quick reminder · {minutes} min", nominal, ReminderRepeat.Once, QuickMinutes: minutes);
             var reminder = new Reminder(Guid.NewGuid(), Guid.NewGuid(), draft, instant, nominal);
             Add(items, reminder);
             return reminder;
@@ -270,7 +270,7 @@ public sealed class ReminderService
     {
         Id: var id, ScheduleId: var schedule, Draft: { Title.Length: > 0 and <= TitleLimit, LocalTime.Year: >= 2 and <= 9998 } draft,
     } && id != Guid.Empty && schedule != Guid.Empty && Enum.IsDefined(draft.Repeat) && !draft.Title.Any(char.IsControl)
-        && ValidSceneId(draft.SceneId)
+        && ValidSceneId(draft.SceneId) && (draft.QuickMinutes is null || draft is { Repeat: ReminderRepeat.Once, QuickMinutes: >= 1 and <= 60 })
         && (item.NextLocal is null || item.NextLocal.Value.Year is >= 2 and <= 9998)
         && (item.Pending is null || item.Pending is { Nominal.Year: >= 2 and <= 9998, Delivery: >= 0 and < int.MaxValue }
             && item.Pending.Status is ReminderStatus.Due or ReminderStatus.Missed or ReminderStatus.Snoozed)

@@ -17,7 +17,6 @@ public sealed record ForesightVM(string Title, string When, string Detail, strin
 
 public sealed class UpcomingVM : ObservableObject
 {
-    public bool NoCalendars { get; set; }
     public string ForesightOverview { get; set; } = "";
     public string ForesightBadge { get; set; } = "";
     public string ForesightMeta { get; set; } = "";
@@ -66,6 +65,8 @@ public partial class UpcomingPage : UserControl, IPage
         _visible?.Dispose();
         _visible = null;
         _busy = false;
+        _storageError = null;
+        AgendaFeedback.Hide();
         CloseEditor(focus: false);
         CloseSceneReview(focus: false);
     }

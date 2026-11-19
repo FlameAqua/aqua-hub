@@ -21,6 +21,8 @@ public partial class ImageGenerationPanel : UserControl
     private IReadOnlyList<GeneratedImage>? _gallery;
     private ImageModelInventory? _inventory;
     private GeneratedImage? _deleteTarget;
+    private FrameworkElement? _inspectorEntry;
+    private (string Text, bool Error, bool Busy)? _lastFeedback;
     private static ImageGenerationSession Session => Hub.Images;
 
     public ImageGenerationPanel()
@@ -49,9 +51,18 @@ public partial class ImageGenerationPanel : UserControl
         Session.Changed -= Refresh;
         Session.Changed += Refresh;
         await Session.LoadAsync();
+        if (!IsLoaded) return;
+        if (Session.RecoveryNeeded) OpenInspector(ServerButton, parameters: false);
         Refresh();
     }
-    private void OnUnloaded(object sender, RoutedEventArgs e) => Session.Changed -= Refresh;
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        Session.Changed -= Refresh;
+        CloseInspector(restoreFocus: false);
+        DeleteConfirmation.Visibility = Visibility.Collapsed;
+        _deleteTarget = null;
+        _lastFeedback = null;
+    }
     private void OnPromptChanged(object sender, TextChangedEventArgs e) { if (!_filling) Session.Draft = Prompt.Text; }
 
     private ImageGenerationOptions Options()
@@ -111,7 +122,45 @@ public partial class ImageGenerationPanel : UserControl
         try { await Session.RecoverAsync(Options()); }
         catch (Exception ex) { Session.Message(ex.Message, true); }
     }
-    private void OnExample(object sender, RoutedEventArgs e) { Session.ClearReference(); Prompt.Text = (string)((Button)sender).Tag; Refresh(); }
+    private void OnParameters(object sender, RoutedEventArgs e) => OpenInspector(ParametersButton, parameters: true);
+    private void OnSetup(object sender, RoutedEventArgs e) => OpenInspector(ServerButton, parameters: false);
+    private void OnShowStatus(object sender, RoutedEventArgs e) => PublishFeedback(force: true);
+
+    private void OpenInspector(FrameworkElement entryPoint, bool parameters)
+    {
+        _inspectorEntry = entryPoint;
+        Parameters.Visibility = parameters ? Visibility.Visible : Visibility.Collapsed;
+        Setup.Visibility = parameters ? Visibility.Collapsed : Visibility.Visible;
+        InspectorTitle.Text = parameters ? "Generation parameters" : "ComfyUI & gallery";
+        Inspector.Visibility = Visibility.Visible;
+        Feedback.NoticeAlignment = HorizontalAlignment.Left;
+        InspectorClose.Focus();
+    }
+
+    private void CloseInspector(bool restoreFocus)
+    {
+        Inspector.Visibility = Visibility.Collapsed;
+        Feedback.NoticeAlignment = HorizontalAlignment.Center;
+        if (restoreFocus) _inspectorEntry?.Focus();
+        _inspectorEntry = null;
+    }
+
+    private void OnCloseInspector(object sender, RoutedEventArgs e) => CloseInspector(restoreFocus: true);
+    private void OnInspectorKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || e.OriginalSource is ComboBox { IsDropDownOpen: true }) return;
+        CloseInspector(restoreFocus: true);
+        e.Handled = true;
+    }
+
+    private void PublishFeedback(bool force = false)
+    {
+        if (!IsLoaded) return;
+        var state = (Text: Session.Status, Error: Session.Error, Busy: Session.Busy || Session.Checking || Session.Attaching);
+        if (!force && (_lastFeedback == state || (!state.Error && !state.Busy && state.Text == ImageGenerationSession.InitialStatus))) return;
+        _lastFeedback = state;
+        Feedback.Show(state.Text, "image-status", error: state.Error, busy: state.Busy);
+    }
 
     // ───────────── Image to edit: picker, drop, paste ─────────────
 
@@ -204,18 +253,15 @@ public partial class ImageGenerationPanel : UserControl
     private void UpdateQuality()
     {
         Quality.IsEnabled = Variant.SelectedIndex == 0 && !Session.Busy;
-        QualityHint.Text = Variant.SelectedIndex == 1 ? "Distilled Klein · 4 steps for quick exploration." : "Klein Base · more detail and variation, at a gentler pace.";
+        Quality.ToolTip = Variant.SelectedIndex == 1 ? "Klein fast uses four sampling steps." : "More steps give the model more time to refine details.";
     }
 
     private void Refresh()
     {
-        Status.Text = Session.Status;
-        Status.SetResourceReference(TextBlock.ForegroundProperty, Session.Error ? "B.Down" : "B.Text2");
         Generate.IsEnabled = !Session.Busy && !Session.Checking && !Session.ManagingImages && !Session.RecoveryNeeded && !Session.Attaching;
         Generate.Content = Session.Busy ? "Creating…" : Session.Editing ? "Apply image edit" : "Generate image";
         RefreshReference();
         AttachImage.IsEnabled = !Session.Busy && !Session.Attaching;
-        AttachImage.Content = Session.Reference is null ? "Add an image to edit…" : "Use a different image…";
         StartServer.IsEnabled = !Session.Busy && !Session.Checking;
         Check.IsEnabled = !Session.Busy && !Session.Checking && !Session.RecoveryNeeded;
         SetupFields.IsEnabled = !Session.Busy && !Session.Checking && (!Session.RecoveryNeeded || !Session.HasRecoveryAddress);
@@ -226,7 +272,7 @@ public partial class ImageGenerationPanel : UserControl
         Seed.IsEnabled = !Session.Busy;
         Retention.IsEnabled = !Session.Busy && !Session.ManagingImages;
         Cancel.Visibility = Session.Busy ? Visibility.Visible : Visibility.Collapsed;
-        Progress.Visibility = Session.Busy || Session.Checking || Session.Attaching ? Visibility.Visible : Visibility.Collapsed;
+        Generate.Visibility = Session.Busy ? Visibility.Hidden : Visibility.Visible;
         UpdateQuality();
         if (!ReferenceEquals(_inventory, Session.Inventory) && Session.Inventory is { } inventory)
         {
@@ -234,7 +280,7 @@ public partial class ImageGenerationPanel : UserControl
             FillModels(Diffusion, (string)Diffusion.SelectedItem, inventory.DiffusionModels);
             FillModels(Encoder, (string)Encoder.SelectedItem, inventory.TextEncoders);
             FillModels(Vae, (string)Vae.SelectedItem, inventory.Vaes);
-            if (inventory.IsReady) Setup.IsExpanded = false;
+            if (inventory.IsReady && Inspector.Visibility == Visibility.Visible && Setup.IsVisible) CloseInspector(restoreFocus: true);
         }
         if (!ReferenceEquals(_gallery, Session.Recent))
         {
@@ -245,9 +291,11 @@ public partial class ImageGenerationPanel : UserControl
         {
             _previewId = Session.Selected?.Id;
             Preview.Source = Session.Selected is { } item ? LoadImage(Session.Archive.ImagePath(item)) : null;
-            ImageDetails.Text = Session.Selected is { } selected ? $"{selected.Width} × {selected.Height}\nSeed {selected.Seed} · {selected.Seconds:0}s"
+            ImageDetails.ToolTip = Session.Selected is { } selected ? $"{selected.Width} × {selected.Height}\nSeed {selected.Seed} · {selected.Seconds:0}s"
                 + (selected.EditedFrom is { } from ? $"\nEdited from {(from.Source == ImageReferenceSource.Gallery ? "a gallery image" : from.Name)}" : "") : "";
+            System.Windows.Automation.AutomationProperties.SetHelpText(ImageDetails, ImageDetails.ToolTip as string ?? "");
         }
+        ImageDetails.Visibility = Preview.Source is not null ? Visibility.Visible : Visibility.Collapsed;
         EmptyCanvas.Visibility = Preview.Source is null ? Visibility.Visible : Visibility.Collapsed;
         SaveImage.IsEnabled = OpenImage.IsEnabled = Preview.Source is not null;
         Regenerate.IsEnabled = EditImage.IsEnabled = DeleteImage.IsEnabled = Preview.Source is not null && Generate.IsEnabled;
@@ -256,9 +304,7 @@ public partial class ImageGenerationPanel : UserControl
         LauncherLabel.ToolTip = LauncherLabel.Text;
         OutputLabel.Text = string.IsNullOrWhiteSpace(settings.OutputFolder) ? "Not selected" : settings.OutputFolder;
         OutputLabel.ToolTip = OutputLabel.Text;
-        RetentionHint.Text = string.IsNullOrWhiteSpace(settings.OutputFolder)
-            ? "Expiry applies to Aqua's gallery. Choose ComfyUI's output folder below to expire its copies too."
-            : "Expiry runs at startup and hourly while Aqua is open. Exported copies are kept.";
+        PublishFeedback();
     }
 
     private string? _thumbId;
@@ -266,9 +312,8 @@ public partial class ImageGenerationPanel : UserControl
     {
         var reference = Session.Reference;
         ReferenceBanner.Visibility = Session.Editing ? Visibility.Visible : Visibility.Collapsed;
-        ReferenceText.Text = reference is null ? "Editing with a reference image. Describe what should change."
-            : reference.Source == ImageReferenceSource.Gallery ? $"Editing a copy of “{reference.Name}”. Describe what should change; the original stays as it is."
-            : $"Editing {reference.Name} · {reference.Width} × {reference.Height}. Describe what should change, and what should stay.";
+        ReferenceText.Text = reference?.Name ?? "Reference image";
+        ReferenceText.ToolTip = reference is null ? "Reference image" : $"{reference.Name} · {reference.Width} × {reference.Height}";
         if (_thumbId != reference?.Id)
         {
             _thumbId = reference?.Id;
@@ -353,7 +398,7 @@ public partial class ImageGenerationPanel : UserControl
     {
         _deleteTarget = Session.Selected;
         DeleteConfirmation.Visibility = _deleteTarget is null ? Visibility.Collapsed : Visibility.Visible;
-        DeleteConfirmation.BringIntoView();
+        KeepImage.Focus();
     }
     private async void OnConfirmDelete(object sender, RoutedEventArgs e)
     {
@@ -361,7 +406,18 @@ public partial class ImageGenerationPanel : UserControl
         _deleteTarget = null; DeleteConfirmation.Visibility = Visibility.Collapsed;
         await Session.DeleteAsync(item);
     }
-    private void OnCancelDelete(object sender, RoutedEventArgs e) { _deleteTarget = null; DeleteConfirmation.Visibility = Visibility.Collapsed; }
+    private void OnCancelDelete(object sender, RoutedEventArgs e)
+    {
+        _deleteTarget = null;
+        DeleteConfirmation.Visibility = Visibility.Collapsed;
+        DeleteImage.Focus();
+    }
+    private void OnDeleteKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        OnCancelDelete(sender, e);
+        e.Handled = true;
+    }
     private void OnFolder(object sender, RoutedEventArgs e)
     {
         try
@@ -436,13 +492,13 @@ public partial class ImageGenerationPanel : UserControl
     private void OnResize(object sender, SizeChangedEventArgs e)
     {
         if (FormColumn is null) return;
-        var narrow = ActualWidth < 840;
-        FormColumn.Width = narrow ? new GridLength(1, GridUnitType.Star) : new GridLength(330);
+        var narrow = ActualWidth < 760;
+        FormColumn.Width = narrow ? new GridLength(1, GridUnitType.Star) : new GridLength(Math.Clamp(ActualWidth * .38, 360, 500));
         Grid.SetColumn(PreviewColumn, narrow ? 0 : 1);
         Grid.SetRow(PreviewColumn, narrow ? 1 : 0);
         Grid.SetColumnSpan(Form, narrow ? 2 : 1);
         Grid.SetColumnSpan(PreviewColumn, narrow ? 2 : 1);
-        Form.Margin = narrow ? new Thickness(0, 0, 0, 24) : new Thickness(0, 0, 24, 0);
+        Form.Margin = narrow ? new Thickness(0, 0, 0, 16) : new Thickness(0, 0, 20, 0);
     }
     private sealed record GalleryItem(GeneratedImage Item, ImageSource? Thumbnail);
 }

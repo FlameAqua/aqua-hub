@@ -256,6 +256,12 @@ File reads hold one bounded read handle, including gallery imports and retained-
 content is rejected before submission. Clipboard dimensions are checked before background scaling/PNG encoding. Native
 decode cannot be interrupted mid-frame; its operation is joined on normal shutdown.
 
+The Image Gen panel gives the prompt, Generate and the canvas separate roles. Generation parameters and the ComfyUI
+and gallery controls use one inspector with keyboard dismissal and focus returned to its entry point. Recovery opens
+the ComfyUI inspector. Session messages update a dismissible overlay with screen-reader announcements. The status icon
+can reopen the notice.
+The overlay does not measure against the studio form or gallery.
+
 The Roleplay tab uses Creative/Main with bounded session context and no Ask PC/web tools. A persistent personality library
 does not exist yet; it belongs to Phase 9. Image Gen shipped early from that phase.
 
@@ -267,9 +273,16 @@ Upcoming projects the existing read-only agenda snapshot onto one selected local
 existing read window to include the start of today and retains events that overlap that window. The UI uses pages
 of 60 source events and preserves matching rows when the selected day or snapshot changes. Today is the entry
 point for the floating deck. The shell owns the deck across navigation. Normalized position and hidden state are
-profile settings. Move by dragging, with arrow keys on the handle, or through UI Automation. **Today’s agenda** resets
-the selected day. Quick reminders use the same local store and an elapsed 5-, 15- or 30-minute deadline. The existing settings
-store replaces the file atomically, including while shareable readers have it open.
+profile settings. Move by dragging, with arrow keys on the bubble, or through UI Automation. Activating it opens shortcuts
+for Ask, Launchpad, up to two pinned apps, today's agenda, a new reminder, the timer and hide. The shortcut direction
+uses available space, and animations follow Aqua's and Windows' motion settings. The settings store replaces the file
+atomically, including while shareable readers have it open.
+
+The Deck timer accepts 1–60 minutes and creates a normal one-off reminder at a fixed instant. Optional duration
+metadata lets the shell resume displaying the countdown after restart. Edits retain the metadata when the schedule
+stays the same. Rescheduling removes it. Older reminder records remain valid. The shell derives remaining time from the persisted
+deadline and selects the earliest active Deck timer. Its one-second display tick only runs while the deck and window
+are visible. Stop deletes the selected timer through `ReminderService`.
 
 `ReminderService` owns reminder policy and persistence. The existing `AgentRuntime` tick checks the next due instant,
 local midnight, retry time and clock revision without reading storage on idle ticks. It schedules at most one reminder

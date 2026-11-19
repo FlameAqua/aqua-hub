@@ -24,17 +24,6 @@ public sealed class A07_UpcomingSystemTests : E2ETestBase
             Ui.Invoke(Ui.WaitButtonWithText(GoTo("upcoming"), "Add calendar"));
             ExpectAgendaSettings();
         });
-        Check("Upcoming", "'Add a calendar' (empty agenda card) → Settings › Agenda", () =>
-        {
-            var button = Ui.Find(GoTo("upcoming"), Ui.Button("Add a calendar"));
-            if (button is null)
-            {
-                Step("   (card hidden: calendars already configured)");
-                return;
-            }
-            Ui.Invoke(button);
-            ExpectAgendaSettings();
-        });
     });
 
     [Fact]

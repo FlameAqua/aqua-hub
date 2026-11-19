@@ -51,7 +51,8 @@ public sealed class ImageGenerationSession
 
     /// <summary>The next generation edits an image rather than starting from the prompt alone.</summary>
     public bool Editing => Reference is not null || ReferenceImage is not null;
-    public string Status { get; private set; } = "Connect your local image server below to get started.";
+    internal const string InitialStatus = "ComfyUI connection hasn’t been checked.";
+    public string Status { get; private set; } = InitialStatus;
     public bool Error { get; private set; }
     public ImageModelInventory? Inventory { get; private set; }
     public GeneratedImage? Selected { get; set; }

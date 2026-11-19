@@ -649,7 +649,7 @@ public partial class AskPage : UserControl, IPage
         var text = Input.Text.Trim();
         if (Session.AttachmentsLoading)
         {
-            ModeHint.Text = "Still reading your attachments…";
+            AskFeedback.Show("Still reading your attachments…");
             return;
         }
         var hasFiles = Session.Pending.Any(p => p.Attachment is not null);
@@ -730,7 +730,7 @@ public partial class AskPage : UserControl, IPage
         if (Session.Voice.IsListening) { Session.Voice.Stop(); return; }
         if (Hub.S.Ask.Voice == "off")
         {
-            ModeHint.Text = "Voice input is off — switch it on in Settings › Ask Aqua.";
+            AskFeedback.Show("Turn on voice input in Settings › Ask Aqua.", "ask-voice-feedback", error: true);
             return;
         }
         _tidyCts?.Cancel();
@@ -742,7 +742,7 @@ public partial class AskPage : UserControl, IPage
         MicButton.IsEnabled = true;
         if (error is not null)
         {
-            ModeHint.Text = error;
+            AskFeedback.Show(error, "ask-voice-feedback", error: true);
             return;
         }
         SetListening(true);
@@ -757,21 +757,15 @@ public partial class AskPage : UserControl, IPage
         ShowVoiceBar(on);
         if (!on)
         {
+            AskFeedback.Hide("ask-voice-feedback");
             UpdateModeHint();
             return;
         }
-        var with = Session.Voice.Describe is { Length: > 0 } d ? " · " + d : "";
-        ModeHint.Text = Hub.S.Ask.Voice switch
-        {
-            "online" => "Listening (Windows online speech" + with + ")…",
-            "whisper" => "Listening" + with + "…",
-            _ => "Listening on this PC" + with + "…",
-        } + (Session.Voice.Note is { } note ? " " + note : "");
+        if (Session.Voice.Note is { Length: > 0 } note) AskFeedback.Show(note, "ask-voice-feedback");
     }
 
     /// <summary>
-    /// Under the Ask box while dictating: the microphone level and, with Windows' recognizers, a note that they often
-    /// mishear and Whisper does far better (until you hide it). With Whisper, how it works: it writes when you stop.
+    /// Keeps the recording meter and Whisper shortcut separate from the composition layout.
     /// </summary>
     private void ShowVoiceBar(bool on)
     {
@@ -783,11 +777,6 @@ public partial class AskPage : UserControl, IPage
         VoiceMeter.Visibility = engine == "online" ? Visibility.Collapsed : Visibility.Visible;
         var suggest = engine != "whisper" && Hub.S.Ask.WhisperTip;
         WhisperTipLinks.Visibility = suggest ? Visibility.Visible : Visibility.Collapsed;
-        VoiceTip.Text = engine == "whisper" ? "Whisper writes when you stop."
-            : !suggest ? ""
-            : Hub.Core.Whisper.Installed() is not null
-                ? "Whisper is installed: switch voice input to it for better results."
-                : "Windows' speech recognition often mishears. Whisper is much better.";
     }
 
     private void OnVoiceLevel(double level)
@@ -800,7 +789,8 @@ public partial class AskPage : UserControl, IPage
         if (!IsLoaded) return;
         VoiceMeterFill.Width = 0;
         MicButton.ToolTip = "Whisper is writing down what you said";
-        ModeHint.Text = "Writing down what you said…";
+        VoiceBar.Visibility = Visibility.Collapsed;
+        AskFeedback.Show("Transcribing…", "ask-voice-feedback", busy: true);
     }
 
     private void OnWhisperSetup(object sender, RoutedEventArgs e)
@@ -813,12 +803,11 @@ public partial class AskPage : UserControl, IPage
     {
         Hub.Core.Settings.Update(s => s.Ask.WhisperTip = false);
         WhisperTipLinks.Visibility = Visibility.Collapsed;
-        VoiceTip.Text = "Hidden. Whisper is in Settings › Ask Aqua › Voice.";
     }
 
     private void OnVoiceProblem(string advice)
     {
-        if (IsLoaded && Session.Voice.IsListening) ModeHint.Text = advice;
+        if (IsLoaded && Session.Voice.IsListening) AskFeedback.Show(advice, "ask-voice-feedback", error: true);
     }
 
     private void OnVoicePartial(string text)
@@ -841,7 +830,7 @@ public partial class AskPage : UserControl, IPage
     private async void OnVoiceEnded(string? error)
     {
         SetListening(false);
-        if (error is not null) ModeHint.Text = error;
+        if (error is not null) AskFeedback.Show(error, "ask-voice-feedback", error: true);
         if (!IsLoaded) return;
         Input.Text = _dictationBase;
         Input.CaretIndex = Input.Text.Length;
@@ -863,20 +852,20 @@ public partial class AskPage : UserControl, IPage
         var dictated = Input.Text;
         _tidyCts?.Cancel();
         var cts = _tidyCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        ModeHint.Text = "Tidying up what you said…";
+        AskFeedback.Show("Tidying up dictation…", "ask-voice-feedback", busy: true);
         var tidied = await Task.Run(() => DictationTidy.TidyAsync(Hub.Core.Llm, heard, cts.Token));
         if (cts != _tidyCts || Session.Voice.IsListening) return;
         // Typed over it or left the page meanwhile: leave the words alone.
         if (!IsLoaded || Input.Text != dictated || tidied is null || tidied == DictationTidy.Joined(heard))
         {
-            UpdateModeHint();
+            AskFeedback.Hide("ask-voice-feedback");
             return;
         }
         Input.Text = (_beforeDictation.Length > 0 ? _beforeDictation + " " : "") + tidied;
         Input.CaretIndex = Input.Text.Length;
         _dictationBase = Input.Text;
         _untidied = dictated;
-        ModeHint.Text = "Tidied up by the local model.";
+        AskFeedback.Show("Dictation tidied up.", "ask-voice-feedback");
         TidyUndo.Visibility = Visibility.Visible;
     }
 
@@ -1064,11 +1053,11 @@ public partial class AskPage : UserControl, IPage
             foreach (var m in monitors)
             {
                 var item = new MenuItem { Header = "Capture " + m.Label };
-                item.Click += async (_, _) => { if (!await Session.AttachCaptureAsync(() => ScreenCapture.CaptureMonitorAsync(m), "Screen " + m.Number)) ModeHint.Text = "Couldn't capture that screen."; Input.Focus(); };
+                item.Click += async (_, _) => { if (!await Session.AttachCaptureAsync(() => ScreenCapture.CaptureMonitorAsync(m), "Screen " + m.Number)) AskFeedback.Show("Couldn't capture that screen.", error: true); Input.Focus(); };
                 Add(item);
             }
             var all = new MenuItem { Header = "Capture all screens" };
-            all.Click += async (_, _) => { if (!await Session.AttachCaptureAsync(ScreenCapture.CaptureAllAsync, "All screens")) ModeHint.Text = "Couldn't capture the screens."; Input.Focus(); };
+            all.Click += async (_, _) => { if (!await Session.AttachCaptureAsync(ScreenCapture.CaptureAllAsync, "All screens")) AskFeedback.Show("Couldn't capture the screens.", error: true); Input.Focus(); };
             Add(all);
         }
         var windows = DesktopWindows.List().Where(w => !w.Minimized && !Core.Ai.Assistant.DesktopRules.IsPrivateWindow(w.Process)).Take(14).ToList();
@@ -1081,7 +1070,7 @@ public partial class AskPage : UserControl, IPage
                 item.Click += async (_, _) =>
                 {
                     if (!await Session.AttachCaptureAsync(() => Task.Run(() => ScreenCapture.CaptureWindow(w.Handle, w.Title)), Core.Util.HtmlText.Truncate(w.Process, 30)))
-                        ModeHint.Text = "Couldn't capture that window.";
+                        AskFeedback.Show("Couldn't capture that window.", error: true);
                     Input.Focus();
                 };
                 pick.Items.Add(item);
@@ -1092,16 +1081,15 @@ public partial class AskPage : UserControl, IPage
 
     private async void OnCaptureScreen(object sender, RoutedEventArgs e)
     {
-        if (!await Session.AttachScreenshotAsync(snip: false)) ModeHint.Text = "Couldn't capture the screen.";
+        if (!await Session.AttachScreenshotAsync(snip: false)) AskFeedback.Show("Couldn't capture the screen.", error: true);
         Input.Focus();
     }
 
     private async void OnSnip(object sender, RoutedEventArgs e)
     {
-        ModeHint.Text = "Drag over the area to capture (Esc cancels)…";
-        var ok = await Session.AttachScreenshotAsync(snip: true);
-        ModeHint.Text = ok ? "" : "No snip arrived.";
-        UpdateModeHint();
+        AskFeedback.Show("Drag over the area to capture. Esc cancels.", "ask-snip", busy: true);
+        try { await Session.AttachScreenshotAsync(snip: true); }
+        finally { AskFeedback.Hide("ask-snip"); }
         Input.Focus();
     }
 
@@ -1234,10 +1222,18 @@ public partial class AskPage : UserControl, IPage
         if (Session.Voice.IsListening) return;
         if (_untidied is not null) HideTidyUndo();
         var s = Hub.S.Ask;
-        ModeHint.Text = Session.Research ? $"Reads up to {s.ResearchPages} pages and writes a cited report"
+        var help = Session.Research ? $"Reads up to {s.ResearchPages} pages and writes a cited report."
             : Session.Computer ? "Files in " + string.Join(", ", s.Folders.Take(3).Select(FolderLabel)) + (s.Folders.Count > 3 ? "…" : "") + (s.ConfirmActions ? " · actions ask first" : "")
-            : Session.Think ? "Slower, more careful answers"
-            : "";
+            : Session.Think ? "Think gives the model more time to answer."
+            : "Use the mode buttons to choose how Aqua answers.";
+        if (ModeHelp.ToolTip is ToolTip { Content: string existing } && existing == help) return;
+        ModeHelp.ToolTip = new ToolTip { Content = help, PlacementTarget = ModeHelp };
+        System.Windows.Automation.AutomationProperties.SetHelpText(ModeHelp, help);
+    }
+
+    private void OnModeHelp(object sender, RoutedEventArgs e)
+    {
+        if (ModeHelp.ToolTip is ToolTip tip) tip.IsOpen = true;
     }
 
     internal static string FolderLabel(string folder) => folder.ToUpperInvariant() switch

@@ -41,8 +41,7 @@ public partial class UpcomingPage
         var settings = Hub.S;
         if (ReminderSceneReview.FindScene(settings, row.Reminder.Draft.SceneId) is not { } scene)
         {
-            _commandError = "This scene is unavailable. Edit the reminder to choose another scene.";
-            RefreshAgenda();
+            AgendaFeedback.Show("This scene is unavailable. Edit the reminder to choose another scene.", error: true);
             return;
         }
         var review = new ReminderSceneReview(scene, settings);
@@ -81,11 +80,11 @@ public partial class UpcomingPage
         if (_sceneReview is not { } confirmed || _visible is null) return;
         if (Hub.Actions.ReminderSceneRunning)
         {
-            SetStatus(SceneRunStatus, "A scene is already running.");
+            ShowSceneFeedback("A scene is already running.", error: true);
             return;
         }
         CloseSceneReview(focus: false);
-        SetStatus(SceneRunStatus, $"Running {confirmed.Review.Scene.Name}…");
+        ShowSceneFeedback($"Running {confirmed.Review.Scene.Name}…", busy: true);
         CancelSceneRun.IsEnabled = true;
         try
         {
@@ -93,14 +92,14 @@ public partial class UpcomingPage
             RefreshAgenda();
             CancelSceneRun.Focus();
             var success = await running;
-            SetStatus(SceneRunStatus, success ? "Scene run finished." : "Scene run finished with one or more unsuccessful steps.");
+            ShowSceneFeedback(success ? "Scene run finished." : "Scene run finished with one or more unsuccessful steps.", error: !success);
         }
-        catch (OperationCanceledException) { SetStatus(SceneRunStatus, "Scene run stopped."); }
-        catch (ReminderException ex) { SetStatus(SceneRunStatus, ex.Message); }
+        catch (OperationCanceledException) { ShowSceneFeedback("Scene run stopped."); }
+        catch (ReminderException ex) { ShowSceneFeedback(ex.Message, error: true); }
         catch (Exception ex)
         {
             Log.Warn("scene", "Reminder scene run failed", ex);
-            SetStatus(SceneRunStatus, "Aqua couldn’t run the scene.");
+            ShowSceneFeedback("Aqua couldn’t run the scene.", error: true);
         }
         finally
         {
@@ -112,7 +111,13 @@ public partial class UpcomingPage
     private void OnStopScene(object sender, RoutedEventArgs e)
     {
         CancelSceneRun.IsEnabled = false;
-        SetStatus(SceneRunStatus, "Stopping scene…");
+        ShowSceneFeedback("Stopping scene…", busy: true);
         Hub.Actions.CancelReminderScene();
+    }
+
+    private void ShowSceneFeedback(string text, bool error = false, bool busy = false)
+    {
+        if (_visible is not null) AgendaFeedback.Show(text, "reminder-scene-status", error, busy);
+        else Hub.Windows.Main?.WorkspaceFeedback.Show(text, "reminder-scene-status", error, busy);
     }
 }

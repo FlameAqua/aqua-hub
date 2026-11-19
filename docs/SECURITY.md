@@ -234,7 +234,8 @@ The scheduled effect is an Aqua alert with internal navigation to Upcoming and a
 and sound are allowed. Personal reminders stay outside calendar ingestion, Ask context, feed search and external
 requests. An explicit delete or one-off completion
 removes the live record and its pending bell entry; normal SQLite/WAL retention applies to their historical bytes.
-Deck position and visibility are local profile settings.
+Deck position and visibility are local profile settings. Quick timer duration is optional metadata on the local reminder.
+Pinned app bubbles invoke the existing Launchpad app launcher on explicit activation with the current pinned entry.
 
 An optional scene ID is a reference to an existing saved Launchpad scene. Due processing can create the alert.
 Execution requires a separate human review and **Run now** in Upcoming, with the current scene and configured

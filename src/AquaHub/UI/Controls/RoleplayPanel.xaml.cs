@@ -17,6 +17,7 @@ public partial class RoleplayPanel : UserControl
     private static readonly Session State = new();
     private bool _syncing = true;
     private bool? _compactLayout;
+    private (string Message, bool Busy, bool Error)? _lastFeedback;
 
     public RoleplayPanel()
     {
@@ -41,11 +42,15 @@ public partial class RoleplayPanel : UserControl
         ScenarioBox.Text = State.Scenario;
         InputBox.Text = State.Draft;
         _syncing = false;
-        StatusText.Text = State.Status;
+        UpdateFeedback();
         UpdateView();
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs e) => State.Changed -= OnStateChanged;
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        State.Changed -= OnStateChanged;
+        _lastFeedback = null;
+    }
 
     private void OnPanelSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -91,6 +96,7 @@ public partial class RoleplayPanel : UserControl
 
     private void OnStateChanged() => Dispatcher.BeginInvoke(() =>
     {
+        if (!IsLoaded) return;
         if (PersonaBox.Text != State.Persona || ScenarioBox.Text != State.Scenario)
         {
             _syncing = true;
@@ -98,9 +104,22 @@ public partial class RoleplayPanel : UserControl
             ScenarioBox.Text = State.Scenario;
             _syncing = false;
         }
-        StatusText.Text = State.Status;
+        UpdateFeedback();
         UpdateView();
     }, System.Windows.Threading.DispatcherPriority.DataBind);
+
+    private void UpdateFeedback()
+    {
+        var feedback = (State.Status, State.Busy, State.Error);
+        if (_lastFeedback == feedback) return;
+        _lastFeedback = feedback;
+        RoleplayFeedback.Show(State.Status, "roleplay-feedback", State.Error, State.Busy);
+    }
+
+    private void OnRoleplayHint(object sender, RoutedEventArgs e)
+    {
+        if (ModelHint.ToolTip is ToolTip tip) tip.IsOpen = true;
+    }
 
     private void OnSceneEdited(object sender, TextChangedEventArgs e)
     {
@@ -133,6 +152,7 @@ public partial class RoleplayPanel : UserControl
         var cts = new CancellationTokenSource();
         State.Cancellation = cts;
         State.Busy = true;
+        State.Error = false;
         State.Status = "Starting scene…";
         State.NotifyChanged();
         UpdateView();
@@ -168,17 +188,27 @@ public partial class RoleplayPanel : UserControl
                 if (delta is not LlmTextDelta chunk) continue;
                 answer.Append(chunk.Text);
                 entry.Answer = answer.ToString();
-                State.Status = "Writing…";
-                State.NotifyChanged();
+                if (State.Status == "Starting scene…")
+                {
+                    State.Status = "Writing…";
+                    State.NotifyChanged();
+                }
                 ScrollToEnd();
             }
             if (scene == State.SceneId)
             {
-                if (answer.Length == 0) answer.Append("The model returned an empty reply. Try another line.");
+                if (answer.Length == 0)
+                {
+                    State.Turns.Remove(entry);
+                    State.RestoreDraft(text);
+                    State.Error = true;
+                    State.Status = "The model returned an empty reply. Try again.";
+                    return;
+                }
                 entry.Answer = answer.ToString();
                 State.History.Add(new LlmMessage("user", text));
                 State.History.Add(new LlmMessage("assistant", answer.ToString()));
-                State.Status = "Scene ready for your next line.";
+                State.Status = "";
                 State.NotifyChanged();
             }
         }
@@ -195,7 +225,7 @@ public partial class RoleplayPanel : UserControl
                 else
                 {
                     State.Turns.Remove(entry);
-                    if (InputBox.Text.Length == 0) InputBox.Text = State.Draft = text;
+                    State.RestoreDraft(text);
                     State.Status = "Reply stopped before any text arrived. Your line is ready to retry.";
                 }
                 State.NotifyChanged();
@@ -206,7 +236,8 @@ public partial class RoleplayPanel : UserControl
             if (scene == State.SceneId)
             {
                 State.Turns.Remove(entry);
-                if (InputBox.Text.Length == 0) InputBox.Text = State.Draft = text;
+                State.RestoreDraft(text);
+                State.Error = true;
                 State.Status = ex is LlmUnavailableException or RoleplayModelUnavailableException
                     ? ex.Message
                     : $"Couldn't reach the configured model: {ex.Message}";
@@ -249,7 +280,8 @@ public partial class RoleplayPanel : UserControl
         _syncing = false;
         InputBox.Clear();
         State.Draft = "";
-        State.Status = "New scene. Choose a persona and setting to begin.";
+        State.Error = false;
+        State.Status = "";
         State.NotifyChanged();
         UpdateView();
         PersonaBox.Focus();
@@ -262,13 +294,11 @@ public partial class RoleplayPanel : UserControl
             State.Turns.Select(t => $"You: {t.UserText}{Environment.NewLine}{t.Persona}: {t.Answer}"));
         if (Sandbox.Intercept("clipboard", transcript))
         {
-            State.Status = "Copy skipped in preview mode.";
-            State.NotifyChanged();
+            RoleplayFeedback.Show("Copy skipped in preview mode.");
             return;
         }
-        try { Clipboard.SetText(transcript); State.Status = "Transcript copied."; }
-        catch (Exception ex) { State.Status = $"Couldn't copy transcript: {ex.Message}"; }
-        State.NotifyChanged();
+        try { Clipboard.SetText(transcript); RoleplayFeedback.Show("Transcript copied."); }
+        catch (Exception ex) { RoleplayFeedback.Show($"Couldn't copy transcript: {ex.Message}", error: true); }
     }
 
     private void OnInputKeyDown(object sender, KeyEventArgs e)
@@ -289,9 +319,21 @@ public partial class RoleplayPanel : UserControl
         InputBox.IsEnabled = !State.Busy;
         PersonaBox.IsEnabled = !State.Busy;
         ScenarioBox.IsEnabled = !State.Busy;
-        ModelLabel.Text = Hub.S.Ai.Provider.Equals("llamacpp", StringComparison.OrdinalIgnoreCase)
-            ? "Uses Creative from Models, or your main model. Scenes stay in this session; copy the transcript to keep it."
-            : "Uses your configured AI model";
+        if (!State.Busy && InputBox.Text != State.Draft)
+        {
+            _syncing = true;
+            InputBox.Text = State.Draft;
+            _syncing = false;
+        }
+        if (ModelHint.ToolTip is null)
+        {
+            var model = Hub.S.Ai.Provider.Equals("llamacpp", StringComparison.OrdinalIgnoreCase)
+                ? "Uses your Creative or Main model."
+                : "Uses your configured AI model.";
+            var help = model + " Copy the transcript to keep it after closing Aqua.";
+            ModelHint.ToolTip = new ToolTip { Content = help, PlacementTarget = ModelHint };
+            System.Windows.Automation.AutomationProperties.SetHelpText(ModelHint, help);
+        }
     }
 
     private void ScrollToEnd() => Dispatcher.BeginInvoke(() => TranscriptScroll.ScrollToEnd(), System.Windows.Threading.DispatcherPriority.Background);
@@ -306,7 +348,9 @@ public partial class RoleplayPanel : UserControl
         public CancellationTokenSource? Cancellation { get; set; }
         public bool Busy { get; set; }
         public long SceneId { get; set; }
-        public string Status { get; set; } = "Ready when you are.";
+        public string Status { get; set; } = "";
+        public bool Error { get; set; }
+        public void RestoreDraft(string text) { if (Draft.Length == 0) Draft = text; }
         public event Action? Changed;
         public void NotifyChanged() => Changed?.Invoke();
     }
