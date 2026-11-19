@@ -44,13 +44,20 @@ public sealed class PlatformServices : IPlatform
     private readonly List<HubAlert> _held = new();
     private string _holdReason = "";
 
+    public void WithdrawReminderAlerts(IReadOnlyCollection<string> alertIds)
+    {
+        if (alertIds.Count == 0) return;
+        lock (_held) _held.RemoveAll(alert => alert.Kind == "reminder" && alertIds.Contains(alert.Id));
+    }
+
     public void Notify(HubAlert alert)
     {
         try { AlertRaised?.Invoke(alert); } catch { }
         switch (Decide(alert, out var reason))
         {
             case ToastDecision.Show:
-                _tray?.Notify(alert.Title, alert.Body, quiet: alert.Severity < AlertSeverity.Important, onClick: () => ToastClicked?.Invoke(alert));
+                var quiet = alert.Kind != "reminder" && alert.Severity < AlertSeverity.Important;
+                _tray?.Notify(alert.Title, alert.Body, quiet: quiet, onClick: () => ToastClicked?.Invoke(alert));
                 break;
             case ToastDecision.Hold:
                 // Quiet hours / full-screen: keep it and deliver one summary afterwards (it's in the bell meanwhile).
@@ -66,22 +73,19 @@ public sealed class PlatformServices : IPlatform
     /// <summary>Called on every system sample: once quiet hours or the game end, deliver one summary of what was held.</summary>
     public void FlushHeld()
     {
-        List<HubAlert> held;
-        string reason;
         lock (_held)
         {
             if (_held.Count == 0) return;
             var n = _settings().Notifications;
             if (NotificationPolicy.InQuietHours(n, DateTime.Now) || (n.SuppressWhenFullscreen && IsFullscreenBusy)) return;
-            held = _held.ToList();
-            reason = _holdReason;
+            if (n.Enabled && !n.DoNotDisturb)
+            {
+                var single = _held.Count == 1 ? _held[0] : null;
+                var (title, body) = NotificationPolicy.Summary(_held, _holdReason);
+                _tray?.Notify(title, body, quiet: true, onClick: () => ToastClicked?.Invoke(single));
+            }
             _held.Clear();
         }
-        var n2 = _settings().Notifications;
-        if (!n2.Enabled || n2.DoNotDisturb) return;
-        var single = held.Count == 1 ? held[0] : null;
-        var (title, body) = NotificationPolicy.Summary(held, reason);
-        _tray?.Notify(title, body, quiet: true, onClick: () => ToastClicked?.Invoke(single));
     }
 
     public bool ShouldToast(HubAlert alert) => Decide(alert, out _) == ToastDecision.Show;

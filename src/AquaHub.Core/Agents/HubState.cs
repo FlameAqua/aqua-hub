@@ -9,6 +9,7 @@ public static class Topics
 {
     public const string News = "news";
     public const string Social = "social";
+    public const string Streams = "streams";
     public const string Pulse = "pulse";
     public const string Markets = "markets";
     public const string MarketBrief = "marketBrief";
@@ -41,6 +42,7 @@ public sealed class HubState
     public IReadOnlyList<StoryCluster> Stories { get; private set; } = Array.Empty<StoryCluster>();
     public IReadOnlyList<FeedItem> Social { get; private set; } = Array.Empty<FeedItem>();
     public SocialPulse? Pulse { get; private set; }
+    public StreamsSnapshot Streams { get; private set; } = StreamsSnapshot.Empty;
     public IReadOnlyDictionary<string, Quote> Quotes { get; private set; } = new Dictionary<string, Quote>();
     public IReadOnlyDictionary<string, Indicators> Indicators { get; private set; } = new Dictionary<string, Indicators>();
     /// <summary>Exchange rates for valuing holdings in your currency ("EURUSD" → dollars per euro).</summary>
@@ -79,6 +81,7 @@ public sealed class HubState
             Stories = _db.GetJson<List<StoryCluster>>("state:news") ?? new();
             Social = _db.GetJson<List<FeedItem>>("state:social") ?? new();
             Pulse = _db.GetJson<SocialPulse>("state:pulse");
+            Streams = StreamsSnapshot.Clean(_db.GetJson<StreamsSnapshot>("state:streams"));
             Quotes = _db.GetJson<Dictionary<string, Quote>>("state:quotes") ?? new();
             Indicators = _db.GetJson<Dictionary<string, Indicators>>("state:indicators") ?? new();
             Fx = new FxRates(_db.GetJson<Dictionary<string, double>>("state:fx") ?? new());
@@ -115,6 +118,7 @@ public sealed class HubState
     public void SetMarketHeadlines(List<FeedItem> items) { MarketHeadlines = items; Save("marketHeadlines", items); }
     public void SetSocial(List<FeedItem> items) { Social = items; Save("social", items); Raise(Topics.Social); }
     public void SetPulse(SocialPulse pulse) { Pulse = pulse; Save("pulse", pulse); Raise(Topics.Pulse); }
+    public void SetStreams(StreamsSnapshot streams) { Streams = StreamsSnapshot.Clean(streams); Save("streams", Streams); Raise(Topics.Streams); }
 
     public void SetQuotes(Dictionary<string, Quote> quotes)
     {

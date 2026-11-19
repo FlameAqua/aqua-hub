@@ -2,8 +2,12 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Collections.ObjectModel;
+using AquaHub.Core.Models;
 using AquaHub.Core.Agents;
+using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
+using AquaHub.Platform;
 using AquaHub.Services;
 using AquaHub.UI.Shell;
 using AquaHub.UI.ViewModels;
@@ -34,10 +38,16 @@ public partial class SocialPage : UserControl, IPage
     private readonly SocialVM _vm = new();
     private readonly UiThrottle _refresh;
     private string _platform = "all";
+    private bool _checkingStreams;
+    private readonly ObservableCollection<StreamVM> _streamRows = new();
+    private Window? _streamWindow;
+    private bool _streamsActive;
 
     public SocialPage()
     {
         InitializeComponent();
+        LiveStreams.ItemsSource = _streamRows;
+        Loaded += OnStreamsLoaded;
         DataContext = _vm;
         _refresh = new UiThrottle(Refresh, 200);
         foreach (var (id, label) in new[] { ("all", "All"), ("following", "Following"), ("reddit", "Reddit"), ("mastodon", "Mastodon"), ("bluesky", "Bluesky"), ("hackernews", "Hacker News"), ("youtube", "YouTube") })
@@ -50,6 +60,8 @@ public partial class SocialPage : UserControl, IPage
 
     public void OnNavigatedTo(string? arg)
     {
+        _streamsActive = true;
+        AttachStreamWindow();
         Hub.State.Changed -= OnChanged; // navigating to the page already shown must not subscribe twice
         Hub.State.Changed += OnChanged;
         // A platform to open on ("youtube", "bluesky"…), e.g. from a link elsewhere.
@@ -59,13 +71,43 @@ public partial class SocialPage : UserControl, IPage
 
     public void OnNavigatedFrom()
     {
+        Hub.Core.Streams.Visible = false;
+        _streamsActive = false;
+        DetachStreamWindow();
         Hub.State.Changed -= OnChanged;
         _refresh.Stop();
     }
 
     private void OnChanged(string topic)
     {
-        if (topic is Topics.Social or Topics.Pulse) _refresh.Request();
+        if (topic is Topics.Social or Topics.Pulse or Topics.Streams) _refresh.Request();
+    }
+
+    private void OnStreamsLoaded(object sender, RoutedEventArgs e) { if (_streamsActive) AttachStreamWindow(); }
+    private void AttachStreamWindow()
+    {
+        DetachStreamWindow();
+        _streamWindow = Window.GetWindow(this);
+        if (_streamWindow is null) return;
+        _streamWindow.IsVisibleChanged += OnStreamWindowVisibility;
+        _streamWindow.StateChanged += OnStreamWindowState;
+        UpdateStreamVisibility();
+    }
+    private void DetachStreamWindow()
+    {
+        if (_streamWindow is null) return;
+        _streamWindow.IsVisibleChanged -= OnStreamWindowVisibility;
+        _streamWindow.StateChanged -= OnStreamWindowState;
+        _streamWindow = null;
+    }
+    private void OnStreamWindowVisibility(object sender, DependencyPropertyChangedEventArgs e) => UpdateStreamVisibility();
+    private void OnStreamWindowState(object? sender, EventArgs e) => UpdateStreamVisibility();
+    private void UpdateStreamVisibility()
+    {
+        var visible = _streamsActive && _streamWindow is { IsVisible: true, WindowState: not WindowState.Minimized };
+        var before = Hub.Core.Streams.Visible;
+        Hub.Core.Streams.Visible = visible;
+        if (visible && !before && !Sandbox.OfflineComponents) Hub.Core.Agents.RunNow("stream-scout");
     }
 
     private void Refresh()
@@ -87,6 +129,85 @@ public partial class SocialPage : UserControl, IPage
         _vm.Trending = Hub.State.Social.Where(IsTrending).OrderByDescending(p => p.Score).Take(8).Select(p => new PostVM(p)).ToList();
         _vm.Changed();
         RefreshFeed();
+        RefreshStreams();
+    }
+
+    private sealed class StreamVM(string id) : ObservableObject
+    {
+        public string Id { get; } = id;
+        public string Title { get; private set; } = "";
+        public string ChannelLine { get; private set; } = "";
+        public string Observation { get; private set; } = "";
+        public string Url { get; private set; } = "";
+        public string AccessibleName => $"{Title} · {ChannelLine} · {Observation}. Open stream in browser";
+        public StreamVM Update(string title, string channel, string observation, string url)
+        { Title = title; ChannelLine = channel; Observation = observation; Url = url; RaiseAll(); return this; }
+    }
+
+    private void RefreshStreams()
+    {
+        var sources = Hub.State.Streams.Sources;
+        var enabled = Hub.S.Social.Streams.Twitch || Hub.S.Social.Streams.YouTube;
+        var now = DateTimeOffset.UtcNow;
+        var rows = _streamRows.ToDictionary(r => r.Id, StringComparer.Ordinal);
+        var streams = sources.SelectMany(source => source.Items.Where(LiveStream.IsValid).Select(stream =>
+        {
+            var platform = stream.Platform == "twitch" ? "Twitch" : "YouTube";
+            var interval = stream.Platform == "twitch" ? TimeSpan.FromMinutes(2) : Core.Sources.StreamsSession.YouTubeInterval;
+            var fresh = source.Ok && source.Checked is { } at && now - at <= interval;
+            var observation = (fresh ? "Live when checked" : "Last seen live") + (source.Checked is { } checkedAt ? " · " + TimeText.AgoPhrase(checkedAt, now) : "");
+            var row = rows.GetValueOrDefault(stream.Id) ?? new StreamVM(stream.Id);
+            return row.Update(stream.Title, $"{stream.Channel} · {platform}" + (stream.Category.Length > 0 ? " · " + stream.Category : ""), observation, stream.Url);
+        })).DistinctBy(s => s.Url).Take(100).ToList();
+        foreach (var row in _streamRows.Except(streams).ToArray()) _streamRows.Remove(row);
+        for (var i = 0; i < streams.Count; i++)
+        {
+            var at = _streamRows.IndexOf(streams[i]);
+            if (at < 0) _streamRows.Insert(i, streams[i]);
+            else if (at != i) _streamRows.Move(at, i);
+        }
+        StreamSummary.Text = !enabled ? "Connect Twitch or enable YouTube in Sources to see your live channels."
+            : streams.Count > 0 ? Plural.Of(streams.Count, "stream")
+            : sources.Any(s => !s.Ok) ? "Some sources couldn't be checked."
+            : sources.Count > 0 ? "No live streams in the checked channels."
+            : "Choose sources, then check your channels.";
+        var notes = sources.Select(s => (s.Label.Length > 0 ? s.Label : s.Platform) + ": " + (s.Ok ? "checked " + (s.Checked is { } at ? TimeText.AgoPhrase(at, now) : "never") : s.Message)).ToList();
+        if (Hub.S.Social.Streams.Twitch && Hub.Core.Streams.TwitchLogin is null) notes.Insert(0, "Connect Twitch in Sources to read channels you follow.");
+        if (Hub.S.Social.Streams.YouTube && StreamSettings.SelectedYouTube(Hub.S.Social).Count == 0) notes.Add("Choose YouTube live channels in Sources.");
+        StreamSourcesStatus.Text = string.Join("\n", notes);
+        CheckStreams.IsEnabled = enabled && !_checkingStreams;
+    }
+    private void OnStreamSources(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "social:streams");
+    private void OnOpenStream(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string url } && Hub.State.Streams.Sources.SelectMany(s => s.Items).Any(s => s.Url == url && LiveStream.IsValid(s))) AppLauncher.OpenUrl(url);
+    }
+    private async void OnCheckStreams(object sender, RoutedEventArgs e)
+    {
+        if (_checkingStreams) return;
+        if (Sandbox.Intercept("streams-refresh", "live channels")) return;
+        _checkingStreams = true; CheckStreams.IsEnabled = false;
+        StreamSummary.Text = "Checking live channels…";
+        string? note = null;
+        try
+        {
+            Hub.Core.Streams.RequestCheck();
+            var report = await Hub.Core.Agents.RunAndWaitAsync("stream-scout", TimeSpan.FromSeconds(60), CancellationToken.None);
+            if (report is null || report.End != AgentRunEnd.Finished)
+            {
+                Hub.Core.Streams.TakeRequestedCheck();
+                note = report?.End switch
+                {
+                    AgentRunEnd.Paused => "Agents are paused. Resume them in Agents to check streams.",
+                    AgentRunEnd.Disabled => "Stream checking is disabled in Agents.",
+                    AgentRunEnd.StillRunning => "The stream check is still running. Results will appear when it finishes.",
+                    _ => "Stream checking isn't available yet.",
+                };
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Core.Util.Log.Warn("streams", "Stream check failed", ex); note = "Couldn't check streams. Try again later."; }
+        finally { _checkingStreams = false; RefreshStreams(); if (note is not null) StreamSummary.Text = note; }
     }
 
     private static bool IsTrending(Core.Models.FeedItem p) => p.SourceId == "bluesky:trending";

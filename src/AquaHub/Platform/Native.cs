@@ -9,6 +9,7 @@ public static class Native
     public const int WM_APP = 0x8000;
     public const int WM_HOTKEY = 0x0312;
     public const int WM_SETTINGCHANGE = 0x001A;
+    public const int WM_TIMECHANGE = 0x001E;
     public const int WM_POWERBROADCAST = 0x0218;
     public const int WM_LBUTTONUP = 0x0202;
     public const int WM_LBUTTONDBLCLK = 0x0203;

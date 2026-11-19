@@ -6,6 +6,8 @@
   "Images": { "description": "Gallery/reference editing, connection fixtures and GPU recovery UI" },
   "Roleplay": { "description": "Roleplay form and scene reset contracts" },
   "Lifecycle": { "description": "Owned session exit, reopen and cancellation during fixture HTTP work" },
+  "Streams": { "description": "Live cards, safe links, source/channel selection and intercepted Twitch/Google sign-in" },
+  "Reminders": { "description": "Daily deck, quick reminders, read-only agenda and intercepted notification and scene effects" },
   "Shell": { "legacy": true, "description": "Legacy startup, navigation, title bar and notifications" },
   "Settings": { "legacy": true, "description": "Legacy full settings flows" },
   "Feeds": { "legacy": true, "description": "Legacy Today, news, social, markets and agenda flows" },

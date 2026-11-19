@@ -786,3 +786,202 @@ The full legacy suite, downloads and real model/GPU tests were not run. Owner ap
 controlled; only scratch app processes and an owned random-port HTTP fixture were used. This completes the authorized
 component E2E extension/modularization. Phase 4 remains open for the live engine/GPU, additional unit regressions and
 performance acceptance in Roadmap. All changes remain uncommitted; Adrian owns commits/releases.
+
+## 6 November 2026: 5.3 Twitch and YouTube streams
+
+Adrian approved moving to the next roadmap stage while retaining Phase 4's targeted live/performance follow-ups. He
+selected Twitch alongside YouTube, public YouTube channel pages rather than a Google API key, and focused unit/provider
+plus component E2E tests. Work is based on his committed Phase 4 baseline b4ac28f; no commits/pushes/releases were made.
+
+Implemented a native Live streams card in Social and opt-in source/account controls in Settings. Cards show the channel,
+provider and check age, preserve stable rows, and open revalidated canonical provider URLs. Missing configuration and
+source failures are explicit. Stream snapshots are bounded, persisted separately from posts, and excluded from automatic
+AI Social summaries. Twitch's followed list is limited to the first 100 live results; YouTube checks the first six saved
+channels. Updates run only while Social's window is visible and not minimised; navigation/hiding cancels active work.
+Twitch checks at most once per minute; YouTube caches attempts for 15 minutes, with a one-minute manual-check floor.
+Manual checking goes through the existing scheduler, joins work, and respects agent pause/disable. SourceHealth handles
+repeated missing-page failures. Old check times are preserved when a check fails; the UI labels retained results honestly.
+
+Twitch uses Public-client device OAuth with browser approval and user:read:follows only. Requests have bounded JSON,
+no authenticated redirects and no embedded secret. Credentials/account metadata are kept in Credential Manager, validated
+before first use and hourly while used, refreshed serially and read back after writes/deletion. Rotated refresh tokens
+are persisted before another network request; disconnect/client changes reject late completions. Rejected refresh clears
+the local connection. Disconnect clears saved credentials and cached Twitch data, then requests access-token revocation,
+with recovery wording if Twitch cannot confirm it. Core and App shutdown join stream/sign-in workers before disposing
+HTTP clients; shared Core disposal identity and named UI/window subscriptions were reviewed.
+
+YouTube uses constructed channel URLs, reject-consent headers, a 4 MiB response cap, bounded JSON traversal and recognised
+live badges in the selected channel's Streams tab. Both legacy videoRenderer and current lockupViewModel are supported.
+Unknown channel/layout responses fail instead of being counted as a successful empty result. An isolated public-page
+probe used the implemented parser: Gamers Nexus returned 0 live streams (1,314,608 bytes), Sky News 2 (1,318,827 bytes),
+with all constructed links validated. No media was downloaded. The scratch probe initially had an incorrect relative
+project reference; correcting that probe path produced the observations above, without changing product assertions.
+
+Self-review corrections included preserving rotated credentials across validation transport failure; preventing a late
+refresh from resurrecting a disconnected account; cancelling/joining work during navigation/exit; separating attempt and
+successful-check timestamps; rejecting malformed stored credentials and foreign persisted links; respecting scheduler
+pause for manual checks; and stopping polling for hidden/minimised windows. No assertion was weakened to obtain a pass.
+
+Verification: 27 new provider/session cases cover both YouTube layouts and refusals, URL/bounds rules, public OAuth,
+controlled pending/slow-down timing, scope/client validation, cancellation, complete fake sign-in/read/revoke, token
+rotation, disconnect races, shared caching, shutdown, hidden views, corrupt secrets and paused agents. The existing full
+Debug suite passes 1,245 tests with 23 opt-in live cases skipped and 0 failures. Release scratch app/E2E builds have 0
+warnings/errors. Streams+Lifecycle desktop checks pass 6/6, including four new stream cases, source persistence, browser/
+auth interception and a light-theme 1000×760 layout. Screenshots were reviewed from ignored scratch results only.
+Selection contracts have 10 passing cases; final documentation and whitespace checks passed.
+
+Current committed main CI is green on b4ac28f: [run 42130813573](https://github.com/FlameAqua/aqua-hub/actions/runs/42130813573). It does not
+include these uncommitted stream changes. The full legacy E2E suite, real Twitch account login/vault/revocation, inference,
+GPU/model probes, microphone and owner-service control were not performed. Only public YouTube pages were fetched for
+provider research/probing; dependencies were restored from the local cache. Owner app/profile, Ollama and ComfyUI stayed
+untouched. No public publishing or artifact download was performed.
+
+Owner acceptance: register a Public Twitch app once, enter its public client ID in Settings > Social > Live streams,
+complete browser approval, confirm followed streams and disconnect. Public YouTube page formats may change, and choosing
+channels beyond the first six remains a follow-up. 5.3 implementation is ready for this account acceptance; 5.4 X/Grok
+has not been started. Phase 4's remaining targeted live/performance acceptance is still tracked in Roadmap.
+
+## 6 November 2026: Google subscriptions and connection feedback
+
+Adrian registered the Public Twitch application, then reported that Connect gave insufficient feedback while the app
+name was entered in the Client ID field. The form now explicitly directs him to Manage > Client ID, retains a prominent
+inline explanation for invalid input, announces status, disables repeated requests and shows a connecting button state.
+Browser-launch failure is reported immediately. His request also authorised optional Google authentication/import.
+
+Implemented Google Desktop OAuth through the system browser with authorization code/S256 PKCE, random state and a
+temporary bounded IPv4 loopback callback. The imported Desktop client JSON cannot choose token/API endpoints. Only
+YouTube read-only access is requested. Access tokens remain in memory; client configuration and bounded refresh tokens
+use separate, read-back-verified profile-scoped credential entries. Imported subscription names/IDs live in a separate
+local catalogue, outside feed search and automatic AI context. Manual sync paginates at 50/page with a 20-page/1,000
+bound and a partial-list indicator. Failed sync preserves successful metadata/time; invalid refresh requires reconnect.
+Disconnect/replacement clears imported metadata and Google-only selections, rejecting stale completions; manual upload
+channels remain. Cancellation and shutdown join owned work and close the callback listener before HTTP disposal.
+
+The searchable live chooser combines manually saved channels and imported subscriptions, limits monitoring to six,
+permits replacement and an explicitly empty choice, and saves ID/name pairs only. Null selection migrates old profiles
+by retaining the original first-six saved-channel behaviour. Successful complete sync reconciles removed subscriptions;
+partial lists cannot prove removals. The upload feed list remains independent. README and maintained contracts describe
+Google Cloud API/consent/Desktop client setup and owner account acceptance.
+
+Self-review and verification found and fixed an accessibility bug: the initial chooser used a Click handler, so a UIA
+Toggle changed appearance without persisting. Saving now follows the two-way binding setter. Screenshots also exposed
+an unthemed dark list background, corrected with native theme resources and bounded/virtualised layout. An overly broad
+callback exception handler could have swallowed token-network failures and resumed waiting; token exchange is now
+outside that retry scope, with a regression case. The initial listener-release test expected an HTTP refusal but Windows
+timed out instead; it now proves actual port release by rebinding that exact owned loopback port.
+
+Final unit evidence: 1,270 passed, 23 opt-in live tests skipped, 0 failures in the normal Debug output location. The 25 new
+Google cases cover Desktop config refusal, PKCE/state/loopback callback, transport failure, pagination/refusals, bounded
+partial lists, credential persistence/failure, profile isolation, cached failure, disconnect races, shutdown/port release
+and selected public-page checks. Release app/E2E scratch builds have 0 warnings/errors. Streams + Lifecycle pass 8/8;
+the six stream cases cover safe links, source persistence, clear Twitch ID validation, intercepted Google sign-in,
+saved/empty selections, the seventh-channel refusal/replacement, and dark/light narrow UI views. Desktop results are
+ignored scratch artifacts; the full legacy suite was not run. Selection contracts pass 10 cases; documentation/whitespace
+checks passed. No independent score is implied.
+
+Committed main CI remains green on b4ac28f, [CI run 42130813573](https://github.com/FlameAqua/aqua-hub/actions/runs/42130813573).
+The earlier entry linked the separate Dependabot workflow on the same commit; that link is corrected above. These local
+changes remain uncommitted and have not run in remote CI. Owner accounts/vault/profile, installed Aqua, Ollama and ComfyUI
+were not controlled. Real Google consent/token refresh/Windows storage and Twitch sign-in/followed streams/revocation
+remain owner acceptance; fixture passes do not certify those external-account operations. No downloads or publishing.
+
+## 6 November 2026: OAuth publication review and X deferral
+
+Adrian reports that Twitch and YouTube now link correctly and show his channels. Roadmap records that owner observation
+without claiming long-term refresh, live/offline transitions or disconnect/reconnect acceptance that he did not report.
+He asked whether public OAuth registration/open-source publication exposes his identity or credentials, and made 5.4
+conditional on a free integration. After the pricing explanation he explicitly chose to defer Grok/X.
+
+Reviewed the implemented public-client/device and Desktop PKCE flows, scopes, local credential/cached-data boundaries
+and official provider guidance. Client IDs identify the application rather than granting account access. Google's
+installed-client secret cannot be treated as a confidential server secret. Real access/refresh tokens remain sensitive;
+the local Windows account is a trust boundary, and cached subscriptions/selected channels can reveal interests if shared.
+Google consent branding can display the configured support email to authorising users, so public-client registration
+does not promise anonymous publisher identity. No Google email/profile identity scope is requested by Aqua; the YouTube
+read-only scope is broader than the subscription endpoint actually used. These distinctions are now in README/Security.
+
+A value-redacting pattern scan of 323 tracked/nonignored new repository text files found zero candidates for common
+Google client IDs/secrets/tokens/API keys, xAI keys, private keys and literal credential assignments. A separate local
+Git-history search for common secret prefixes/private-key markers also returned no matches. This is a focused check,
+not an exhaustive secret scan, penetration test or proof of no vulnerabilities. The owner's profile, vault, imported
+client JSON and provider console were not inspected. Added ignore rules for common Google client export filenames;
+direct checks confirm three representative export paths are ignored and the provider test source remains unignored.
+Ignores do not cover every renamed export or remove credentials that were previously committed.
+
+Official pricing checked on 6 November: [xAI X Search](https://docs.x.ai/developers/tools/x-search) charges $5 per 1,000
+posts fetched and $10 per 1,000 user profiles, plus model tokens. The [X API](https://docs.x.com/x-api/getting-started/pricing)
+lists $0.005/post and $0.010/user or following/follower resource read. Native X OAuth/PKCE account linking is supported,
+but does not waive data-access pricing. No paid integration, account connection, billing setup, API key or billable
+provider request was added. Roadmap marks 5.4 deferred; Phase 7 still needs its design discussion before implementation.
+
+This turn changed documentation and Git ignore rules only; documentation/whitespace and ignore-behaviour checks pass.
+Application/unit/desktop tests were not rerun for those changes. Local HEAD remains b4ac28f; its committed main
+[CI run 42130813573](https://github.com/FlameAqua/aqua-hub/actions/runs/42130813573) is green and does not include the
+uncommitted stream/Google work. No commits, publishing, downloads or owner-app/service control were performed.
+
+## 19 November 2026: Phase 7 deck, day agenda and local reminders
+
+Adrian chose a floating deck opened from Today, one-off/daily/weekly local reminders beside read-only calendar events,
+and a five-minute catch-up window. The deck stays in the main Aqua window across pages, moves by dragging or using the
+focused handle's arrow keys, and saves its position and hidden state. Upcoming supports day selection and all reminders.
+The editor preserves a draft when validation or saving fails. Local reminders support edit, delete, Done and a ten-minute
+snooze. Earlier-today and overlapping calendar events are retained by the existing reader.
+
+One-offs and snoozes keep an instant. Repeats follow the PC clock. Restart and resume reconcile to the latest occurrence
+per repeat. Older occurrences are marked Missed. The bounded local record and bell update commit together, so clearing
+the bell or reopening Aqua does not replay an occurrence. The existing scheduler owns the deadline check and joins
+pending reminder work on Quit. Calendar sources remain read-only and reminder text stays outside Ask and feed search.
+The notification limitations and retention contract are in [Architecture](ARCHITECTURE.md#agenda-reminders-and-the-deck).
+
+Self-review and the first desktop attempt found a Windows file replacement bug while the settings file had an open,
+shareable reader. A controlled scratch file reproduced the problem. Settings now use atomic replacement for existing
+files, with a regression test. The native delete dialog is an owned window. The UIA check locates it in the owner's
+tree and confirms it using Invoke. The unit UI contract flagged a deck Border without an automation peer. The deck uses
+the existing accessible GroupBorder. Scratch captures also caught a low-contrast dark deck heading and a mismatched
+date input, corrected with Aqua theme resources.
+
+The initial sandboxed Debug test invocation timed out connecting to its local host. With the required host access, the
+final normal-output Debug suite passed **1,285**, with **23 opt-in live cases skipped** and **0 failures**. Fifteen new
+cases cover scheduling/DST, missed recovery, restart, stale actions, deduplication, edit/delete ordering, rollback,
+shutdown, settings replacement and the widened calendar read window. The scratch Release app and E2E harness built
+with no warnings or errors. The offline Reminders component passed both cases, covering deck movement and persistence,
+the Today entry points, a light narrow editor, read-only agenda rows, recurrence and validation, edit, snooze, Done,
+delete and intercepted notification delivery. The selected offline close/reopen/quit Lifecycle case also passed.
+Selection checks passed 11 cases, and single-case discovery listed only the selected reminder case. Documentation
+and whitespace checks passed.
+
+Latest committed main CI is green on b4ac28f. This run predates the local stream and Phase 7 changes.
+[GitHub Actions run 42130813573](https://github.com/FlameAqua/aqua-hub/actions/runs/42130813573).
+Actual Windows notification delivery, quiet hours/fullscreen, physical sleep/resume, a real time-zone switch,
+screen-reader announcements and the large-day performance workload remain manual acceptance. Desktop checks used
+synthetic profiles and UIA patterns. No installed app, owner profile, account credentials, Ollama or ComfyUI were used.
+
+### Reminder colours and tone
+
+Adrian confirmed the workflow was working and reported dark text on the reminder form. The four field labels now use
+the Aqua theme foreground and retain their keyboard shortcuts. Personal reminder notifications request the Windows
+tone when delivery is allowed. The alert keeps its original priority, and quiet-hours/fullscreen summaries are silent.
+
+Reviewed the reminder editor in dark and light scratch captures. Both offline Reminders cases passed. The delivery case
+verified the sound request and the silence of an older missed occurrence through the toast intercept. Actual Windows
+playback remains manual acceptance. The normal Debug suite passed 1,285 tests with 23 opt-in live cases skipped.
+Scratch Release app and E2E builds had no warnings or errors. Documentation, whitespace and selection checks passed.
+
+### Deck shortcuts and confirmed scene reminders
+
+Adrian confirmed the reminder labels and tone in his build. He approved a scheduled reminder offering a saved
+Launchpad scene for manual execution and explicitly deferred Trading 212. The deck now opens today's agenda and
+can save a one-off reminder for 5, 15 or 30 minutes from now. The elapsed deadline stays exact across clock changes.
+
+Upcoming previews the current scene steps and configured targets before **Run now**. Reaching the due time only
+raises the normal alert. Scene requests are saved per occurrence before execution, with Done remaining separate.
+Only one confirmed reminder scene runs at a time. The runner checks that the reviewed scene is current on admission,
+stops remaining steps when cancelled, and is joined on normal Quit. Review captured the dark deck and scene preview.
+
+The normal Debug suite passed **1,287** with **23 opt-in live cases skipped** and **0 failures**. New cases cover
+a quick reminder across the DST overlap and rename, and rejection of early, stale and duplicate scene requests across
+restart, snooze and the next repeat. Both scratch Release builds had zero warnings and errors. All **five** offline
+Reminders cases and the selected close/reopen/quit Lifecycle case passed. The fixtures covered choosing the scene in
+the editor, the absence of a launch at the due time or on cancelling the review, one intercepted launch after
+confirmation, and stopping before a later action. Real scene effects remain manual acceptance. Documentation,
+selection and whitespace checks passed. Committed main CI remains green on b4ac28f and predates this local work.

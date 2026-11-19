@@ -293,6 +293,75 @@
                     <!-- ═══ Social ═══ -->
                     <StackPanel x:Name="P_social" Visibility="Collapsed">
                         <TextBlock Text="Social" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
+                        <c:SettingRow x:Name="Row_streams" Icon="play" Title="Live streams" Description="Read-only live status for Twitch channels you follow and your selected YouTube channels. Streams open in your browser; no chat or posting permissions.">
+                            <c:SettingRow.Below>
+                                <StackPanel>
+                                    <CheckBox Content="Show live Twitch channels I follow" IsChecked="{Binding Social.Streams.Twitch}" AutomationProperties.AutomationId="settings-streams-twitch"/>
+                                    <CheckBox Content="Check selected YouTube channels for live streams" IsChecked="{Binding Social.Streams.YouTube}" Margin="0,8,0,12" AutomationProperties.AutomationId="settings-streams-youtube"/>
+                                    <TextBlock Text="Twitch app setup (first time)" Style="{StaticResource T.CardTitle}"/>
+                                    <TextBlock Text="Register a Public Twitch application. In Twitch's console, click Manage and copy its Client ID below. The app name (such as FlameAqua-AquaHub) is not the Client ID. No client secret is needed."
+                                               TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,4,0,8"/>
+                                    <TextBlock Text="Client ID (from Twitch → Manage)" Style="{StaticResource T.Caption}" Margin="0,0,0,4"/>
+                                    <TextBox x:Name="TwitchClientId" Text="{Binding Social.Streams.TwitchClientId, UpdateSourceTrigger=PropertyChanged}" MaxLength="100" ui:UiProps.Placeholder="Public Twitch client ID"
+                                             AutomationProperties.AutomationId="settings-twitch-client-id" AutomationProperties.Name="Public Twitch client ID"/>
+                                    <WrapPanel Margin="0,10,0,0">
+                                        <Button Content="Register Twitch app" Click="OnRegisterTwitch" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" AutomationProperties.AutomationId="settings-twitch-register"/>
+                                        <Button x:Name="TwitchConnect" Content="Connect Twitch…" Click="OnConnectTwitch" Style="{StaticResource Btn.Accent}" Margin="0,0,6,6" AutomationProperties.AutomationId="settings-twitch-connect"/>
+                                        <Button x:Name="TwitchCancel" Content="Cancel sign-in" Click="OnCancelTwitch" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-twitch-cancel"/>
+                                        <Button x:Name="TwitchDisconnect" Content="Disconnect" Click="OnDisconnectTwitch" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-twitch-disconnect"/>
+                                    </WrapPanel>
+                                    <TextBlock x:Name="TwitchStatus" Text="Not connected." TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" Margin="0,2,0,4" AutomationProperties.AutomationId="settings-twitch-status" AutomationProperties.LiveSetting="Polite"/>
+                                    <TextBlock Text="YouTube live checks use public channel pages every 15 minutes while Social is open. Choose up to six channels below. Page changes can temporarily interrupt detection."
+                                               TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,10,0,4"/>
+                                    <TextBlock Text="YouTube subscriptions (optional Google connection)" Style="{StaticResource T.CardTitle}" Margin="0,12,0,4"/>
+                                    <TextBlock Text="Connect Google to import your subscription list, then choose channels for live checks. Google grants read-only YouTube access; Aqua won't change your subscriptions. Sync is manual. New uploads still use the saved YouTube channels list further below."
+                                               TextWrapping="Wrap" Style="{StaticResource T.Caption}"/>
+                                    <WrapPanel Margin="0,10,0,0">
+                                        <Button Content="Google setup guide" Click="OnGoogleSetup" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6"/>
+                                        <Button x:Name="GoogleImport" Content="Import Desktop client JSON…" Click="OnImportGoogleClient" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" AutomationProperties.AutomationId="settings-google-import"/>
+                                        <Button x:Name="GoogleConnect" Content="Connect Google…" Click="OnConnectGoogle" Style="{StaticResource Btn.Accent}" Margin="0,0,6,6" AutomationProperties.AutomationId="settings-google-connect"/>
+                                        <Button x:Name="GoogleSync" Content="Sync subscriptions" Click="OnSyncGoogle" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-google-sync"/>
+                                        <Button x:Name="GoogleCancel" Content="Cancel" Click="OnCancelGoogle" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-google-cancel"/>
+                                        <Button x:Name="GoogleDisconnect" Content="Disconnect Google" Click="OnDisconnectGoogle" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-google-disconnect"/>
+                                    </WrapPanel>
+                                    <TextBlock x:Name="GoogleStatus" TextWrapping="Wrap" FontSize="13" Margin="0,2,0,8" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="settings-google-status"/>
+                                    <TextBlock x:Name="YouTubeSelectionStatus" TextWrapping="Wrap" Style="{StaticResource T.Caption}" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="settings-youtube-selection-status"/>
+                                    <TextBox x:Name="YouTubeChannelFilter" TextChanged="OnFilterYouTubeChannels" ui:UiProps.Placeholder="Find a saved channel or imported subscription…" Margin="0,8,0,6" AutomationProperties.Name="Find YouTube live channel" AutomationProperties.AutomationId="settings-youtube-filter"/>
+                                    <ListBox x:Name="YouTubeLiveChoices" Style="{StaticResource PlainList}" MaxHeight="210" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" AutomationProperties.Name="YouTube channels for live checks" AutomationProperties.AutomationId="settings-youtube-live-choices">
+                                        <ListBox.Template>
+                                            <ControlTemplate TargetType="ListBox">
+                                                <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False"><ItemsPresenter/></ScrollViewer>
+                                            </ControlTemplate>
+                                        </ListBox.Template>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="4" HorizontalContentAlignment="Stretch" AutomationProperties.AutomationId="settings-youtube-live-choice" AutomationProperties.Name="{Binding Label}">
+                                                    <CheckBox.Template>
+                                                        <ControlTemplate TargetType="CheckBox">
+                                                            <Grid Background="Transparent">
+                                                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                                <Border x:Name="Box" Width="18" Height="18" CornerRadius="4" BorderThickness="1" BorderBrush="{DynamicResource B.ControlStrokeStrong}" VerticalAlignment="Center">
+                                                                    <c:Icon x:Name="Tick" Kind="check" Width="13" Height="13" StrokeThickness="2.4" Foreground="{DynamicResource B.OnAccent}" Visibility="Collapsed"/>
+                                                                </Border>
+                                                                <ContentPresenter Grid.Column="1" Margin="9,0,0,0" VerticalAlignment="Center"/>
+                                                            </Grid>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsChecked" Value="True">
+                                                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource B.Accent}"/>
+                                                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource B.Accent}"/>
+                                                                    <Setter TargetName="Tick" Property="Visibility" Value="Visible"/>
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </CheckBox.Template>
+                                                    <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/>
+                                                </CheckBox>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
                         <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
                                    Text="Public posts from your communities, and your Bluesky and Mastodon timelines if you connect them. For X, Facebook or Instagram, add an RSS bridge such as RSSHub as an extra feed."/>
                         <c:SettingRow x:Name="Row_bluesky" Icon="user" Title="Your Bluesky timeline" Description="Posts from people you follow. Use an app password (Bluesky › Settings › Privacy and security › App passwords); it's kept in Windows Credential Manager.">

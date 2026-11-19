@@ -385,6 +385,50 @@ public class AgentPipelineTests
         Assert.Equal(1, net.Count("https://cal.example/")); // webcal:// is fetched over HTTPS
     }
 
+    [Fact]
+    public async Task AgendaRetainsEarlierTodayAndEventsOverlappingMidnight()
+    {
+        const string ics = """
+            BEGIN:VCALENDAR
+            BEGIN:VEVENT
+            UID:early
+            SUMMARY:Earlier today
+            DTSTART:20261119T080000Z
+            DTEND:20261119T083000Z
+            END:VEVENT
+            BEGIN:VEVENT
+            UID:span
+            SUMMARY:Overnight booking
+            DTSTART:20261118T230000Z
+            DTEND:20261119T030000Z
+            END:VEVENT
+            BEGIN:VEVENT
+            UID:old
+            SUMMARY:Ended yesterday
+            DTSTART:20261118T080000Z
+            DTEND:20261118T083000Z
+            END:VEVENT
+            END:VCALENDAR
+            """;
+        using var t = new TestContext(new FakeNetwork().On("https://cal.example/day.ics", ics, "text/calendar"));
+        t.Ctx.Settings.Update(s =>
+        {
+            s.Events.Calendars = [new() { Name = "Work", Url = "https://cal.example/day.ics" }];
+            s.Events.HolidayCountries = [];
+            s.Events.Economic = false;
+            s.Events.Earnings = false;
+        });
+        var result = await new EventsScoutAgent(new AgendaClock()).RunAsync(t.Ctx, CancellationToken.None);
+        Assert.True(result.Ok, result.Message);
+        Assert.Equal(new[] { "Overnight booking", "Earlier today" }, t.Ctx.State.Events.Select(e => e.Title));
+    }
+
+    private sealed class AgendaClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2026, 11, 19, 19, 0, 0, TimeSpan.Zero);
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+    }
+
     // ───────────────────────────── AI agents ─────────────────────────────
 
     private static async Task<TestContext> WithModel(FakeOllama server)

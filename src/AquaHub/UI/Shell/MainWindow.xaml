@@ -182,6 +182,59 @@
                             <TranslateTransform x:Name="PageShift"/>
                         </ContentControl.RenderTransform>
                     </ContentControl>
+                    <Canvas x:Name="DeckSurface" Grid.Row="1" ClipToBounds="True" SizeChanged="OnDeckSizeChanged">
+                        <c:GroupBorder x:Name="DailyDeck" Width="222" CornerRadius="12" Padding="10" BorderThickness="1"
+                                Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.CardStroke}"
+                                SizeChanged="OnDeckSizeChanged" AutomationProperties.AutomationId="daily-deck"
+                                AutomationProperties.Name="Daily deck" Visibility="Collapsed">
+                            <StackPanel>
+                                <DockPanel LastChildFill="True" Margin="0,0,0,4">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Icon}" Width="27" Height="27"
+                                            Click="OnHideDeck" ToolTip="Hide deck" AutomationProperties.Name="Hide deck"
+                                            AutomationProperties.AutomationId="deck-hide">
+                                        <c:Icon Kind="close" Width="13" Height="13"/>
+                                    </Button>
+                                    <c:DeckGrip x:Name="DeckHandle" Focusable="True" Cursor="SizeAll" Height="27"
+                                           DragDelta="OnDeckDrag" DragCompleted="OnDeckDragCompleted"
+                                           PreviewKeyDown="OnDeckMoveKey" ToolTip="Drag or use the arrow keys to move the deck"
+                                           AutomationProperties.Name="Move deck" AutomationProperties.AutomationId="deck-move"
+                                           AutomationProperties.HelpText="Use the arrow keys to move the deck">
+                                        <c:DeckGrip.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="Grip" Padding="7,2" Background="Transparent" CornerRadius="5">
+                                                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="Deck"
+                                                               Foreground="{DynamicResource B.Text}"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Subtle}"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsKeyboardFocused" Value="True">
+                                                        <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.AccentSoft}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </c:DeckGrip.Template>
+                                    </c:DeckGrip>
+                                </DockPanel>
+                                <Button Style="{StaticResource Btn.Standard}" Content="Add reminder" Click="OnDeckAddReminder"
+                                        AutomationProperties.AutomationId="deck-add-reminder"/>
+                                <Button Style="{StaticResource Btn.Link}" Content="Today’s agenda" HorizontalAlignment="Left"
+                                        Margin="0,4,0,3" Click="OnDeckToday" AutomationProperties.AutomationId="deck-today"/>
+                                <TextBlock Style="{StaticResource T.Caption}" Text="Remind me in" Margin="0,2,0,4"/>
+                                <UniformGrid x:Name="DeckQuickTimes" Rows="1">
+                                    <Button Style="{StaticResource Btn.Subtle}" Padding="4" Content="5 min" Tag="5" Click="OnDeckQuickReminder"
+                                            AutomationProperties.Name="Remind me in 5 minutes" AutomationProperties.AutomationId="deck-quick-5"/>
+                                    <Button Style="{StaticResource Btn.Subtle}" Padding="4" Content="15 min" Tag="15" Click="OnDeckQuickReminder"
+                                            AutomationProperties.Name="Remind me in 15 minutes" AutomationProperties.AutomationId="deck-quick-15"/>
+                                    <Button Style="{StaticResource Btn.Subtle}" Padding="4" Content="30 min" Tag="30" Click="OnDeckQuickReminder"
+                                            AutomationProperties.Name="Remind me in 30 minutes" AutomationProperties.AutomationId="deck-quick-30"/>
+                                </UniformGrid>
+                                <TextBlock x:Name="DeckStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,5,0,0"
+                                           Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="deck-status"/>
+                            </StackPanel>
+                        </c:GroupBorder>
+                    </Canvas>
                     <StackPanel x:Name="Banners" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,24" Width="380"/>
                 </Grid>
             </Border>

@@ -103,6 +103,11 @@ or dedicated test-run locations rather than repository documentation.
 
 Adrian authorized modular E2E coverage for Phase 4 on 5 November. Use `scripts/e2e.ps1 -Component <name>` to run only
 the affected UI/service contract; the default `Phase4` alias selects Models, Runtime, Ask, Images, Roleplay and Lifecycle.
+The separate `Streams` component covers 5.3. On 6 November Adrian also authorized focused unit/provider tests alongside
+E2E for this stage; the earlier test-authoring restriction does not apply to the new stream work.
+The separate `Reminders` component covers the Phase 7 deck, day agenda, quick reminders, scene confirmation and
+intercepted alert and scene effects. Select an individual case with `-Component Reminders -Filter T02`. Actual Windows notification delivery,
+quiet hours/fullscreen, screen-reader use and physical sleep/resume remain manual acceptance.
 `-Component Ask,Images` unions groups; `-Filter A24` or `-Smoke` narrows them. `-ListComponents` lists scope, `-Plan`
 resolves the filter without building, and `-ListTests` discovers the selection without launching Aqua or creating profiles.
 CI runs `scripts/check-e2e-selection.ps1`; it compiles, but does not execute, desktop tests. Dependencies must already
@@ -139,9 +144,12 @@ dispatcher stalls and memory across repeated open/close/navigation cycles; estab
 range from a current .NET 10 Release baseline before adding a numeric ceiling. Model throughput is hardware/workload
 dependent: compare identical model/hash, context/cache, prompt, MTP and driver rather than enforcing a global tok/s value.
 
-Future reminders/indexing must define their own idle CPU/I/O, queue depth, disk growth and foreground latency budgets
-before implementation. Indexing should reconcile changes incrementally with bounded work and a recovery scan; scheduling
-must specify sleep/restart/time-zone behaviour. Neither feature should introduce unbounded per-file timers or UI polling.
+Reminders reuse the existing one-second scheduler tick. Idle reminder overhead is one deadline/revision check with no
+disk I/O until the next due time, midnight, an explicit clock signal or retry. At most eight operations queue or run
+together, with up to 200 schedules and one outstanding occurrence per schedule. A 200-schedule scratch profile with
+a busy day and a batch of due occurrences is the representative load for measuring foreground latency and idle I/O.
+The existing 50 ms p95 UI update target is still unmeasured for that workload. Indexing should define its own budgets
+and reconcile changes incrementally with bounded work and a recovery scan.
 
 For a repeatable offline UI measurement, build Release into scratch, then run that executable with
 `--e2e --data-dir <empty-scratch-profile> --snapshot <scratch-results> --measure --pages performance`.

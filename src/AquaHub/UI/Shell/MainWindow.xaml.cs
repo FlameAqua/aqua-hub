@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitializeDeck();
         UI.Controls.PopupToggle.Attach(AlertsPopup, BellButton);
         _status = new UiThrottle(UpdateStatus, 250);
         _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
@@ -154,7 +155,7 @@ public partial class MainWindow : Window
         "news" => new NewsPage(),
         "social" => new SocialPage(),
         "markets" => new MarketsPage(),
-        "upcoming" => new UpcomingPage(),
+        "upcoming" => new UpcomingPage(Hub.Core.Reminders),
         "system" => new SystemPage(),
         "launchpad" => new LaunchpadPage(),
         "ask" => new AskPage(),
@@ -183,7 +184,13 @@ public partial class MainWindow : Window
     {
         if (topic is Topics.Ai or Topics.Alerts or Topics.Freshness or Topics.Agents && IsVisible) _status.Request();
         // The list under the bell follows alerts that arrive, or are read, while it's open.
-        if (topic is Topics.Alerts) Hub.OnUi(() => { if (AlertsPopup.IsOpen) FillAlerts(); });
+        if (topic is Topics.Alerts) Hub.OnUi(() =>
+        {
+            if (AlertsPopup.IsOpen) FillAlerts();
+            foreach (var banner in Banners.Children.OfType<FrameworkElement>()
+                .Where(b => b.Tag is AlertVM { Alert: { Kind: "reminder" } alert } && !Hub.State.Alerts.Any(a => a.Id == alert.Id)).ToList())
+                Banners.Children.Remove(banner);
+        });
     }
 
     private void OnSettingsChanged(Core.Settings.HubSettings s)
@@ -334,6 +341,7 @@ public partial class MainWindow : Window
     {
         _status.Request();
         if (!IsActive || Hub.S.Notifications.DoNotDisturb) return;
+        if (alert.Kind == "reminder" && (!Hub.Platform.ShouldToast(alert) || !Hub.State.Alerts.Any(item => item.Id == alert.Id))) return;
         var vm = new AlertVM(alert);
         var banner = new AquaHub.UI.Controls.GroupBorder
         {

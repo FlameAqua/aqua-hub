@@ -3,58 +3,193 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:AquaHub.UI.Controls"
              xmlns:ui="clr-namespace:AquaHub.UI">
+    <UserControl.Resources>
+        <Style TargetType="DatePicker">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DatePicker">
+                        <Grid x:Name="PART_Root">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <DatePickerTextBox x:Name="PART_TextBox" Padding="6,4"
+                                               AutomationProperties.Name="{TemplateBinding AutomationProperties.Name}">
+                                <DatePickerTextBox.Style>
+                                    <Style TargetType="DatePickerTextBox" BasedOn="{StaticResource {x:Type TextBox}}"/>
+                                </DatePickerTextBox.Style>
+                            </DatePickerTextBox>
+                            <Button x:Name="PART_Button" Grid.Column="1" Style="{StaticResource Btn.Icon}"
+                                    Width="28" Height="28" Margin="2,0,0,0" ToolTip="Open calendar"
+                                    AutomationProperties.Name="Open calendar">
+                                <c:Icon Kind="upcoming" Width="14" Height="14"/>
+                            </Button>
+                            <Popup x:Name="PART_Popup" Placement="Bottom" StaysOpen="False" AllowsTransparency="True"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="32,26,32,36" MaxWidth="1560">
-            <Grid Margin="0,0,0,18">
-                <StackPanel>
-                    <TextBlock Text="Upcoming &amp; predictions" Style="{StaticResource T.Title}"/>
-                    <TextBlock Text="Your agenda, key dates for markets, and what the crowd expects to happen." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
-                </StackPanel>
-                <Button Style="{StaticResource Btn.Standard}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="OnAddCalendar">
-                    <StackPanel Orientation="Horizontal"><c:Icon Kind="plus" Width="14" Height="14"/><TextBlock Text="Add calendar" Margin="8,0,0,0"/></StackPanel>
-                </Button>
-            </Grid>
+            <DockPanel Margin="0,0,0,18">
+                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Standard}" Margin="12,0,0,0"
+                        Content="Add calendar" VerticalAlignment="Center" Click="OnAddCalendar"/>
+                <TextBlock Text="Upcoming &amp; predictions" Style="{StaticResource T.Title}" TextWrapping="Wrap"/>
+            </DockPanel>
 
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" MinWidth="340"/>
+                    <ColumnDefinition Width="3*" MinWidth="340"/>
                     <ColumnDefinition Width="16"/>
-                    <ColumnDefinition Width="3*"/>
+                    <ColumnDefinition Width="2*"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Agenda -->
-                <c:Card Title="Agenda" Icon="upcoming" Subtitle="{Binding AgendaMeta}" VerticalAlignment="Top">
+                <c:Card Title="Agenda" Icon="upcoming" VerticalAlignment="Top">
+                    <c:Card.HeaderAction>
+                        <Button x:Name="AddReminder" Style="{StaticResource Btn.Standard}" Content="Add reminder"
+                                Click="OnAddReminder" AutomationProperties.AutomationId="agenda-add-reminder"/>
+                    </c:Card.HeaderAction>
                     <StackPanel>
-                        <ItemsControl ItemsSource="{Binding Days}">
+                        <WrapPanel x:Name="DayControls" Margin="0,0,0,6">
+                            <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnPreviousDay"
+                                    ToolTip="Previous day" AutomationProperties.Name="Previous day" AutomationProperties.AutomationId="agenda-previous">
+                                <c:Icon Kind="chevron-left" Width="14" Height="14"/>
+                            </Button>
+                            <DatePicker x:Name="AgendaDate" Width="126" Margin="4,0" SelectedDateChanged="OnDaySelected"
+                                        DateValidationError="OnAgendaDateInvalid"
+                                        SelectedDateFormat="Short" VerticalAlignment="Center"
+                                        AutomationProperties.Name="Agenda date" AutomationProperties.AutomationId="agenda-date"/>
+                            <Button Style="{StaticResource Btn.Icon}" Width="28" Height="28" Click="OnNextDay"
+                                    ToolTip="Next day" AutomationProperties.Name="Next day" AutomationProperties.AutomationId="agenda-next">
+                                <c:Icon Kind="chevron-right" Width="14" Height="14"/>
+                            </Button>
+                            <Button Style="{StaticResource Btn.Link}" Content="Today" Click="OnToday" Margin="6,0"
+                                    AutomationProperties.AutomationId="agenda-today"/>
+                            <Button x:Name="AllReminders" Style="{StaticResource Btn.Link}" Content="All reminders"
+                                    Click="OnAllReminders" Margin="6,0,0,0" AutomationProperties.AutomationId="agenda-all-reminders"/>
+                        </WrapPanel>
+                        <TextBlock x:Name="AgendaHeading" Style="{StaticResource T.Caption}" Margin="0,2,0,8" TextWrapping="Wrap"
+                                   AutomationProperties.AutomationId="agenda-day-heading"/>
+                        <Border x:Name="ReminderEditor" Style="{StaticResource CardInner}" Margin="0,0,0,10"
+                                Visibility="Collapsed" PreviewKeyDown="OnEditorKey">
+                            <StackPanel x:Name="EditorFields">
+                                <StackPanel.Resources>
+                                    <Style TargetType="Label">
+                                        <Setter Property="Foreground" Value="{DynamicResource B.Text}"/>
+                                    </Style>
+                                </StackPanel.Resources>
+                                <TextBlock x:Name="EditorHeading" FontWeight="SemiBold"/>
+                                <Label Content="_Title" Target="{Binding ElementName=ReminderTitle}"/>
+                                <TextBox x:Name="ReminderTitle" AutomationProperties.Name="Reminder title"
+                                         AutomationProperties.AutomationId="reminder-title" MaxLength="120"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <StackPanel Margin="0,0,12,6">
+                                        <Label Content="_Date" Target="{Binding ElementName=ReminderDate}"/>
+                                        <DatePicker x:Name="ReminderDate" Width="126" SelectedDateFormat="Short"
+                                                    DateValidationError="OnReminderDateInvalid"
+                                                    AutomationProperties.Name="Reminder date" AutomationProperties.AutomationId="reminder-date"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,12,6">
+                                        <Label Content="Ti_me (24-hour)" Target="{Binding ElementName=ReminderTime}"/>
+                                        <TextBox x:Name="ReminderTime" Width="112" MaxLength="5"
+                                                 AutomationProperties.Name="Reminder time (24-hour)" AutomationProperties.AutomationId="reminder-time"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,0,6">
+                                        <Label Content="_Repeat" Target="{Binding ElementName=ReminderRepeatBox}"/>
+                                        <ComboBox x:Name="ReminderRepeatBox" Width="108" MinWidth="96" SelectedIndex="0"
+                                                  AutomationProperties.Name="Repeat reminder" AutomationProperties.AutomationId="reminder-repeat">
+                                            <ComboBoxItem Content="Once"/>
+                                            <ComboBoxItem Content="Daily"/>
+                                            <ComboBoxItem Content="Weekly"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                </WrapPanel>
+                                <Label Content="Scene action (optional)" Target="{Binding ElementName=ReminderSceneBox}"/>
+                                <ComboBox x:Name="ReminderSceneBox" DisplayMemberPath="Name" HorizontalContentAlignment="Stretch"
+                                          AutomationProperties.Name="Scene action" AutomationProperties.AutomationId="reminder-scene"/>
+                                <TextBlock x:Name="EditorStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap"
+                                           AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="reminder-editor-status"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Style="{StaticResource Btn.Accent}" Content="Save" Click="OnSaveReminder"
+                                            AutomationProperties.AutomationId="reminder-save"/>
+                                    <Button Style="{StaticResource Btn.Standard}" Content="Cancel" Click="OnCancelEditor" Margin="6,0,0,0"
+                                            AutomationProperties.AutomationId="reminder-cancel"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="SceneReviewPanel" Style="{StaticResource CardInner}" Margin="0,0,0,10"
+                                Visibility="Collapsed" PreviewKeyDown="OnSceneReviewKey">
+                            <StackPanel>
+                                <TextBlock x:Name="SceneReviewTitle" FontWeight="SemiBold" TextWrapping="Wrap"
+                                           AutomationProperties.AutomationId="reminder-scene-review-title"/>
+                                <ListBox x:Name="SceneReviewSteps" MaxHeight="176" Margin="0,6,0,8" BorderThickness="0"
+                                         Background="Transparent" Foreground="{DynamicResource B.Text}" HorizontalContentAlignment="Stretch"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Scene steps"
+                                         AutomationProperties.AutomationId="reminder-scene-review-steps">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="{DynamicResource B.Text}"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <WrapPanel>
+                                    <Button Style="{StaticResource Btn.Accent}" Content="Run now" Click="OnConfirmScene"
+                                            AutomationProperties.AutomationId="reminder-scene-confirm"/>
+                                    <Button x:Name="CancelSceneReview" Style="{StaticResource Btn.Standard}" Content="Cancel"
+                                            Click="OnCancelSceneReview" Margin="6,0,0,0" AutomationProperties.AutomationId="reminder-scene-cancel"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock x:Name="SceneRunStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                   Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="reminder-scene-status"/>
+                        <Button x:Name="CancelSceneRun" Style="{StaticResource Btn.Link}" Content="Stop scene" Click="OnStopScene"
+                                Visibility="Collapsed" HorizontalAlignment="Left" Margin="0,0,0,6" AutomationProperties.AutomationId="reminder-scene-stop"/>
+                        <TextBlock x:Name="AgendaStatus" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   AutomationProperties.AutomationId="agenda-status" AutomationProperties.LiveSetting="Polite"/>
+                        <Button x:Name="AgendaRetry" Style="{StaticResource Btn.Standard}" HorizontalAlignment="Left" Margin="0,0,0,8"
+                                Content="Retry reminders" Click="OnRetryReminders" Visibility="Collapsed" AutomationProperties.AutomationId="agenda-retry"/>
+                        <ItemsControl x:Name="AgendaList" AutomationProperties.Name="Agenda entries" AutomationProperties.AutomationId="agenda-entries">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <StackPanel Margin="0,0,0,14">
-                                        <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource B.AccentText}" Margin="0,0,0,6"/>
-                                        <ItemsControl ItemsSource="{Binding Events}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Grid Margin="0,4">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="4"/>
-                                                            <ColumnDefinition Width="64"/>
-                                                            <ColumnDefinition Width="*"/>
-                                                        </Grid.ColumnDefinitions>
-                                                        <Border CornerRadius="2" Background="{Binding KindBrush}"/>
-                                                        <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontSize="13" Foreground="{DynamicResource B.Text2}" Margin="10,1,0,0"/>
-                                                        <StackPanel Grid.Column="2">
-                                                            <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                                            <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,2,0,0">
-                                                                <Run Text="{Binding KindLabel, Mode=OneWay}" Foreground="{Binding KindBrush, Mode=OneWay}"/><Run Text="{Binding Detail, Mode=OneWay, StringFormat=' · {0}'}"/>
-                                                            </TextBlock>
-                                                        </StackPanel>
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
+                                    <Grid Margin="0,0,0,9">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="76"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding When}" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,1,8,0"/>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"
+                                                       AutomationProperties.AutomationId="agenda-entry-title"/>
+                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
+                                            <WrapPanel Visibility="{Binding Editable, Converter={StaticResource Vis}}">
+                                                <Button Style="{StaticResource Btn.Link}" Content="Run scene" Click="OnReviewScene"
+                                                        Visibility="{Binding CanRunScene, Converter={StaticResource Vis}}" Margin="0,0,6,0"
+                                                        AutomationProperties.Name="{Binding RunSceneName}" AutomationProperties.AutomationId="reminder-run-scene"/>
+                                                <Button Style="{StaticResource Btn.Link}" Content="Done" Click="OnReminderDone"
+                                                        AutomationProperties.Name="{Binding DoneName}" AutomationProperties.AutomationId="reminder-done"
+                                                        Visibility="{Binding Actionable, Converter={StaticResource Vis}}" Margin="0,0,6,0"/>
+                                                <Button Style="{StaticResource Btn.Link}" Content="Snooze 10 minutes" Click="OnReminderSnooze"
+                                                        AutomationProperties.Name="{Binding SnoozeName}" AutomationProperties.AutomationId="reminder-snooze"
+                                                        Visibility="{Binding CanSnooze, Converter={StaticResource Vis}}" Margin="0,0,6,0"/>
+                                                <Button Style="{StaticResource Btn.Link}" Content="Edit" Click="OnReminderEdit"
+                                                        AutomationProperties.Name="{Binding EditName}" AutomationProperties.AutomationId="reminder-edit" Margin="0,0,6,0"/>
+                                                <Button Style="{StaticResource Btn.Link}" Content="Delete" Click="OnReminderDelete"
+                                                        AutomationProperties.Name="{Binding DeleteName}" AutomationProperties.AutomationId="reminder-delete"/>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="PreviousAgendaItems" Style="{StaticResource Btn.Link}" Content="Previous events"
+                                    Click="OnPreviousAgendaItems" Visibility="Collapsed" Margin="0,0,8,0"/>
+                            <Button x:Name="MoreAgendaItems" Style="{StaticResource Btn.Link}" Content="Next events"
+                                    Click="OnMoreAgendaItems" Visibility="Collapsed"/>
+                        </WrapPanel>
                         <Border Style="{StaticResource CardInner}" Visibility="{Binding NoCalendars, Converter={StaticResource Vis}}">
                             <StackPanel>
                                 <TextBlock Text="Connect your calendar" FontWeight="SemiBold"/>

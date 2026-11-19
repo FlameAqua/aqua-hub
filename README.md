@@ -278,7 +278,8 @@ needed. Dependencies must already be restored; builds use `--no-restore`. Exampl
 ./scripts/e2e.ps1 -Plan                       # resolve selection without building or launching
 ```
 
-Offline components are **Models, Runtime, Ask, Images, Roleplay and Lifecycle**. Multiple components are combined with
+Offline components are **Models, Runtime, Ask, Images, Roleplay, Lifecycle and Streams**. The default Phase4 group retains
+its original six components; use `-Component Streams` for 5.3. Multiple components are combined with
 OR; `-Filter` (test/class name fragment) and `-Smoke` narrow that selection. `-NoBuild` reuses app and test binaries;
 omit it after code changes. Results include TRX, a JSON summary with counts/duration/app and test binary hashes, logs and failure screenshots.
 Each run has a unique folder under `%LOCALAPPDATA%\AquaHub.E2E\e2e-runs`; `-Root` selects another dedicated scratch root.
@@ -291,6 +292,52 @@ legacy group. It can take 30–60 minutes, uses keyboard/mouse input and may nee
 and leave the desktop idle for legacy runs. Its first run opens a scratch app for onboarding; `-Setup` recreates that warm
 fixture while preserving the previous one. The runner never kills pre-existing apps. CI checks component selection and
 compiles the desktop suite; it does not run desktop tests. See [Development](docs/DEVELOPMENT.md) for evidence boundaries.
+
+## Live streams (5.3)
+
+**Social pulse › Live streams** shows live broadcasts from connected Twitch follows and selected YouTube channels. Each
+card opens the stream in your browser. **Sources** opens **Settings › Social › Live streams**; both sources start off.
+
+- For YouTube, enable the switch and choose up to six live channels. Existing profiles initially select the first six
+  saved channels; clearing every selection stays empty. The public page adapter needs no Google API key. It checks
+  every 15 minutes while Social is visible; Check now can recheck after one minute.
+- For Twitch, register Aqua Hub as a **Public** app in the [Twitch developer console](https://dev.twitch.tv/console/apps),
+  click **Manage**, copy **Client ID** (not the app name) into Aqua, then choose **Connect Twitch…** and approve the
+  read-only connection in your browser.
+  For the console's required **OAuth Redirect URLs**, add `https://github.com/FlameAqua/aqua-hub` as the app's HTTPS
+  landing/fallback page. The device flow obtains tokens by polling Twitch and does not need a callback server; a
+  cancelled browser authorization may return to that registered page.
+  The [public device flow](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow) needs no
+  embedded client secret. Tokens stay in Windows Credential Manager. Disconnect clears local account/cache data and
+  requests token revocation.
+
+To choose live channels from your Google/YouTube subscriptions:
+
+1. In [Google Cloud](https://console.cloud.google.com/), create/select a project and enable **YouTube Data API v3**.
+2. Configure Google Auth branding/audience and the consent screen. For a personal project in **Testing**, add your
+   Google account as a test user. Add the read-only YouTube scope `https://www.googleapis.com/auth/youtube.readonly`.
+3. Create an OAuth client with application type **Desktop app**. Obtain its client JSON configuration through Google's
+   console, then choose **Import Desktop client JSON…** in Aqua. A web client or service account will not work. A
+   Desktop client uses a temporary loopback redirect; you do not add the Twitch redirect URL here.
+4. Choose **Connect Google…**, approve read-only YouTube access in your browser, then pick up to six channels in Aqua.
+   **Sync subscriptions** updates the list manually (up to 1,000 subscriptions); it does not automatically select them.
+
+Google sign-in imports a local subscription catalogue for the live chooser. The separate **YouTube channels** list
+still controls new-upload feeds. Aqua never changes your subscriptions. Access tokens stay in memory; the Desktop
+client configuration and refresh token use profile-scoped Windows credentials. Disconnect removes the imported list,
+Google-only live selections and saved refresh token, and requests revocation; manual upload channels remain. Google
+may require renewed consent for test projects or app verification for wider distribution. See Google's
+[Desktop OAuth guide](https://developers.google.com/identity/protocols/oauth2/native-app).
+
+Public OAuth client IDs identify the application; they do not grant access to your account. Keep access/refresh tokens
+and personal client JSON exports out of Git. Common Google export filenames are ignored, but renamed exports still
+need care. Google's consent screen can display the configured support email to people authorising the app; choose an
+appropriate project contact before sharing your client with other users. See [Security](docs/SECURITY.md#stream-accounts-and-metadata).
+
+Checks respect agent pause/disable and stop when Social is left, hidden or minimised. Failed checks retain the last data
+with its age/error rather than reporting everyone offline. YouTube page changes can interrupt detection. Twitch's real
+account registration/sign-in/revocation still needs owner acceptance; automated desktop checks intercept those effects.
+Streams are kept separate from AI Social summaries. X/Grok is deferred because its official APIs are paid; see the roadmap.
 
 ## Project status
 

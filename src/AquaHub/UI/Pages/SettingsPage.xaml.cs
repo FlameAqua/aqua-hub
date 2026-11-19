@@ -36,6 +36,9 @@ public partial class SettingsPage : UserControl, IPage
     private string? _picturesText;
     private FileSystemWatcher? _watcher;
     private CancellationTokenSource? _cityCts;
+    private CancellationTokenSource? _twitchCts;
+    private bool _twitchBusy, _streamsActive;
+    private string _twitchMessage = "";
 
     private static readonly SectionVM[] SectionDefs =
     {
@@ -104,6 +107,11 @@ public partial class SettingsPage : UserControl, IPage
 
     public void OnNavigatedTo(string? arg)
     {
+        _streamsActive = true;
+        Hub.Core.Streams.Changed -= OnStreamConnectionChanged;
+        Hub.Core.Streams.Changed += OnStreamConnectionChanged;
+        Hub.Core.YouTubeAccount.Changed -= OnYouTubeAccountChanged;
+        Hub.Core.YouTubeAccount.Changed += OnYouTubeAccountChanged;
         Load();
         // "social:youtube" opens a section and brings one of its rows into view.
         var parts = (arg ?? "").Split(':', 2);
@@ -257,6 +265,11 @@ public partial class SettingsPage : UserControl, IPage
 
     public void OnNavigatedFrom()
     {
+        _streamsActive = false;
+        _twitchCts?.Cancel();
+        _googleCts?.Cancel();
+        Hub.Core.Streams.Changed -= OnStreamConnectionChanged;
+        Hub.Core.YouTubeAccount.Changed -= OnYouTubeAccountChanged;
         _voiceTest?.Dispose();
         _voiceTest = null;
         Hub.Core.Settings.Changed -= OnSettingsChangedElsewhere;
@@ -317,6 +330,8 @@ public partial class SettingsPage : UserControl, IPage
         BraveKey.Password = Hub.Core.Secrets.Get(SecretKeys.BraveSearchKey) ?? "";
         UpdateSearchEngineRows();
         ShowConnections();
+        ShowTwitchConnection();
+        ShowYouTubeAccount();
         _ = FillMicsAsync();
         UpdateWhisper();
         var (items, saved, cache, bytes) = Hub.Core.Db.Stats();
@@ -349,6 +364,75 @@ public partial class SettingsPage : UserControl, IPage
         AskFolderList.ItemsSource = _s.Ask.Folders.Select(f => new AskFolderVM(Pages.AskPage.FolderLabel(f),
             LocalFiles.ExpandFolders(new[] { f }, Hub.Ask.Platform.KnownFolder).FirstOrDefault() ?? f + " (not found)", f)).ToList();
         BuildScenes();
+        RefreshYouTubeChoices();
+    }
+
+    private void OnStreamConnectionChanged() => Hub.OnUi(() => { if (_streamsActive) ShowTwitchConnection(); });
+    private void ShowTwitchConnection()
+    {
+        var connected = Hub.Core.Streams.TwitchLogin is { Length: > 0 };
+        TwitchConnect.IsEnabled = !_twitchBusy;
+        TwitchConnect.Content = _twitchBusy ? "Connecting Twitch…" : "Connect Twitch…";
+        TwitchClientId.IsEnabled = !_twitchBusy;
+        TwitchConnect.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        TwitchCancel.Visibility = _twitchBusy && _twitchCts is not null ? Visibility.Visible : Visibility.Collapsed;
+        TwitchDisconnect.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
+        TwitchDisconnect.IsEnabled = !_twitchBusy;
+        if (!_twitchBusy) TwitchStatus.Text = _twitchMessage.Length > 0 ? _twitchMessage
+            : connected ? "Connected as " + Hub.Core.Streams.TwitchLogin + ". Tokens are kept in Windows Credential Manager." : "Not connected.";
+    }
+    private void OnRegisterTwitch(object sender, RoutedEventArgs e) => AppLauncher.OpenUrl("https://dev.twitch.tv/console/apps");
+    private void OnCancelTwitch(object sender, RoutedEventArgs e) { _twitchCts?.Cancel(); Hub.Core.Streams.CancelConnect(); }
+    private async void OnConnectTwitch(object sender, RoutedEventArgs e)
+    {
+        if (_twitchBusy) return;
+        if (!TwitchClient.ValidClientId(TwitchClientId.Text.Trim()))
+        {
+            _twitchMessage = "Enter the public Twitch client ID: in Twitch's developer console, click Manage and copy Client ID. The app name isn't the Client ID.";
+            ShowTwitchConnection();
+            TwitchStatus.SetResourceReference(TextBlock.ForegroundProperty, "B.Warn");
+            TwitchClientId.Focus();
+            return;
+        }
+        TwitchStatus.SetResourceReference(TextBlock.ForegroundProperty, "B.Text");
+        SaveNow();
+        if (Sandbox.Intercept("twitch-connect", "public client · followed live channels")) { TwitchStatus.Text = "Twitch sign-in is intercepted in this test profile."; return; }
+        _twitchBusy = true;
+        _twitchMessage = "";
+        using var cancellation = new CancellationTokenSource();
+        _twitchCts = cancellation;
+        Hub.Core.Settings.Update(s => s.Social.Streams.Twitch = true);
+        ShowTwitchConnection();
+        TwitchStatus.Text = "Requesting a Twitch sign-in code…";
+        try
+        {
+            await Hub.Core.Streams.ConnectAsync(code => Hub.Ui.InvokeAsync(() =>
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                TwitchStatus.Text = $"In your browser, sign in and enter {code.UserCode} if asked. Waiting for your approval…";
+                if (!AppLauncher.OpenUrl(code.VerificationUri.AbsoluteUri)) throw new TwitchException("Couldn't open your browser. Check your default browser, then connect Twitch again.");
+            }).Task, cancellation.Token);
+            _twitchMessage = "Connected as " + Hub.Core.Streams.TwitchLogin + ". Open Social to check your followed live channels.";
+        }
+        catch (OperationCanceledException) { _twitchMessage = "Twitch sign-in cancelled."; }
+        catch (TwitchException ex) { _twitchMessage = ex.Message; }
+        catch (Exception ex) { Log.Warn("streams", "Twitch sign-in failed", ex); _twitchMessage = "Couldn't connect to Twitch. Check your connection and try again."; }
+        finally { _twitchCts = null; _twitchBusy = false; ShowTwitchConnection(); }
+    }
+    private async void OnDisconnectTwitch(object sender, RoutedEventArgs e)
+    {
+        if (_twitchBusy) return;
+        _twitchBusy = true; ShowTwitchConnection();
+        try
+        {
+            var disconnect = Hub.Core.Streams.DisconnectAsync();
+            Hub.Core.Settings.Update(s => s.Social.Streams.Twitch = false);
+            await disconnect;
+            _twitchMessage = "Disconnected. Saved Twitch credentials and stream observations were removed.";
+        }
+        catch (TwitchException ex) { _twitchMessage = ex.Message; }
+        catch (Exception) { _twitchMessage = "Disconnected on this PC. Twitch couldn't confirm revocation; you can remove Aqua Hub in Twitch's Connections settings."; }
+        finally { _twitchBusy = false; ShowTwitchConnection(); }
     }
 
     private void SetupChips()
@@ -768,6 +852,7 @@ public partial class SettingsPage : UserControl, IPage
     {
         if (sender is not FrameworkElement { Tag: string id }) return;
         _s.Social.YouTubeChannels.RemoveAll(c => c.ChannelId == id);
+        if (!Hub.Core.YouTubeAccount.Channels.Any(c => c.ChannelId == id)) _s.Social.Streams.YouTubeSelection?.RemoveAll(c => c.ChannelId == id);
         RefreshLists();
         Save();
     }

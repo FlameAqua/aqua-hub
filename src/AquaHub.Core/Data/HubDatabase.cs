@@ -11,7 +11,7 @@ namespace AquaHub.Core.Data;
 /// HTTP validators for conditional GETs, alerts, agent run history and daily price history.
 /// All statements are parameterised.
 /// </summary>
-public sealed class HubDatabase
+public sealed partial class HubDatabase
 {
     private readonly string _cs;
     public string Path { get; }
@@ -99,6 +99,7 @@ public sealed class HubDatabase
             CREATE TABLE IF NOT EXISTS price_history(symbol TEXT NOT NULL, day INTEGER NOT NULL, close REAL NOT NULL,
               PRIMARY KEY(symbol, day)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, at INTEGER NOT NULL) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS reminder_state(id INTEGER PRIMARY KEY CHECK(id = 1), data TEXT NOT NULL);
             PRAGMA user_version = 1;
             """);
     }
@@ -368,7 +369,13 @@ public sealed class HubDatabase
     public bool AddAlert(HubAlert a)
     {
         using var c = Open();
+        return InsertAlert(c, null, a);
+    }
+
+    private static bool InsertAlert(SqliteConnection c, SqliteTransaction? tx, HubAlert a)
+    {
         using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "INSERT OR IGNORE INTO alerts(id, kind, severity, title, body, url, target, created, read) VALUES($id, $k, $s, $t, $b, $u, $g, $c, 0);";
         cmd.Parameters.AddWithValue("$id", a.Id);
         cmd.Parameters.AddWithValue("$k", a.Kind);

@@ -9,9 +9,11 @@ $pair = Resolve-E2ESelection -Component @('Models', 'Images') -Smoke -Filter 'T0
 Assert-Selection ($pair.Filter -eq 'Execution=Offline&(Component=Models|Component=Images)&Category=Smoke&FullyQualifiedName~T01') 'Component OR and narrowing AND filters changed.'
 Assert-Selection ((Resolve-E2ESelection -Component 'Models,Images').Filter -eq 'Execution=Offline&(Component=Models|Component=Images)') 'Comma-separated components failed.'
 Assert-Selection ((Resolve-E2ESelection -All).Filter -eq '') 'Explicit All must retain the complete suite.'
+Assert-Selection ((Resolve-E2ESelection -Component Streams).Filter -eq 'Execution=Offline&(Component=Streams)') 'Streams must be independently selectable.'
+Assert-Selection ((Resolve-E2ESelection -Component Reminders -Filter T02).Filter -eq 'Execution=Offline&(Component=Reminders)&FullyQualifiedName~T02') 'Select Reminders by case.'
 Assert-Selection ((Resolve-E2ESelection -Legacy -Component Settings).Filter -eq 'Execution=Legacy&(Component=Settings)') 'Legacy module selection failed.'
 Assert-Rejected { Resolve-E2ESelection -Component Unknown }
 Assert-Rejected { Resolve-E2ESelection -Component Settings }
 Assert-Rejected { Resolve-E2ESelection -All -Component Models }
 Assert-Rejected { Resolve-E2ESelection -Component Models -Filter 'T01|T02' }
-'E2E selection checks passed (9 cases).'
+'E2E selection checks passed (11 cases).'

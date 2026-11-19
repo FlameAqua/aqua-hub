@@ -11,6 +11,7 @@ public sealed class HubSettings
     public int Version { get; set; } = SettingsStore.CurrentVersion;
     public bool OnboardingComplete { get; set; }
     public GeneralSettings General { get; set; } = new();
+    public DeckSettings Deck { get; set; } = new();
     public LocationSettings Location { get; set; } = new();
     public NewsSettings News { get; set; } = new();
     public SocialSettings Social { get; set; } = new();
@@ -25,6 +26,8 @@ public sealed class HubSettings
     public NotificationSettings Notifications { get; set; } = new();
     public PrivacySettings Privacy { get; set; } = new();
 }
+
+public sealed record DeckSettings(bool Hidden = false, double X = 1, double Y = 1);
 
 public sealed class GeneralSettings
 {
@@ -179,6 +182,7 @@ public sealed class SocialSettings
     public bool HackerNews { get; set; } = true;
     public int HackerNewsCount { get; set; } = 15;
     public List<ChannelRef> YouTubeChannels { get; set; } = new() { GamersNexusChannel() };
+    public StreamSettings Streams { get; set; } = new();
 
     public static ChannelRef GamersNexusChannel() => new()
     {
@@ -187,6 +191,20 @@ public sealed class SocialSettings
     };
     /// <summary>Any extra RSS/Atom feeds treated as social (e.g. a self-hosted RSSHub bridge).</summary>
     public List<NewsSource> ExtraFeeds { get; set; } = new();
+}
+
+public sealed class StreamSettings
+{
+    public bool Twitch { get; set; }
+    public bool YouTube { get; set; }
+    /// <summary>The registered Public client ID; tokens stay in the secret store.</summary>
+    public string TwitchClientId { get; set; } = "";
+    /// <summary>Null retains the original first-six saved-channel behaviour; an empty list means no live channels.</summary>
+    public List<ChannelRef>? YouTubeSelection { get; set; }
+
+    public static IReadOnlyList<ChannelRef> SelectedYouTube(SocialSettings social) =>
+        (social.Streams.YouTubeSelection ?? social.YouTubeChannels).Where(c => c is not null && Sources.YouTubeStreams.ValidChannel(c.ChannelId))
+            .DistinctBy(c => c.ChannelId).Take(Sources.StreamsSession.MaxYouTubeChannels).ToArray();
 }
 
 public sealed class WatchSymbol

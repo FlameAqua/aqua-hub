@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using AquaHub.Core.Models;
+using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
 using AquaHub.Platform;
 using AquaHub.UI.Shell;
@@ -20,9 +21,44 @@ public sealed class WindowManager
     private FlyoutWindow? _flyout;
     private CommandPalette? _palette;
     private DispatcherTimer? _trim;
+    private readonly object _deckGate = new();
+    private DeckSettings? _pendingDeck;
+    private Task _deckSave = Task.CompletedTask;
 
     public MainWindow? Main => _main;
     public bool MainVisible => _main is { IsVisible: true } m && m.WindowState != WindowState.Minimized;
+
+    public Task DeckSaved { get { lock (_deckGate) return _deckSave; } }
+
+    public void SaveDeck(DeckSettings settings)
+    {
+        lock (_deckGate)
+        {
+            if (Hub.Quitting) return;
+            _pendingDeck = settings;
+            if (_deckSave.IsCompleted) _deckSave = Task.Run(PersistDeck);
+        }
+    }
+
+    private void PersistDeck()
+    {
+        while (true)
+        {
+            DeckSettings settings;
+            lock (_deckGate)
+            {
+                if (_pendingDeck is not { } pending)
+                {
+                    _deckSave = Task.CompletedTask;
+                    return;
+                }
+                settings = pending;
+                _pendingDeck = null;
+            }
+            try { Hub.Core.Settings.Update(s => s.Deck = settings); }
+            catch (Exception ex) { Log.Warn("deck", "Could not save the deck position", ex); }
+        }
+    }
 
     public void ShowMain(string? page = null, string? arg = null)
     {
@@ -122,7 +158,7 @@ public sealed class WindowManager
             case "markets": ShowMain("markets", parts.Length > 1 ? parts[1] : null); break;
             case "news": ShowMain("news", parts.Length > 1 ? parts[1] : null); break;
             case "brief": ShowMain("today"); break;
-            case "upcoming": ShowMain("upcoming"); break;
+            case "upcoming": ShowMain("upcoming", parts.Length > 1 ? parts[1] : null); break;
             case "system": ShowMain("system"); break;
             case "settings": ShowMain("settings", parts.Length > 1 ? parts[1] : null); break;
             default:

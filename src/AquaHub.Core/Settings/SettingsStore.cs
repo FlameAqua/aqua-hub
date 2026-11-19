@@ -14,11 +14,11 @@ public interface ISecretStore
 
 public sealed class InMemorySecretStore : ISecretStore
 {
-    private readonly Dictionary<string, string> _values = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _values = new();
     public string? Get(string key) => _values.TryGetValue(key, out var v) ? v : null;
     public void Set(string key, string? value)
     {
-        if (string.IsNullOrEmpty(value)) _values.Remove(key); else _values[key] = value;
+        if (string.IsNullOrEmpty(value)) _values.TryRemove(key, out _); else _values[key] = value;
     }
 }
 
@@ -29,6 +29,9 @@ public static class SecretKeys
     public const string MastodonToken = "mastodon.accessToken";
     public const string OpenAiCompatibleKey = "ai.apiKey";
     public const string BraveSearchKey = "ask.braveSearchKey";
+    public const string TwitchConnection = "twitch.connection";
+    public const string GoogleYouTubeClient = "youtube.google.client";
+    public const string GoogleYouTubeRefresh = "youtube.google.refresh";
 }
 
 /// <summary>
@@ -236,7 +239,9 @@ public sealed partial class SettingsStore
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             var tmp = _path + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(s, JsonUtil.Options));
-            File.Move(tmp, _path, overwrite: true);
+            // ReplaceFile can replace a destination with open readers that allow delete sharing.
+            if (File.Exists(_path)) File.Replace(tmp, _path, destinationBackupFileName: null);
+            else File.Move(tmp, _path);
         }
         catch (Exception ex)
         {
@@ -262,6 +267,12 @@ public sealed partial class SettingsStore
         s.General ??= new(); s.Location ??= new(); s.News ??= new(); s.Social ??= new();
         s.Markets ??= new(); s.Events ??= new(); s.Predictions ??= new(); s.Ai ??= new(); s.Ask ??= new();
         s.Apps ??= new(); s.Scenes ??= new(); s.Notifications ??= new(); s.Privacy ??= new();
+        s.Deck ??= new();
+        s.Deck = s.Deck with
+        {
+            X = double.IsFinite(s.Deck.X) ? Math.Clamp(s.Deck.X, 0, 1) : 1,
+            Y = double.IsFinite(s.Deck.Y) ? Math.Clamp(s.Deck.Y, 0, 1) : 1,
+        };
 
         s.News.RefreshMinutes = Math.Clamp(s.News.RefreshMinutes, 3, 240);
         s.News.MaxAgeHours = Math.Clamp(s.News.MaxAgeHours, 6, 168);
@@ -282,6 +293,12 @@ public sealed partial class SettingsStore
         s.Social.BlueskyFeeds = Clean(s.Social.BlueskyFeeds).Where(x => x.StartsWith("at://", StringComparison.Ordinal)).ToList();
         s.Social.ExtraFeeds = (s.Social.ExtraFeeds ?? new()).Where(f => IsSafeHttpUrl(f.Url)).ToList();
         s.Social.YouTubeChannels = (s.Social.YouTubeChannels ?? new()).Where(c => !string.IsNullOrWhiteSpace(c.ChannelId)).ToList();
+        s.Social.Streams ??= new();
+        s.Social.Streams.TwitchClientId = (s.Social.Streams.TwitchClientId ?? "").Trim();
+        if (!Sources.TwitchClient.ValidClientId(s.Social.Streams.TwitchClientId)) s.Social.Streams.TwitchClientId = "";
+        if (s.Social.Streams.YouTubeSelection is not null)
+            s.Social.Streams.YouTubeSelection = StreamSettings.SelectedYouTube(s.Social).Select(c => new ChannelRef
+            { ChannelId = c.ChannelId, Name = (c.Name ?? "")[..Math.Min(c.Name?.Length ?? 0, 200)] }).ToList();
 
         s.Markets.RefreshSeconds = Math.Clamp(s.Markets.RefreshSeconds, 30, 3600);
         s.Markets.AlertMovePercent = Math.Clamp(s.Markets.AlertMovePercent, 0.5, 50);

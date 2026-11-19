@@ -51,6 +51,7 @@ public partial class App : Application
 
     private async Task StopOwnedAsync()
     {
+        var reminderScene = Hub.Actions.StopReminderSceneAsync();
         Hub.Speech?.Stop();
         Hub.Updates?.StopScheduling();
         Hub.Ollama?.StopScheduling();
@@ -59,7 +60,9 @@ public partial class App : Application
         var ask = Hub.Ask.StopAsync();
         var images = Hub.Images.StopAsync();
         var llm = Hub.Core.Llm.StopAsync();
-        await Task.WhenAll(agents, local, ask, images, llm, _initialization, _mediaInitialization);
+        var streams = Hub.Core.Streams.StopAsync();
+        var youtube = Hub.Core.YouTubeAccount.StopAsync();
+        await Task.WhenAll(agents, local, ask, images, llm, streams, youtube, reminderScene, Hub.Windows.DeckSaved, _initialization, _mediaInitialization);
         await Hub.Llama.StopAsync();
         _shutdownComplete = true;
     }
@@ -176,10 +179,9 @@ public partial class App : Application
         Hub.Tray.BalloonClicked += () => Hub.OnUi(() => Hub.Windows.ShowMain());
         // Any of several notifications could have been clicked: show them all (the alerts list) rather than guess.
         Hub.Tray.SeveralClicked += () => Hub.OnUi(() => Hub.Windows.OpenAlert(null));
-        Hub.Tray.SettingChanged += area =>
-        {
-            if (area is "ImmersiveColorSet" && Hub.S.General.Theme == "system") Hub.OnUi(() => Hub.Theme.Apply(Hub.S.General));
-        };
+        Hub.Tray.SettingChanged += OnTraySettingChanged;
+        Hub.Tray.TimeChanged += OnReminderClockChanged;
+        Hub.Tray.PowerChanged += OnReminderClockChanged;
         _trayController = new TrayController(firstIcon);
         _trayController.Update();
         _single!.Listen(cmd => Hub.OnUi(() => HandleCommand(cmd)));
@@ -190,11 +192,11 @@ public partial class App : Application
         Autostart.Sync(Hub.S.General.LaunchAtStartup, installed: Hub.Updates.IsInstalled);
 
         Hub.Images.Start();
+        Hub.Core.Start(runAgents: !Sandbox.OfflineComponents);
         if (!Sandbox.OfflineComponents)
         {
             _mediaInitialization = Hub.Media.InitAsync();
             Hub.System.Start(TimeSpan.FromSeconds(20));
-            Hub.Core.Start();
             Hub.Windows.StartIdleTrim();
             Hub.Ollama.Start();
             Hub.Updates.Start();
@@ -208,6 +210,18 @@ public partial class App : Application
         if (!args.Background || Hub.Core.Settings.IsFirstRun) Hub.Windows.ShowMain(args.Page);
         if (args.Command is { } command and not "activate") Dispatcher.BeginInvoke(() => HandleCommand(command), DispatcherPriority.ApplicationIdle);
         Log.Info("app", $"Aqua Hub started{(Sandbox.Enabled ? " (dry-run E2E mode)" : "")}");
+    }
+
+    private static void OnReminderClockChanged()
+    {
+        TimeZoneInfo.ClearCachedData();
+        Hub.Core.Reminders.ClockChanged();
+    }
+
+    private static void OnTraySettingChanged(string? area)
+    {
+        if (area is "ImmersiveColorSet" && Hub.S.General.Theme == "system") Hub.OnUi(() => Hub.Theme.Apply(Hub.S.General));
+        if (string.Equals(area, "intl", StringComparison.OrdinalIgnoreCase)) OnReminderClockChanged();
     }
 
     /// <summary>English (Ireland/UK) abbreviates September as "Sept", which looks odd beside "Oct" in compact dates.</summary>
@@ -317,7 +331,10 @@ public partial class App : Application
         // alive until process exit; normal Quit awaits them with the dispatcher still running.
         if (!_shutdownComplete && Hub.Core is not null)
         {
+            Cleanup(() => { if (Hub.Actions is not null) _ = Hub.Actions.StopReminderSceneAsync(); });
             Cleanup(() => { _ = Hub.Core.Agents.StopAsync(); });
+            Cleanup(() => { _ = Hub.Core.Streams.StopAsync(); });
+            Cleanup(() => { _ = Hub.Core.YouTubeAccount.StopAsync(); });
             Cleanup(() => { if (Hub.LocalAi is not null) _ = Hub.LocalAi.StopAsync(); });
             Cleanup(() => { if (Hub.Ask is not null) _ = Hub.Ask.StopAsync(); });
         }
@@ -325,6 +342,12 @@ public partial class App : Application
         if (_shutdownComplete) Cleanup(() => Hub.Core?.Dispose());
         Cleanup(() => Hub.LlamaHost?.Dispose());
         Cleanup(() => Hub.Hotkeys?.Dispose());
+        if (Hub.Tray is { } tray)
+        {
+            tray.TimeChanged -= OnReminderClockChanged;
+            tray.PowerChanged -= OnReminderClockChanged;
+            tray.SettingChanged -= OnTraySettingChanged;
+        }
         Cleanup(() => Hub.Tray?.Dispose());
         Cleanup(() => Hub.System?.Dispose());
         Cleanup(() => _single?.Dispose());

@@ -13,6 +13,8 @@
                     <TextBlock Text="{Binding Subline}" Style="{StaticResource T.Body2}" Margin="0,6,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button x:Name="OpenDeckButton" Style="{StaticResource Btn.Standard}" Content="Deck" Margin="0,0,8,0"
+                            Click="OnShowDeck" AutomationProperties.AutomationId="today-show-deck"/>
                     <!-- Refresh lives in the title bar (and F5); the page's one primary action is listening to the brief. -->
                     <Button Style="{StaticResource Btn.Accent}" Command="{Binding ReadBriefCommand}" AutomationProperties.AutomationId="read-brief"
                             AutomationProperties.Name="{Binding ReadLabel}">
@@ -243,13 +245,17 @@
                 <!-- ═══ Upcoming ═══ -->
                 <c:Card Title="Coming up" Icon="upcoming">
                     <c:Card.HeaderAction>
-                        <Button Style="{StaticResource Btn.Icon}" Command="{Binding Go}" CommandParameter="upcoming" ToolTip="Open agenda" Width="28" Height="28">
-                            <c:Icon Kind="chevron-right" Width="14" Height="14"/>
-                        </Button>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Style="{StaticResource Btn.Link}" Content="Add reminder" Click="OnAddReminder"
+                                    AutomationProperties.AutomationId="today-add-reminder"/>
+                            <Button Style="{StaticResource Btn.Icon}" Command="{Binding Go}" CommandParameter="upcoming" ToolTip="Open agenda" Width="28" Height="28">
+                                <c:Icon Kind="chevron-right" Width="14" Height="14"/>
+                            </Button>
+                        </StackPanel>
                     </c:Card.HeaderAction>
                     <StackPanel>
                         <ItemsControl ItemsSource="{Binding Events}" ItemTemplate="{StaticResource Tpl.EventRow}"/>
-                        <TextBlock Text="Nothing scheduled — add a calendar in Settings → Agenda." Style="{StaticResource T.Body2}"
+                        <TextBlock Text="No upcoming calendar events." Style="{StaticResource T.Body2}"
                                    Visibility="{Binding Events, Converter={StaticResource VisNot}}"/>
                     </StackPanel>
                 </c:Card>

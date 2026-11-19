@@ -132,7 +132,62 @@ off. It must not be used by tests against the owner's service. Other local/remot
 may include paths. Copy/export is explicit and never needs prompts, answers or API keys. Server kind/size/mtime is a
 compatibility-cache fingerprint, not cryptographic authenticity. Exact artifact provenance is incomplete in older records.
 
-## 6. Chat and image retention
+## 6. Chat, image and stream retention
+
+### Stream accounts and metadata
+
+Twitch's client ID is public settings data; its token pair/account metadata live only in `AquaHub/twitch.connection` in
+Credential Manager, never in settings JSON. Device sign-in requests only `user:read:follows` and opens Twitch's validated
+HTTPS activation address in the browser; no app secret, password capture, embedded login or Aqua backend is used. The
+authenticated HTTP client refuses redirects. Responses and credential syntax/size are bounded; raw provider errors or
+token values are not put in user errors or logs. Refresh rotation is serialised, replacements are saved before further
+network work, and cancelled/obsolete sign-in cannot restore a disconnected account.
+
+Disconnect deletes local credentials and cached Twitch observations, then requests revocation of the current access
+token. If Twitch cannot confirm revocation, the UI explains how to remove the connection in Twitch settings. Switching
+the public client ID clears the old local connection. Saved stream observations include public broadcast titles and
+followed-channel metadata; they are unencrypted local profile data, separate from posts and automatic AI summaries.
+
+YouTube checks public channel pages without Google keys, browser cookies or sign-in, using the existing reject-consent
+headers. The page adapter does not execute JavaScript or render remote HTML. It extracts recognised live metadata under
+strict response/depth/work bounds and constructs canonical provider links. Checks are opt-in, visibility-bound and
+cached; third-party page changes can interrupt detection. E2E uses synthetic observations and intercepts browser/auth
+actions; it cannot certify real account login, credential-vault operations or account revocation.
+
+Optional Google connection requests `youtube.readonly` solely to list subscriptions. It does not request write/chat
+permissions or change the user's subscriptions. Desktop configuration import accepts only bounded installed-client
+fields; token/API destinations are fixed in code. Browser OAuth uses S256 PKCE, fresh state and a temporary loopback
+listener bound to `127.0.0.1`, checking host/path/state and rejecting duplicate parameters. The listener is bounded by
+time/request limits and closes on cancel/navigation/exit. It serves only static text without reflecting OAuth values.
+Provider HTTP refuses redirects and bounds parsing/pagination. Tokens/codes/raw provider errors never enter logs or AI.
+
+Google access tokens stay in memory; bounded refresh tokens and Desktop client configuration use separate read-back-
+verified Credential Manager entries under `AquaHub/youtube.google.*`, scoped by a hash of the profile's database path.
+The installed client secret is not a confidential server credential and is never put in settings JSON. Imported names
+and channel IDs are unencrypted private local data in `account:youtube-subscriptions`; only explicitly selected live
+channel IDs/names enter settings. Neither catalogue nor live observations enter feed search or automatic AI context.
+Manual sync preserves successful cached data/time on transport failures and reports partial lists at 1,000 entries.
+Disconnect clears the refresh credential, imported catalogue and Google-only selections before requesting revocation;
+the client configuration remains for reconnecting. Manual upload channels remain. Stale completions cannot restore
+removed data. Local deletion follows normal SQLite/settings semantics; it is not secure erasure of historical file bytes.
+
+Publishing this source does not publish the user's runtime OAuth tokens. Twitch explicitly treats client IDs as public;
+Google Desktop clients are public clients whose installed-client secret cannot be kept confidential. An identifier alone
+does not authorise account access, and PKCE binds Google's authorization code to the initiating request. Public clients
+do not prove the authenticity of an arbitrary distributed binary; user consent and trusting the app remain necessary.
+Keep personal client exports outside Git even though the Desktop client fields are not account access tokens. Common
+`client_secret_*.json` and `credentials.json` filenames are ignored; this does not detect every renamed export or remove
+anything already committed. Access/refresh tokens and confidential web-app secrets must remain private.
+
+Google's consent branding can expose the configured user-support email to people authorising the client. Use an
+appropriate project contact for a shared app; a public client ID is not a guarantee of anonymous publisher identity.
+Google documents that display in its [branding guidance](https://support.google.com/cloud/answer/15549049).
+Aqua requests no Google email/profile identity scope, but `youtube.readonly` grants broader YouTube read access than the
+subscription-list endpoint Aqua actually calls. Cached channel choices/subscriptions can reveal interests if the local
+profile/database is shared or committed. Windows Credential Manager does not defend against malware running as the
+same Windows user. These are implemented boundaries and remaining risks, not a claim of zero vulnerabilities.
+
+### Chats and generated images
 
 Chats, notes, summaries and brief retained source excerpts live in the local database. Unstarred chat retention defaults
 to 30 days; deleting a chat or disabling stored chats removes its associated data and cancels in-flight saving. Per-chat
@@ -172,6 +227,19 @@ After the 45-second bound or Windows session termination, still-used dependencie
 the model job closes. An unresolved Comfy reservation/marker remains; external Comfy processes are not killed on exit.
 
 ## 7. Persistence, updates and supply chain
+
+Personal reminders store plain text in the local profile database. The reminder and its bell entry are readable by
+the signed-in Windows user. A visible notification can expose the title through Windows notification settings.
+The scheduled effect is an Aqua alert with internal navigation to Upcoming and a Windows tone when notifications
+and sound are allowed. Personal reminders stay outside calendar ingestion, Ask context, feed search and external
+requests. An explicit delete or one-off completion
+removes the live record and its pending bell entry; normal SQLite/WAL retention applies to their historical bytes.
+Deck position and visibility are local profile settings.
+
+An optional scene ID is a reference to an existing saved Launchpad scene. Due processing can create the alert.
+Execution requires a separate human review and **Run now** in Upcoming, with the current scene and configured
+targets checked against the review. Removal or replacement invalidates a stale action. The local occurrence claim
+prevents an accidental duplicate run. Scene actions use the existing configured Launchpad targets and effect guards.
 
 Profile data is under `%LOCALAPPDATA%/AquaHub` (or an explicit profile override); the versioned installation is separate
 under `%LOCALAPPDATA%/AquaHub.App`. User-selected model/output folders have their own ownership rules. No database,

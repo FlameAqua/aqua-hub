@@ -304,7 +304,7 @@ public sealed class PredictionScoutAgent : Agent
     }
 }
 
-public sealed class EventsScoutAgent : Agent
+public sealed class EventsScoutAgent(TimeProvider? time = null) : Agent
 {
     public override string Id => "events-scout";
     public override string Name => "Agenda Scout";
@@ -315,8 +315,11 @@ public sealed class EventsScoutAgent : Agent
     public override async Task<AgentResult> RunAsync(HubContext ctx, CancellationToken ct)
     {
         var e = ctx.S.Events;
-        var from = DateTimeOffset.Now.AddHours(-2);
-        var to = DateTimeOffset.Now.AddDays(e.LookaheadDays);
+        var clock = time ?? TimeProvider.System;
+        var now = clock.GetLocalNow();
+        var midnight = new DateTimeOffset(now.Date, clock.LocalTimeZone.GetUtcOffset(now.Date));
+        var from = midnight < now.AddHours(-2) ? midnight : now.AddHours(-2);
+        var to = now.AddDays(e.LookaheadDays);
         var all = new List<HubEvent>();
         var notes = new List<string>();
 
@@ -355,7 +358,7 @@ public sealed class EventsScoutAgent : Agent
             else notes.Add("add a free Finnhub key for earnings dates");
         }
 
-        var events = all.Where(x => x.Start >= from && x.Start <= to)
+        var events = all.Where(x => x.Start <= to && (x.Start >= from || x.End > from))
             .GroupBy(x => x.Id).Select(g => g.First())
             .OrderBy(x => x.Start).ToList();
         ctx.State.SetEvents(events);

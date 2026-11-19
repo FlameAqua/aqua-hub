@@ -46,7 +46,7 @@ Do not introduce a second scheduler, settings store or GPU owner. A wholesale de
 
 ## 2. Collection, scheduling and publication
 
-`HubCore.CreateAgents()` registers 15 agents: collectors feed clustering/editorial work, market analysis and Foresight;
+`HubCore.CreateAgents()` registers 16 agents: collectors feed clustering/editorial work, market analysis and Foresight;
 the brief combines their results, while Sentinel and housekeeping maintain alerts and stored data.
 
 - `AgentRuntime` normally ticks each second. It bounds collectors to three concurrent runs and AI agents to one.
@@ -71,6 +71,47 @@ preserve selection/expansion. This reduces refresh work; it is not a guarantee o
 Settings are copy-on-write. `SettingsStore` validates, migrates and atomically persists settings; forms use a three-way
 merge so unrelated changes from the tray or another page survive. New settings need defaults, validation, migration
 where needed, and a clear owner. Do not save a stale whole settings object from a page.
+
+### Live streams (5.3)
+
+`StreamsSession` owns public-page refresh and Twitch sign-in/credential rotation. `StreamScoutAgent` requests checks
+while Social is visible; source state lives in a separate bounded `StreamsSnapshot`, persisted as `state:streams`.
+It is not inserted into feed-item search, Pulse or automatic AI prompts. Native rows retain identities between updates.
+Persisted data is bounded and canonical provider URLs are revalidated before display/opening.
+
+Both providers are opt-in under `social.streams`. Twitch checks followed live channels with a user token and the
+`user:read:follows` scope. Public-client device OAuth uses an independent non-redirecting HTTP client, bounded JSON and
+minimum polling intervals. Sign-in can be cancelled; credential replacement is serialised and versioned so disconnect or
+client-ID changes reject late completions. Rotated refresh tokens are saved before validation, since they are single-use.
+Stored access tokens are validated before first use and hourly while checks run; rejected access can renew once, and
+rejected refresh clears the local connection. Secret-store writes/deletes are checked by reading back. Normal exit cancels/joins stream work
+before HTTP disposal; Core async disposal has a shared identity, and synchronous disposal starts observed async cleanup.
+
+YouTube reads only constructed HTTPS `/channel/<validated-id>/streams` addresses with existing reject-consent headers.
+Responses are limited to 4 MiB, JSON depth/work is bounded and only recognised live badges in the selected channel tab
+are accepted. Unknown page layouts fail rather than replacing cached data with an empty list. Checks cover at most six
+selected channels every 15 minutes while Social is open; manual checks have a one-minute floor. `SourceHealth` handles
+repeated failures, and separate attempted/success timestamps prevent rapid retries while retaining honest age/error data.
+Navigation, hiding and minimising cancel visible-page work. Manual refresh uses the agent runtime and respects
+pause/disable; shutdown joins refresh and sign-in before their HTTP clients are disposed.
+
+`YouTubeAccount` separately owns optional Google Desktop OAuth and manually synced subscriptions. It opens the system
+browser with authorization code/S256 PKCE and random state, listening only on a random `127.0.0.1` port for at most
+three minutes. Callback host/path/state and duplicate parameters are checked; requests and responses are bounded.
+It imports only validated Desktop client fields; configuration endpoints cannot redirect authenticated requests.
+The YouTube API requests only `youtube.readonly`, paginates `subscriptions.list?mine=true` at 50 items/page and stops
+at 20 pages/1,000 subscriptions with an explicit partial-list indicator. No automatic subscription polling is added.
+API failures preserve the prior successful catalogue/time. Invalid refresh credentials require reconnect.
+
+Access tokens stay in memory. Desktop configuration and refresh credentials use separate, read-back-verified Windows
+credential entries suffixed by a profile-path hash. The private catalogue is stored outside HubState/feed/AI, at
+`account:youtube-subscriptions`. Settings retain only chosen channel ID/name pairs in `social.streams.youTubeSelection`;
+null preserves the previous first-six saved-channel behaviour, while an empty list remains empty. The searchable,
+virtualised picker combines saved upload channels and imported subscriptions without changing the upload feed list.
+Successful complete syncs reconcile selections; partial lists cannot prove an old selection was unsubscribed.
+Disconnect/configuration replacement clears imported metadata and Google-only selections before revocation; epoch
+checks reject late results. Manual upload channels remain. Normal/forced shutdown cancels, joins and disposes owned
+Google work. Sign-in/sync can be cancelled and navigation cancels the page's operation.
 
 ## 3. AI routing and the GPU
 
@@ -219,6 +260,48 @@ The Roleplay tab uses Creative/Main with bounded session context and no Ask PC/w
 does not exist yet; it belongs to Phase 9. Image Gen shipped early from that phase.
 
 ## 7. Windows effects, storage and updates
+
+### Agenda, reminders and the deck
+
+Upcoming projects the existing read-only agenda snapshot onto one selected local day. Agenda Scout widens its
+existing read window to include the start of today and retains events that overlap that window. The UI uses pages
+of 60 source events and preserves matching rows when the selected day or snapshot changes. Today is the entry
+point for the floating deck. The shell owns the deck across navigation. Normalized position and hidden state are
+profile settings. Move by dragging, with arrow keys on the handle, or through UI Automation. **Today’s agenda** resets
+the selected day. Quick reminders use the same local store and an elapsed 5-, 15- or 30-minute deadline. The existing settings
+store replaces the file atomically, including while shareable readers have it open.
+
+`ReminderService` owns reminder policy and persistence. The existing `AgentRuntime` tick checks the next due instant,
+local midnight, retry time and clock revision without reading storage on idle ticks. It schedules at most one reminder
+check, including while collectors are paused, and joins reminder work before shutdown. The tray message window signals
+clock, regional settings and power changes. The service serializes checks and edits on a worker with up to eight
+outstanding operations. Once a SQLite transaction starts it finishes; queued operations can be cancelled.
+
+New and rescheduled reminders start in the next five years. One-offs and snoozes keep an instant. Daily and weekly
+schedules use local wall time. A one-off entered in a daylight-saving gap is rejected. A repeat advances by the gap,
+and an ambiguous time uses the earlier instant. The latest due occurrence per repeat wins
+after a gap. Work within five minutes can create an alert; older work is marked Missed. Each repeat retains at most
+one outstanding occurrence alongside its next nominal date. A later occurrence replaces the earlier outstanding one.
+Done removes that occurrence, or the whole record for a one-off. Snooze requests another delivery after ten minutes.
+
+An additive SQLite table holds up to 200 reminder records, with titles limited to 120 characters and a 512 KiB stored
+read limit. There is no completed occurrence history. The calendar feed cache and alert bell can be cleared separately.
+A schedule identity, nominal occurrence and delivery attempt identify the bell row. The cursor and alert writes commit
+in one transaction before the app requests delivery. This prevents duplicate delivery after restart or bell clearing.
+A process exit between commit and a notification request can leave the reminder in the agenda and bell without a toast.
+The existing notification policy governs pop-ups, including quiet hours and fullscreen. The Calendar reminders
+switch controls imported event alerts. An immediate personal reminder requests the Windows notification sound, subject
+to Aqua's notification policy and Windows sound settings. Held summaries are silent. The held-summary queue stays
+in memory. A restart preserves the agenda and bell record while discarding the queued pop-up. Editing,
+finishing or deleting an occurrence withdraws its pending Aqua alert. Windows controls notifications Aqua handed off.
+
+A reminder can reference a saved Launchpad scene by ID. When the occurrence is Due or Missed, Upcoming offers the
+current scene steps for review. The explicit **Run now** action checks the current scene and relevant configured app
+targets against that review and atomically claims the occurrence before using the existing scene executor. Only one
+confirmed reminder scene runs at a time. A run request remains recorded across snooze and restart. A new recurring
+occurrence can offer its own run. The user marks Done separately. Cancel stops the remaining steps, and deleting,
+snoozing or rescheduling the occurrence withdraws authority for the next step. Quit cancels and joins this owned work.
+Effects already begun retain their existing OS semantics.
 
 `IPlatform`, `ISecretStore`, `ILlamaProcessHost` and Ask's platform/tool adapters provide existing test seams. Core still
 contains some Windows-specific path logic, and several UI services use static `Hub`; these are migration targets when

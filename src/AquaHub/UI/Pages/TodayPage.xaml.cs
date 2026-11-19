@@ -1,4 +1,6 @@
 using System.Windows.Controls;
+using System.Windows;
+using AquaHub.Services;
 using AquaHub.UI.Shell;
 using AquaHub.UI.ViewModels;
 
@@ -21,4 +23,7 @@ public partial class TodayPage : UserControl, IPage
     }
 
     public void OnNavigatedFrom() => _vm.Detach();
+    internal void FocusDeckButton() => OpenDeckButton.Focus();
+    private void OnShowDeck(object sender, RoutedEventArgs e) => Hub.Windows.Main?.ReopenDeck();
+    private void OnAddReminder(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("upcoming", "new-reminder");
 }

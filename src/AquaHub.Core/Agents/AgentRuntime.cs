@@ -4,6 +4,7 @@ using AquaHub.Core.Ai;
 using AquaHub.Core.Data;
 using AquaHub.Core.Models;
 using AquaHub.Core.Net;
+using AquaHub.Core.Reminders;
 using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
 
@@ -20,6 +21,7 @@ public interface IPlatform
     bool IsUiVisible { get; }
     /// <summary>Deliver a notification (the platform applies quiet hours / do-not-disturb rules).</summary>
     void Notify(HubAlert alert);
+    void WithdrawReminderAlerts(IReadOnlyCollection<string> alertIds) { }
 }
 
 public sealed class NullPlatform : IPlatform
@@ -41,6 +43,7 @@ public sealed class HubContext
     public required HubState State { get; init; }
     public required ISecretStore Secrets { get; init; }
     public required IPlatform Platform { get; init; }
+    public Sources.StreamsSession? Streams { get; init; }
     public HubSettings S => Settings.Current;
 
     /// <summary>
@@ -110,6 +113,7 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
     }
 
     private readonly HubContext _ctx;
+    private readonly ReminderService? _reminders;
     private readonly List<Slot> _slots = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _collectors = new(3);
@@ -120,7 +124,11 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
     private Task? _shutdown;
     private bool _stopping;
 
-    public AgentRuntime(HubContext ctx) => _ctx = ctx;
+    public AgentRuntime(HubContext ctx, ReminderService? reminders = null)
+    {
+        _ctx = ctx;
+        _reminders = reminders;
+    }
 
     /// <summary>How often the scheduler looks for agents that are due (tests make it quicker).</summary>
     internal TimeSpan Tick { get; init; } = TimeSpan.FromSeconds(1);
@@ -175,12 +183,12 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
         }
     }
 
-    public void Start()
+    public void Start(bool runAgents = true)
     {
         lock (_slots)
         {
             ObjectDisposedException.ThrowIf(_stopping, this);
-            _loop ??= Task.Run(() => LoopAsync(_cts.Token));
+            _loop ??= Task.Run(() => LoopAsync(runAgents, _cts.Token));
         }
     }
 
@@ -241,13 +249,14 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task LoopAsync(CancellationToken ct)
+    private async Task LoopAsync(bool runAgents, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                if (!Paused)
+                _reminders?.CheckIfDue();
+                if (runAgents && !Paused)
                 {
                     List<Slot> due;
                     var now = DateTimeOffset.Now;
@@ -420,14 +429,15 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
             if (_shutdown is not null) return _shutdown;
             _stopping = true;
             _cts.Cancel();
-            return _shutdown = JoinAsync();
+            return _shutdown = JoinAsync(_reminders?.StopAsync() ?? Task.CompletedTask);
         }
     }
 
-    private async Task JoinAsync()
+    private async Task JoinAsync(Task reminders)
     {
         if (_loop is not null) await _loop.ConfigureAwait(false);
         await Task.WhenAll(_inflight.Values.ToArray()).ConfigureAwait(false);
+        await reminders.ConfigureAwait(false);
         lock (_slots)
             foreach (var slot in _slots)
                 slot.Completion?.TrySetResult(new(AgentRunEnd.Paused, slot.Status));

@@ -2,6 +2,7 @@ using AquaHub.Core.Agents;
 using AquaHub.Core.Ai;
 using AquaHub.Core.Data;
 using AquaHub.Core.Net;
+using AquaHub.Core.Reminders;
 using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
 
@@ -43,6 +44,7 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
     public LlmClient Llm { get; }
     public HubState State { get; }
     public AgentRuntime Agents { get; }
+    public ReminderService Reminders { get; }
     public AskService Ask { get; }
     /// <summary>Ask Aqua's tool-using engine (web, files, research).</summary>
     public Ai.Assistant.AskAgent Assistant { get; }
@@ -55,6 +57,10 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
     public CommandInterpreter Commands { get; }
     public HubContext Context { get; }
     public ISecretStore Secrets { get; }
+    public Sources.StreamsSession Streams { get; }
+    public Sources.YouTubeAccount YouTubeAccount { get; }
+    private Task? _disposal;
+    private readonly object _disposalGate = new();
     /// <summary>Whisper speech recognition, installed on request (Settings › Ask Aqua › Voice).</summary>
     public Speech.WhisperSetup Whisper { get; }
     /// <summary>Aqua's own model runtime (llama.cpp), installed on request (Settings › AI & models).</summary>
@@ -82,6 +88,8 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
         Llm = new LlmClient(() => Settings.Current.Ai, secrets);
         State = new HubState(Db);
         State.Load();
+        Streams = new Sources.StreamsSession(Settings, State, Http, secrets);
+        YouTubeAccount = new Sources.YouTubeAccount(Settings, Db, secrets);
         Context = new HubContext
         {
             Settings = Settings,
@@ -91,8 +99,10 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
             State = State,
             Secrets = secrets,
             Platform = platform,
+            Streams = Streams,
         };
-        Agents = new AgentRuntime(Context);
+        Reminders = new ReminderService(Db, State, platform);
+        Agents = new AgentRuntime(Context, Reminders);
         foreach (var agent in CreateAgents()) Agents.Register(agent);
         Ask = new AskService(Db, State, Llm, () => Settings.Current);
         WebSearch = new WebSearch(Http, () => Settings.Current, secrets);
@@ -118,6 +128,7 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
         new NewsScoutAgent(),
         new StoryCuratorAgent(),
         new SocialScoutAgent(),
+        new StreamScoutAgent(),
         new MarketWatchAgent(),
         new PredictionScoutAgent(),
         new EventsScoutAgent(),
@@ -130,19 +141,21 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
         new KeeperAgent(),
     };
 
-    public void Start() => Agents.Start();
+    public void Start(bool runAgents = true) => Agents.Start(runAgents);
 
     public void Dispose()
     {
-        Agents.Dispose();
-        Llm.Dispose();
-        WebReader.Dispose();
-        Http.Dispose();
+        var task = DisposeAsync().AsTask();
+        if (!task.IsCompletedSuccessfully)
+            _ = task.ContinueWith(t => { if (t.Exception is { } error) Log.Error("core", "Cleanup failed", error); }, TaskScheduler.Default);
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() { lock (_disposalGate) return new(_disposal ??= DisposeOwnedAsync()); }
+    private async Task DisposeOwnedAsync()
     {
-        await Agents.StopAsync().ConfigureAwait(false);
+        await Task.WhenAll(Agents.StopAsync(), Streams.StopAsync(), YouTubeAccount.StopAsync()).ConfigureAwait(false);
+        await Streams.DisposeAsync().ConfigureAwait(false);
+        await YouTubeAccount.DisposeAsync().ConfigureAwait(false);
         Llm.Dispose();
         WebReader.Dispose();
         Http.Dispose();

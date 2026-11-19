@@ -38,6 +38,17 @@ public sealed class TempDir : IDisposable
 public class SettingsTests
 {
     [Fact]
+    public void DeckSettingsReplaceFileWhileShareableReaderHasItOpen()
+    {
+        using var folder = new TempDir();
+        var path = Path.Combine(folder.Path, "settings.json");
+        var store = new SettingsStore(path);
+        using var reader = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        store.Update(s => s.Deck = new(Hidden: true, X: 0.75, Y: 0.25));
+        Assert.Equal(new DeckSettings(true, 0.75, 0.25), new SettingsStore(path).Current.Deck);
+    }
+
+    [Fact]
     public void ValidationClampsAndRejectsUnsafeValues()
     {
         var s = new HubSettings();

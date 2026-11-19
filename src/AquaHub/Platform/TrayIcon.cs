@@ -32,6 +32,7 @@ public sealed class TrayIcon : IDisposable
     public event Action<int>? Hotkey;
     public event Action<string?>? SettingChanged;
     public event Action? PowerChanged;
+    public event Action? TimeChanged;
 
     public IntPtr Handle => _window.Handle;
 
@@ -71,14 +72,19 @@ public sealed class TrayIcon : IDisposable
     /// </summary>
     public void Notify(string title, string body, bool quiet = false, Action? onClick = null)
     {
-        if (Sandbox.Intercept("toast", title)) return;
+        var flags = Native.NIIF_USER | Native.NIIF_LARGE_ICON | Native.NIIF_RESPECT_QUIET_TIME | (quiet ? Native.NIIF_NOSOUND : 0);
+        if (Sandbox.Intercept("toast", title))
+        {
+            if ((flags & Native.NIIF_NOSOUND) == 0) Sandbox.Record("toast-sound", title);
+            return;
+        }
         if (!_added) return;
         _balloonClick = onClick;
         _shownSinceClick++;
         var data = NewData(Native.NIF_INFO);
         data.szInfoTitle = Trim(title, 63);
         data.szInfo = Trim(string.IsNullOrWhiteSpace(body) ? " " : body, 255);
-        data.dwInfoFlags = Native.NIIF_USER | Native.NIIF_LARGE_ICON | Native.NIIF_RESPECT_QUIET_TIME | (quiet ? Native.NIIF_NOSOUND : 0);
+        data.dwInfoFlags = flags;
         data.hBalloonIcon = _largeIcon;
         Native.Shell_NotifyIconW(Native.NIM_MODIFY, ref data);
     }
@@ -155,6 +161,10 @@ public sealed class TrayIcon : IDisposable
         else if (msg == Native.WM_POWERBROADCAST)
         {
             PowerChanged?.Invoke();
+        }
+        else if (msg == Native.WM_TIMECHANGE)
+        {
+            TimeChanged?.Invoke();
         }
         return IntPtr.Zero;
     }

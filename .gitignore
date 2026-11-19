@@ -11,3 +11,7 @@ release-notes.md
 /docs/handoff/
 /docs/screenshots/
 /artifacts/phase4/
+/artifacts/phase5/
+# Personal Google OAuth client exports; import these from outside the repository.
+client_secret_*.json
+credentials.json

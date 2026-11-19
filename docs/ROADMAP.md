@@ -9,9 +9,9 @@ reference upgrades committed as `86f5ec6`. Adrian retains direction, commits and
 | Order | Work | Status |
 |---|---|---|
 | Done | Phases 1–3: hub, fixes, Ask tables/maths/notes/compression/chat images | Shipped through 1.3.0 |
-| 1 | Finish Phase 4, including 4.5/4.6 | Current priority after documentation/maintenance |
-| 2 | **5.3 / 5.4:** live streams and X | Keep; no reaction/personalization dependency |
-| 3 | **7:** everyday wins | Next |
+| 1 | Phase 4, including 4.5/4.6 | Implementation and modular checks delivered; targeted live/performance follow-ups remain |
+| 2 | **5.3 / 5.4:** live streams and X | 5.3 linking confirmed by owner; remaining acceptance below. 5.4 deferred: paid APIs conflict with free-only scope |
+| 3 | **7:** everyday wins | Deck, quick reminders, day agenda and confirmed scene actions implemented. Trading 212 deferred by Adrian |
 | 4 | **8:** powerful file and semantic search | Needs a dedicated design/acceptance pass |
 | 5 | **9:** remaining voice and creativity features | Image Gen already delivered early |
 | 6 | **6:** user-built agents and deeper health tools | Later |
@@ -75,7 +75,8 @@ cannot establish the real GPU handoff. Verify explicit-file grants and imported 
   Long-chat dispatcher stalls still exceed the proposed 50 ms target; broader interactive/theme/retained-memory acceptance
   is **open**, not a passed performance budget. The diagnostic is not desktop E2E or live model/GPU evidence.
 
-Phase 4 is not complete. Adrian authorized extending/modularizing desktop E2E coverage on 5 November. The runner now
+Phase 4's implementation and modular E2E coverage have been delivered. Live, lifecycle and performance acceptance
+remains open. Adrian authorized extending/modularizing desktop E2E coverage on 5 November. The runner now
 selects offline Models, Runtime, Ask, Images, Roleplay and Lifecycle groups; the full legacy suite requires `-All`.
 See [Development](DEVELOPMENT.md#targeted-desktop-components) for commands and isolation/evidence limits.
 
@@ -92,27 +93,57 @@ hashes. The normal Debug unit regression passed **1,218 / 23 skipped / 0 failed*
 not the live engine/GPU and performance acceptance above. Historical failures and final evidence are recorded in
 [Scoring](SCORING.md#5-november-2026-modular-e2e-completion).
 
-Additional unit-level regression authoring remains outside this E2E authorization: controlled scheduler start/finish
-signals, shutdown-with-active-workers, containment failure/failed-stop, post-header cancellation, context fallback,
-warm-up contention and reasoning control. Desktop fixture passes do not close live engine/GPU or performance acceptance.
+Additional regression backlog: controlled scheduler start/finish signals, shutdown-with-active-workers, containment
+failure/failed-stop, post-header cancellation, context fallback, warm-up contention and reasoning control. Adrian expanded
+test permission to unit/provider and E2E tests for the new stage on 6 November. Desktop fixture passes do not close live
+engine/GPU or performance acceptance; ongoing usage findings should also be recorded here as they appear.
 
 Mouse-button global shortcuts need a separate `WH_MOUSE_LL` design; RegisterHotKey cannot supply them. This is a carried
 improvement, not a prerequisite for streams or everyday features.
 
-## Next: 5.3 streams and 5.4 X
+## 5.3 streams; 5.4 X deferred
 
-- **5.3:** Twitch and YouTube live streams. Twitch's API route through Adrian's own registered app remains a decision.
-- **5.4:** X through Grok using an xAI key Adrian provides. Design access, disclosure, caching/rate limits and unavailable
-  states when implementing; the existing local-AI privacy policy cannot be silently reused as a cloud-data promise.
+- **5.3 implemented:** Social has a native Live streams card, source status and safe browser links. Sources contains
+  explicit Twitch/YouTube switches (off by default). Twitch uses an owner-registered **Public** client with browser/device
+  sign-in and read-only followed-stream scope; YouTube uses public channel pages, as Adrian selected. Updates run while
+  Social is open: Twitch at most once a minute, YouTube for up to six chosen channels every 15 minutes; Check now has a
+  one-minute floor. Failed checks preserve old data with its check time and error, and navigation/exit cancels owned work.
+  Streams remain outside AI Social summaries. Unit/provider and targeted desktop checks cover the new boundaries.
+  Optional Google Desktop OAuth imports/syncs a read-only subscription catalogue (manual sync, bounded at 1,000), with
+  an explicit six-channel live chooser. Saved upload channels remain separate. Twitch setup now distinguishes Client ID
+  from app name and gives prominent inline connection feedback.
+  **Owner feedback, 6 November:** Adrian confirms Twitch/YouTube link correctly and the channels appear as expected.
+  Actual long-term refresh, cancellation, disconnect/reconnect and live/offline transitions remain usage acceptance;
+  this report does not independently verify those paths. Public YouTube markup can change. Current public-page probes
+  found zero live streams on Gamers Nexus and two on Sky News.
+- **5.4 deferred by Adrian, 6 November:** implementation was conditional on a free integration. Official
+  [xAI X Search](https://docs.x.ai/developers/tools/x-search) bills fetched posts/profiles plus model tokens, and
+  [X API reads](https://docs.x.com/x-api/getting-started/pricing) require pay-per-usage credits. X account linking can use
+  [native OAuth/PKCE](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code), but it does not make
+  account/timeline API reads free. No Grok key, X connection or billable request has been added. A future paid proposal
+  needs explicit scope/budget approval, visible cloud-data disclosure and caching/spend controls. Phase 7 remains next
+  for its dedicated design discussion; deferral does not authorise implementing that whole phase automatically.
 
 These ship independently of reactions, interest decay or a For You ranking layer.
 
-## Then Phase 7: everyday wins
+## Phase 7: everyday wins
 
-The deck, reminders and scheduled tasks, calendar days, small daily conveniences, and Trading 212 beginning with CSV.
-Define the deck and first daily workflows with Adrian before implementation. Scheduling must specify recurrence,
-time-zone/DST changes, sleep/resume, missed tasks, restarts, deduplication, cancellation and notification behaviour.
-Trading 212 begins with local import/validation, not account automation or trading authority.
+- Today opens the floating deck, which stays within Aqua's main window across navigation. Move it, hide it and reopen
+  it from Today. It offers **Add reminder**, **Today’s agenda**, and one-tap 5-, 15- and 30-minute reminders.
+  Position and visibility are profile settings.
+- Upcoming shows scheduled reminders alongside read-only events for a selected day. It offers an all-reminders view,
+  editing and deletion, and **Done** or **Snooze 10 minutes** for due items. One-offs keep their instant. Daily and weekly
+  repeats follow the local PC clock. On launch or wake, the latest occurrence within five minutes can
+  alert, and older occurrences appear as **Missed**. Immediate reminder notifications request the Windows tone.
+  See [Architecture](ARCHITECTURE.md#agenda-reminders-and-the-deck)
+  for the schedule, notification and retention contracts.
+- Adrian approved linking a reminder to a saved Launchpad scene. When the item is due or missed, **Run scene** opens
+  a review of its current steps. **Run now** explicitly starts it. Done remains a separate action.
+- Adrian confirmed the reminder workflow, corrected theme labels and tone in his build. Real scene execution,
+  quiet hours/fullscreen, physical sleep/resume, changing system time zone, screen-reader announcements and the
+  large-day responsiveness workload remain manual acceptance.
+- Adrian deferred Trading 212. When resumed, it starts with a redacted sample and a locally validated CSV preview.
+  Calendar writes, additional account connections and sync need separate agreement.
 
 ## Then Phase 8: find anything
 

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using AquaHub.Core.Agents;
 using AquaHub.Core.Ai;
+using AquaHub.Core.Reminders;
 using AquaHub.Core.Settings;
 using AquaHub.Core.Util;
 using AquaHub.Platform;
@@ -12,7 +13,7 @@ namespace AquaHub.Services;
 /// Executes allow-listed hub actions (from the command palette, flyout, scenes or the command agent).
 /// Every target is resolved against user configuration — nothing here executes model-provided paths or URLs.
 /// </summary>
-public sealed class ActionExecutor
+public sealed partial class ActionExecutor
 {
     public async Task<string> ExecuteAsync(HubCommand cmd)
     {
@@ -34,7 +35,7 @@ public sealed class ActionExecutor
                 }
             case "media_play":
                 if (Hub.Media.HasSession) await Hub.Media.PlayAsync();
-                else await WakeMusicAsync();
+                else await WakeMusicAsync(s.Apps, CancellationToken.None);
                 return "Playing";
             case "media_pause":
                 // Without a session the only tool is the play/pause key, which would *start* playback — so do nothing
@@ -126,17 +127,18 @@ public sealed class ActionExecutor
         }
     }
 
-    private async Task WakeMusicAsync()
+    private async Task WakeMusicAsync(IEnumerable<AppEntry> apps, CancellationToken ct)
     {
-        var player = Hub.S.Apps.FirstOrDefault(a => a.IsMusicPlayer);
+        var player = apps.FirstOrDefault(a => a.IsMusicPlayer);
         if (player is not null && !Hub.Launcher.IsRunning(player))
         {
             Hub.Launcher.Launch(player);
-            await Task.Delay(3500);
+            await Task.Delay(3500, ct);
         }
         // No music app in the Launchpad: Windows' default one (Media Player unless you chose another).
         else if (player is null && DefaultApps.For("music") is { } music && !DefaultApps.IsRunning(music) && DefaultApps.Launch(music))
-            await Task.Delay(3500);
+            await Task.Delay(3500, ct);
+        ct.ThrowIfCancellationRequested();
         MediaController.SendMediaKey();
     }
 
@@ -169,68 +171,88 @@ public sealed class ActionExecutor
         await Hub.Speech.SpeakAsync(sb.ToString(), Hub.S.Location.Language);
     }
 
-    public async Task RunSceneAsync(Scene scene, IProgress<string>? progress = null)
+    public Task RunSceneAsync(Scene scene, IProgress<string>? progress = null) =>
+        RunSceneAsync(scene, Hub.S, progress, CancellationToken.None);
+
+    private async Task<bool> RunSceneAsync(Scene scene, HubSettings s, IProgress<string>? progress, CancellationToken ct,
+        Func<bool>? stillDue = null)
     {
-        var s = Hub.S;
+        var successful = true;
         foreach (var step in scene.Steps)
         {
+            ct.ThrowIfCancellationRequested();
+            if (stillDue is not null && !stillDue()) throw new ReminderException("The reminder changed. Remaining scene steps were stopped.");
             try
             {
                 progress?.Report(Describe(step, s));
                 switch (step.Action)
                 {
                     case "launch":
-                        if (s.Apps.FirstOrDefault(a => a.Id == step.Target) is { } la) Hub.Launcher.Launch(la);
+                        successful &= s.Apps.FirstOrDefault(a => a.Id == step.Target) is { } la
+                            && await Task.Run(() => Hub.Launcher.Launch(la), ct);
                         break;
                     case "close":
-                        if (s.Apps.FirstOrDefault(a => a.Id == step.Target) is { } ca) Hub.Launcher.Close(ca);
+                        if (s.Apps.FirstOrDefault(a => a.Id == step.Target) is { } ca)
+                            await Task.Run(() => Hub.Launcher.Close(ca), ct);
+                        else successful = false;
                         break;
                     case "focus":
-                        if (s.Apps.FirstOrDefault(a => a.Id == step.Target) is { } fa) Hub.Launcher.Focus(fa);
+                        successful &= s.Apps.FirstOrDefault(a => a.Id == step.Target) is { } fa
+                            && await Task.Run(() => Hub.Launcher.Focus(fa), ct);
                         break;
                     case "media":
-                        await ExecuteAsync(new HubCommand(step.Value switch
-                        {
-                            "play" => "media_play", "pause" => "media_pause", "next" => "media_next", "previous" => "media_previous", _ => "media_toggle",
-                        }));
+                        if (step.Value == "play" && !Hub.Media.HasSession) await WakeMusicAsync(s.Apps, ct);
+                        else
+                            await ExecuteAsync(new HubCommand(step.Value switch
+                            {
+                                "play" => "media_play", "pause" => "media_pause", "next" => "media_next", "previous" => "media_previous", _ => "media_toggle",
+                            }));
                         break;
                     case "volume":
                         if (int.TryParse(step.Value, out var vol)) Hub.Volume.SetVolume(vol);
+                        else successful = false;
                         break;
                     case "mute":
                         if ((Hub.Volume.IsMuted() == true) != (step.Value == "true")) Hub.Volume.ToggleMute();
                         break;
                     case "dnd":
-                        Hub.Core.Settings.Update(x => x.Notifications.DoNotDisturb = step.Value is "on" or "true");
+                        await Task.Run(() => Hub.Core.Settings.Update(x => x.Notifications.DoNotDisturb = step.Value is "on" or "true"), ct);
                         break;
                     case "ai":
                         await ExecuteAsync(new HubCommand(step.Value == "pause" ? "pause_ai" : "resume_ai"));
                         break;
                     case "open-url":
-                        AppLauncher.OpenUrl(step.Value);
+                        successful &= await Task.Run(() => AppLauncher.OpenUrl(step.Value), ct);
                         break;
                     case "open-page":
                         Hub.Windows.ShowMain(step.Value);
                         break;
                     case "wait":
                         if (double.TryParse(step.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var secs))
-                            await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(secs, 0, 30)));
+                            await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(secs, 0, 30)), ct);
+                        else successful = false;
                         break;
                     case "music-search":
-                        Hub.Launcher.MusicSearch(step.Value, s.Apps);
+                        successful &= await Task.Run(() => Hub.Launcher.MusicSearch(step.Value, s.Apps), ct);
                         break;
                     case "read-brief":
                         await ReadBriefAsync();
                         break;
+                    default:
+                        successful = false;
+                        break;
                 }
-                await Task.Delay(250);
+                await Task.Delay(250, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
+                successful = false;
                 Log.Warn("scene", $"Step {step.Action} failed", ex);
             }
         }
         Log.Info("scene", $"Ran scene {scene.Name}");
+        return successful;
     }
 
     public static string Describe(SceneStep step, HubSettings s)
@@ -241,7 +263,7 @@ public sealed class ActionExecutor
             "launch" => $"Open {App(step.Target)}",
             "close" => $"Close {App(step.Target)}",
             "focus" => $"Focus {App(step.Target)}",
-            "media" => step.Value switch { "play" => "Play music", "pause" => "Pause media", "next" => "Next track", _ => "Play/pause" },
+            "media" => step.Value switch { "play" => "Play music", "pause" => "Pause media", "next" => "Next track", "previous" => "Previous track", _ => "Play/pause" },
             "volume" => $"Volume {step.Value}%",
             "mute" => step.Value == "true" ? "Mute" : "Unmute",
             "dnd" => step.Value is "on" or "true" ? "Do not disturb on" : "Do not disturb off",

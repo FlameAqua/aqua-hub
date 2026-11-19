@@ -32,6 +32,34 @@
             <!-- Topics (AI) -->
             <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,24">
                 <StackPanel>
+                    <c:Card Title="Live streams" Icon="play" Subtitle="From channels you follow" Margin="0,0,0,12" AutomationProperties.AutomationId="social-streams">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,10">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Content="Sources" Click="OnStreamSources" Style="{StaticResource Btn.Standard}" Margin="0,0,6,0" AutomationProperties.AutomationId="streams-sources"/>
+                                    <Button x:Name="CheckStreams" Content="Check now" Click="OnCheckStreams" Style="{StaticResource Btn.Standard}" AutomationProperties.AutomationId="streams-refresh"/>
+                                </StackPanel>
+                                <TextBlock x:Name="StreamSummary" TextWrapping="Wrap" Style="{StaticResource T.Body2}" VerticalAlignment="Center" Margin="0,0,10,0" AutomationProperties.AutomationId="streams-summary" AutomationProperties.LiveSetting="Polite"/>
+                            </DockPanel>
+                            <TextBlock x:Name="StreamSourcesStatus" TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,0,0,8" AutomationProperties.AutomationId="streams-status"/>
+                            <ItemsControl x:Name="LiveStreams" AutomationProperties.AutomationId="streams-list">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource Btn.Standard}" HorizontalContentAlignment="Stretch" Padding="12,10" Margin="0,0,0,6" Click="OnOpenStream"
+                                                Tag="{Binding Url}" AutomationProperties.Name="{Binding AccessibleName}" AutomationProperties.AutomationId="stream-open">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding ChannelLine}" TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,4,0,0"/>
+                                                <TextBlock Text="{Binding Observation}" TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="Updates while Social is open. YouTube checks up to six selected channels every 15 minutes; Check now can recheck after one minute. Streams open in your browser."
+                                       TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </c:Card>
                     <c:Card Title="The pulse" Icon="fire" Badge="{Binding Badge}" Subtitle="{Binding Meta}" Background="{DynamicResource B.Hero}" BorderBrush="{DynamicResource B.AccentSoft}">
                         <TextBlock Text="{Binding Overview}" FontSize="15.5" LineHeight="24" TextWrapping="Wrap"/>
                     </c:Card>
