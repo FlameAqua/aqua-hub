@@ -4,33 +4,50 @@
              xmlns:c="clr-namespace:AquaHub.UI.Controls"
              xmlns:ui="clr-namespace:AquaHub.UI"
              xmlns:svc="clr-namespace:AquaHub.Services">
+    <UserControl.Resources>
+        <Style TargetType="c:SettingRow" BasedOn="{StaticResource {x:Type c:SettingRow}}">
+            <Setter Property="ShowDescription" Value="False"/>
+            <Setter Property="ReflowControls" Value="True"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+        <Style x:Key="SettingsGroupTitle" TargetType="TextBlock" BasedOn="{StaticResource T.CardTitle}">
+            <Setter Property="Margin" Value="2,17,0,8"/>
+        </Style>
+        <Style x:Key="SettingsLink" TargetType="Button" BasedOn="{StaticResource Btn.Link}">
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="Margin" Value="0,0,12,3"/>
+            <EventSetter Event="Click" Handler="OnRelatedSetting"/>
+        </Style>
+        <Style x:Key="SettingsSectionItem" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource B.Text}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="Row" CornerRadius="8" Padding="10,7" Background="Transparent" Margin="0,1,4,1">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource B.Subtle}"/></Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Row" Property="Background" Value="{DynamicResource B.AccentSoft}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource B.AccentText}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
+    </UserControl.Resources>
     <Grid Margin="32,26,20,0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <Grid Margin="0,0,12,16">
-            <StackPanel>
-                <TextBlock Text="Settings" Style="{StaticResource T.Title}"/>
-                <TextBlock Text="Changes apply instantly and are saved automatically." Style="{StaticResource T.Body2}" Margin="0,4,0,0"/>
-            </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <Button Style="{StaticResource Btn.Standard}" Click="OnEditJson" ToolTip="Open settings.json in Notepad (power users)">
-                    <StackPanel Orientation="Horizontal"><c:Icon Kind="copy" Width="14" Height="14"/><TextBlock Text="Edit JSON" Margin="8,0,0,0"/></StackPanel>
-                </Button>
-            </StackPanel>
-        </Grid>
-
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="210"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <StackPanel Margin="0,0,16,0" VerticalAlignment="Top">
-                <Grid Margin="0,0,0,10">
+        <DockPanel Margin="0,0,12,20" LastChildFill="True">
+                <Grid DockPanel.Dock="Right" Width="285" Margin="16,0,0,0">
                     <TextBox x:Name="SearchBox" ui:UiProps.Placeholder="Search settings" Padding="30,0,10,0" TextChanged="OnSearch"
-                             AutomationProperties.AutomationId="settings-search"/>
+                             ToolTip="Search settings (Ctrl+F)" AutomationProperties.Name="Search settings" AutomationProperties.AutomationId="settings-search"/>
                     <c:Icon Kind="search" Width="14" Height="14" Margin="11,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Center"
                             Foreground="{DynamicResource B.Text3}" IsHitTestVisible="False"/>
                     <Popup x:Name="SearchPopup" PlacementTarget="{Binding ElementName=SearchBox}" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" VerticalOffset="4">
@@ -53,20 +70,37 @@
                         </Border>
                     </Popup>
                 </Grid>
-                <ListBox x:Name="Sections" Style="{StaticResource PlainList}" SelectionChanged="OnSection">
+                <TextBlock Text="Settings" Style="{StaticResource T.Title}" VerticalAlignment="Center"/>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="194"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <ListBox x:Name="Sections" Style="{StaticResource PlainList}" SelectionChanged="OnSection"
+                     Margin="0,0,16,14" ItemContainerStyle="{StaticResource SettingsSectionItem}" AutomationProperties.Name="Settings categories">
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate><DataTemplate>
+                                <TextBlock Text="{Binding Name}" Style="{StaticResource T.Caption}" FontWeight="SemiBold" Margin="10,13,0,4"/>
+                            </DataTemplate></GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal">
-                                <c:Icon Kind="{Binding Icon}" Width="16" Height="16" Foreground="{DynamicResource B.Text2}"/>
+                                <c:Icon Kind="{Binding Icon}" Width="16" Height="16"/>
                                 <TextBlock Text="{Binding Name}" Margin="12,0,0,0"/>
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
-                </ListBox>
-            </StackPanel>
+            </ListBox>
 
-            <ScrollViewer x:Name="Scroller" Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,12,32">
-                <Grid MaxWidth="980" HorizontalAlignment="Left" x:Name="Panels">
+            <ScrollViewer x:Name="Scroller" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          HorizontalContentAlignment="Stretch" Padding="0,0,12,32">
+                <Grid MaxWidth="980" x:Name="Panels">
 
                     <!-- ═══ General ═══ -->
                     <StackPanel x:Name="P_general">
@@ -77,7 +111,7 @@
                         <c:SettingRow Icon="power" Title="Start with Windows" Description="Runs quietly in the tray so your agents stay current." Keywords="startup boot login autostart">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.LaunchAtStartup}"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="close" Title="Closing the window keeps Aqua Hub running" Description="Use the tray icon or hotkey to bring it back. Quit from the tray menu." Keywords="tray minimise minimize background close">
+                        <c:SettingRow Icon="close" Title="Keep running in the tray" Description="Closing the window keeps Aqua running. Use the tray icon or a shortcut to reopen it." Keywords="tray minimise minimize background close">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.CloseToTray}"/>
                         </c:SettingRow>
                         <c:SettingRow Icon="moon" Title="Theme" Keywords="dark mode light mode appearance">
@@ -109,14 +143,14 @@
                         <c:SettingRow Icon="eye" Title="Reduce motion" Description="Turn off page and panel animations." Keywords="animations accessibility">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.ReduceMotion}"/>
                         </c:SettingRow>
+                        <TextBlock Text="Related settings" Style="{StaticResource SettingsGroupTitle}"/>
+                        <Button Style="{StaticResource SettingsLink}" Content="Keyboard shortcuts" Tag="shortcuts"/>
                     </StackPanel>
 
                     <!-- ═══ Shortcuts ═══ -->
                     <StackPanel x:Name="P_shortcuts" Visibility="Collapsed">
                         <TextBlock Text="Shortcuts" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
-                        <TextBlock Text="Global shortcuts support keyboard keys only; Windows does not register mouse buttons as system-wide hotkeys."
-                                   Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,0,0,12"/>
-                        <c:SettingRow Icon="keyboard" Title="Quick panel hotkey" Description="Opens the quick panel from any app." Keywords="shortcut keyboard flyout widget">
+                        <c:SettingRow Icon="keyboard" Title="Quick panel hotkey" Description="Opens the quick panel from any app. Global shortcuts use keyboard keys." Keywords="shortcut keyboard flyout widget">
                             <StackPanel Orientation="Horizontal">
                                 <c:HotkeyBox x:Name="FlyoutHotkey" Text="{Binding General.HotkeyFlyout, UpdateSourceTrigger=PropertyChanged}" DefaultGesture="Ctrl+Alt+H" Width="200"/>
                                 <Button Style="{StaticResource Btn.Icon}" Margin="6,0,0,0" Click="OnResetHotkey" Tag="{Binding ElementName=FlyoutHotkey}"
@@ -288,16 +322,33 @@
 
                     <!-- ═══ Social ═══ -->
                     <StackPanel x:Name="P_social" Visibility="Collapsed">
-                        <TextBlock Text="Social" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
-                        <c:SettingRow x:Name="Row_streams" Icon="play" Title="Live streams" Description="Read-only live status for Twitch channels you follow and your selected YouTube channels. Streams open in your browser; no chat or posting permissions.">
+                        <TextBlock Text="Social" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <c:SettingRow x:Name="Row_streams" Icon="play" Title="Live streams"
+                                      Description="Aqua checks live channels while Social is open and opens streams in your browser.">
                             <c:SettingRow.Below>
-                                <StackPanel>
-                                    <CheckBox Content="Show live Twitch channels I follow" IsChecked="{Binding Social.Streams.Twitch}" AutomationProperties.AutomationId="settings-streams-twitch"/>
-                                    <CheckBox Content="Check selected YouTube channels for live streams" IsChecked="{Binding Social.Streams.YouTube}" Margin="0,8,0,12" AutomationProperties.AutomationId="settings-streams-youtube"/>
-                                    <TextBlock Text="Twitch app setup (first time)" Style="{StaticResource T.CardTitle}"/>
-                                    <TextBlock Text="Register a Public Twitch application. In Twitch's console, click Manage and copy its Client ID below. The app name (such as FlameAqua-AquaHub) is not the Client ID. No client secret is needed."
-                                               TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,4,0,8"/>
-                                    <TextBlock Text="Client ID (from Twitch → Manage)" Style="{StaticResource T.Caption}" Margin="0,0,0,4"/>
+                                <WrapPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,24,6">
+                                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Social.Streams.Twitch}" ToolTip="Show followed Twitch channels when live"
+                                                  AutomationProperties.Name="Show Twitch streams" AutomationProperties.AutomationId="settings-streams-twitch" Margin="0,0,8,0"/>
+                                        <TextBlock Text="Twitch" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                        <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Social.Streams.YouTube}" ToolTip="Show selected YouTube channels when live"
+                                                  AutomationProperties.Name="Show YouTube streams" AutomationProperties.AutomationId="settings-streams-youtube" Margin="0,0,8,0"/>
+                                        <TextBlock Text="YouTube" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </WrapPanel>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_twitch" Icon="play" Title="Twitch"
+                                      Description="Register a public Twitch app. Open Manage in the Twitch console and copy its Client ID. Aqua reads the channels you follow."
+                                      Keywords="public client id sign in">
+                            <TextBlock x:Name="TwitchStatus" Text="Not connected" TextWrapping="Wrap" Style="{StaticResource T.Caption}"
+                                       AutomationProperties.AutomationId="settings-twitch-status" AutomationProperties.LiveSetting="Polite"/>
+                            <c:SettingRow.Below>
+                                <Expander Header="Manage Twitch connection" AutomationProperties.AutomationId="settings-twitch-details">
+                                    <StackPanel Margin="0,6,0,0">
+                                    <TextBlock Text="Client ID" Style="{StaticResource T.Caption}" Margin="0,0,0,5"/>
                                     <TextBox x:Name="TwitchClientId" Text="{Binding Social.Streams.TwitchClientId, UpdateSourceTrigger=PropertyChanged}" MaxLength="100" ui:UiProps.Placeholder="Public Twitch client ID"
                                              AutomationProperties.AutomationId="settings-twitch-client-id" AutomationProperties.Name="Public Twitch client ID"/>
                                     <WrapPanel Margin="0,10,0,0">
@@ -306,12 +357,18 @@
                                         <Button x:Name="TwitchCancel" Content="Cancel sign-in" Click="OnCancelTwitch" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-twitch-cancel"/>
                                         <Button x:Name="TwitchDisconnect" Content="Disconnect" Click="OnDisconnectTwitch" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-twitch-disconnect"/>
                                     </WrapPanel>
-                                    <TextBlock x:Name="TwitchStatus" Text="Not connected." TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" Margin="0,2,0,4" AutomationProperties.AutomationId="settings-twitch-status" AutomationProperties.LiveSetting="Polite"/>
-                                    <TextBlock Text="YouTube live checks use public channel pages every 15 minutes while Social is open. Choose up to six channels below. Page changes can temporarily interrupt detection."
-                                               TextWrapping="Wrap" Style="{StaticResource T.Caption}" Margin="0,10,0,4"/>
-                                    <TextBlock Text="YouTube subscriptions (optional Google connection)" Style="{StaticResource T.CardTitle}" Margin="0,12,0,4"/>
-                                    <TextBlock Text="Connect Google to import your subscription list, then choose channels for live checks. Google grants read-only YouTube access; Aqua won't change your subscriptions. Sync is manual. New uploads still use the saved YouTube channels list further below."
-                                               TextWrapping="Wrap" Style="{StaticResource T.Caption}"/>
+                                    </StackPanel>
+                                </Expander>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_google" Icon="user" Title="Google subscriptions"
+                                      Description="Optional. Connect a Google account to import your YouTube subscription list. Access is read-only and sync is manual."
+                                      Keywords="YouTube Google OAuth client sign in">
+                            <TextBlock x:Name="GoogleStatus" TextWrapping="Wrap" Style="{StaticResource T.Caption}" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="settings-google-status"/>
+                            <c:SettingRow.Below>
+                                <Expander Header="Manage Google connection" AutomationProperties.AutomationId="settings-google-details">
+                                    <StackPanel Margin="0,4,0,0">
+                                        <TextBlock Text="Optional read-only access to your YouTube subscriptions." Style="{StaticResource T.Caption}" TextWrapping="Wrap"/>
                                     <WrapPanel Margin="0,10,0,0">
                                         <Button Content="Google setup guide" Click="OnGoogleSetup" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6"
                                                 ToolTip="Enable YouTube Data API v3, create a Desktop OAuth client, and add your account as a test user if required."
@@ -322,9 +379,19 @@
                                         <Button x:Name="GoogleCancel" Content="Cancel" Click="OnCancelGoogle" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-google-cancel"/>
                                         <Button x:Name="GoogleDisconnect" Content="Disconnect Google" Click="OnDisconnectGoogle" Style="{StaticResource Btn.Standard}" Margin="0,0,6,6" Visibility="Collapsed" AutomationProperties.AutomationId="settings-google-disconnect"/>
                                     </WrapPanel>
-                                    <TextBlock x:Name="GoogleStatus" TextWrapping="Wrap" FontSize="13" Margin="0,2,0,8" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="settings-google-status"/>
-                                    <TextBlock x:Name="YouTubeSelectionStatus" TextWrapping="Wrap" Style="{StaticResource T.Caption}" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="settings-youtube-selection-status"/>
-                                    <TextBox x:Name="YouTubeChannelFilter" TextChanged="OnFilterYouTubeChannels" ui:UiProps.Placeholder="Find a saved channel or imported subscription…" Margin="0,8,0,6" AutomationProperties.Name="Find YouTube live channel" AutomationProperties.AutomationId="settings-youtube-filter"/>
+                                    </StackPanel>
+                                </Expander>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_livechannels" Icon="play" Title="YouTube live channels"
+                                      Description="Choose up to six saved or subscribed channels. Aqua checks their public pages while Social is open."
+                                      Keywords="stream selection subscriptions">
+                            <TextBlock x:Name="YouTubeSelectionStatus" TextWrapping="Wrap" Style="{StaticResource T.Caption}"
+                                       AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="settings-youtube-selection-status"/>
+                            <c:SettingRow.Below>
+                                <Expander Header="Choose live channels" AutomationProperties.AutomationId="settings-livechannels-details">
+                                    <StackPanel>
+                                    <TextBox x:Name="YouTubeChannelFilter" TextChanged="OnFilterYouTubeChannels" ui:UiProps.Placeholder="Find a channel…" Margin="0,8,0,6" AutomationProperties.Name="Find YouTube live channel" AutomationProperties.AutomationId="settings-youtube-filter"/>
                                     <ListBox x:Name="YouTubeLiveChoices" Style="{StaticResource PlainList}" MaxHeight="210" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" AutomationProperties.Name="YouTube channels for live checks" AutomationProperties.AutomationId="settings-youtube-live-choices">
                                         <ListBox.Template>
                                             <ControlTemplate TargetType="ListBox">
@@ -357,68 +424,19 @@
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
-                                </StackPanel>
+                                        <TextBlock x:Name="YouTubeChoiceEmpty" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                        <Button x:Name="UploadChannelsLink" Style="{StaticResource SettingsLink}" Content="Manage channels for new uploads" Tag="social:youtube" Margin="0,8,0,0"/>
+                                    </StackPanel>
+                                </Expander>
                             </c:SettingRow.Below>
                         </c:SettingRow>
-                        <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
-                                   Text="Public posts from your communities, and your Bluesky and Mastodon timelines if you connect them. For X, Facebook or Instagram, add an RSS bridge such as RSSHub as an extra feed."/>
-                        <c:SettingRow x:Name="Row_bluesky" Icon="user" Title="Your Bluesky timeline" Description="Posts from people you follow. Use an app password (Bluesky › Settings › Privacy and security › App passwords); it's kept in Windows Credential Manager.">
+
+                        <TextBlock Text="Posts &amp; feeds" Style="{StaticResource SettingsGroupTitle}"/>
+                        <c:SettingRow x:Name="Row_youtube" Icon="play" Title="YouTube channels" Description="New uploads. Paste a channel link, @handle or video link."
+                                      FocusTarget="{Binding ElementName=NewChannelId}">
                             <c:SettingRow.Below>
-                                <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="220"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox Text="{Binding Social.BlueskyHandle, UpdateSourceTrigger=PropertyChanged}" ui:UiProps.Placeholder="you.bsky.social" Margin="0,0,6,0"/>
-                                        <PasswordBox x:Name="BskyPassword" Grid.Column="1" Margin="0,0,6,0" AutomationProperties.Name="Bluesky app password"/>
-                                        <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Content="Connect" Click="OnConnectBluesky"/>
-                                        <Button Grid.Column="3" Style="{StaticResource Btn.Subtle}" Content="Disconnect" Click="OnDisconnectBluesky" Margin="6,0,0,0"/>
-                                    </Grid>
-                                    <TextBlock x:Name="BskyStatus" Style="{StaticResource T.Caption}" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </c:SettingRow.Below>
-                        </c:SettingRow>
-                        <c:SettingRow x:Name="Row_mastodon" Icon="hash" Title="Your Mastodon home timeline" Description="A token with the read:statuses scope (Mastodon › Preferences › Development), for the server below. Kept in Windows Credential Manager.">
-                            <c:SettingRow.Below>
-                                <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <PasswordBox x:Name="MastodonToken" Margin="0,0,6,0" AutomationProperties.Name="Mastodon access token"/>
-                                        <Button Grid.Column="1" Style="{StaticResource Btn.Standard}" Content="Connect" Click="OnConnectMastodon"/>
-                                        <Button Grid.Column="2" Style="{StaticResource Btn.Subtle}" Content="Disconnect" Click="OnDisconnectMastodon" Margin="6,0,0,0"/>
-                                    </Grid>
-                                    <TextBlock x:Name="MastodonStatus" Style="{StaticResource T.Caption}" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </c:SettingRow.Below>
-                        </c:SettingRow>
-                        <c:SettingRow x:Name="Row_reddit" Icon="social" Title="Subreddits" Description="Local and interest communities (read via public RSS).">
-                            <c:SettingRow.Below><c:ChipEditor x:Name="Subreddits"/></c:SettingRow.Below>
-                        </c:SettingRow>
-                        <c:SettingRow Icon="hash" Title="Mastodon instance" Description="Server used for hashtag timelines.">
-                            <TextBox Text="{Binding Social.MastodonInstance, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
-                        </c:SettingRow>
-                        <c:SettingRow Icon="hash" Title="Mastodon hashtags">
-                            <c:SettingRow.Below><c:ChipEditor x:Name="Hashtags"/></c:SettingRow.Below>
-                        </c:SettingRow>
-                        <c:SettingRow Icon="globe" Title="Bluesky trending topics">
-                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Social.BlueskyTrending}"/>
-                        </c:SettingRow>
-                        <c:SettingRow Icon="user" Title="Bluesky accounts" Description="Handles to follow, e.g. someone.bsky.social">
-                            <c:SettingRow.Below><c:ChipEditor x:Name="BskyAccounts"/></c:SettingRow.Below>
-                        </c:SettingRow>
-                        <c:SettingRow Icon="layers" Title="Bluesky custom feeds" Description="Paste a feed link (bsky.app/profile/…/feed/…) or its at:// address.">
-                            <c:SettingRow.Below><c:ChipEditor x:Name="BskyFeeds"/></c:SettingRow.Below>
-                        </c:SettingRow>
-                        <c:SettingRow x:Name="Row_youtube" Icon="play" Title="YouTube channels" Description="New uploads. Paste a channel link, @handle or video link.">
-                            <c:SettingRow.Below>
-                                <StackPanel>
+                                <Expander Header="Manage upload channels">
+                                <StackPanel Margin="0,6,0,0">
                                     <ItemsControl x:Name="ChannelList">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
@@ -461,11 +479,31 @@
                                         <Button x:Name="AddChannelButton" Grid.Column="1" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddChannel" MinWidth="64"/>
                                     </Grid>
                                 </StackPanel>
+                                </Expander>
                             </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_reddit" Icon="social" Title="Subreddits" Description="Local and interest communities (read via public RSS).">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Subreddits"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="hash" Title="Mastodon instance" Description="Server used for hashtag timelines.">
+                            <TextBox Text="{Binding Social.MastodonInstance, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="hash" Title="Mastodon hashtags">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="Hashtags"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="globe" Title="Bluesky trending topics">
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Social.BlueskyTrending}"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="user" Title="Bluesky accounts" Description="Handles to follow, e.g. someone.bsky.social">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="BskyAccounts"/></c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="layers" Title="Bluesky custom feeds" Description="Paste a feed link (bsky.app/profile/…/feed/…) or its at:// address.">
+                            <c:SettingRow.Below><c:ChipEditor x:Name="BskyFeeds"/></c:SettingRow.Below>
                         </c:SettingRow>
                         <c:SettingRow x:Name="Row_extrafeeds" Icon="link" Title="Extra feeds" Description="Any RSS or Atom feed, shown as posts (for example an RSSHub bridge).">
                             <c:SettingRow.Below>
-                                <StackPanel>
+                                <Expander Header="Manage RSS and Atom feeds">
+                                <StackPanel Margin="0,6,0,0">
                                     <ItemsControl x:Name="ExtraFeedList">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
@@ -503,13 +541,56 @@
                                         <Button Grid.Column="3" Style="{StaticResource Btn.Accent}" Content="Add" Click="OnAddExtraFeed"/>
                                     </Grid>
                                 </StackPanel>
+                                </Expander>
                             </c:SettingRow.Below>
                         </c:SettingRow>
-                        <c:SettingRow x:Name="Row_hackernews" Icon="bolt" Title="Hacker News front page" Description="The stories tech people are discussing.">
+                        <c:SettingRow x:Name="Row_hackernews" Icon="bolt" Title="Hacker News front page">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Social.HackerNews}"/>
                         </c:SettingRow>
                         <c:SettingRow Icon="refresh" Title="Refresh every (minutes)">
                             <TextBox Text="{Binding Social.RefreshMinutes, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </c:SettingRow>
+
+                        <TextBlock Text="Connected timelines" Style="{StaticResource SettingsGroupTitle}"/>
+                        <c:SettingRow x:Name="Row_bluesky" Icon="user" Title="Bluesky timeline" Description="Use an app password from Bluesky › Settings › Privacy and security. Aqua saves it in Windows Credential Manager.">
+                            <TextBlock x:Name="BskyStatus" Style="{StaticResource T.Caption}" HorizontalAlignment="Left" TextWrapping="Wrap"/>
+                            <c:SettingRow.Below>
+                                <Expander Header="Manage connection">
+                                    <StackPanel Margin="0,6,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Text="{Binding Social.BlueskyHandle, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Bluesky handle" ui:UiProps.Placeholder="you.bsky.social" Margin="0,0,6,0"/>
+                                        <PasswordBox x:Name="BskyPassword" Grid.Column="1" Margin="0,0,6,0" AutomationProperties.Name="Bluesky app password"/>
+                                        <Button Grid.Column="2" Style="{StaticResource Btn.Standard}" Content="Connect" Click="OnConnectBluesky"/>
+                                        <Button Grid.Column="3" Style="{StaticResource Btn.Subtle}" Content="Disconnect" Click="OnDisconnectBluesky" Margin="6,0,0,0"/>
+                                    </Grid>
+                                    </StackPanel>
+                                </Expander>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
+                        <c:SettingRow x:Name="Row_mastodon" Icon="hash" Title="Mastodon timeline" Description="Use an access token with read:statuses from your server’s Preferences › Development. Aqua saves it in Windows Credential Manager.">
+                            <TextBlock x:Name="MastodonStatus" Style="{StaticResource T.Caption}" HorizontalAlignment="Left" TextWrapping="Wrap"/>
+                            <c:SettingRow.Below>
+                                <Expander Header="Manage connection">
+                                    <StackPanel Margin="0,6,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <PasswordBox x:Name="MastodonToken" Margin="0,0,6,0" AutomationProperties.Name="Mastodon access token"/>
+                                        <Button Grid.Column="1" Style="{StaticResource Btn.Standard}" Content="Connect" Click="OnConnectMastodon"/>
+                                        <Button Grid.Column="2" Style="{StaticResource Btn.Subtle}" Content="Disconnect" Click="OnDisconnectMastodon" Margin="6,0,0,0"/>
+                                    </Grid>
+                                    </StackPanel>
+                                </Expander>
+                            </c:SettingRow.Below>
                         </c:SettingRow>
                     </StackPanel>
 
@@ -603,7 +684,8 @@
                     <!-- ═══ Agenda ═══ -->
                     <StackPanel x:Name="P_agenda" Visibility="Collapsed">
                         <TextBlock Text="Agenda" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
-                        <c:SettingRow Icon="upcoming" Title="Calendars" Description="Private ICS links from Google/Outlook/iCloud, or a local .ics file. Read-only.">
+                        <c:SettingRow x:Name="Row_calendars" Icon="upcoming" Title="Calendars" Description="Import a read-only ICS link from your calendar provider or select a local .ics file."
+                                      FocusTarget="{Binding ElementName=NewCalName}">
                             <c:SettingRow.Below>
                                 <StackPanel>
                                     <ItemsControl x:Name="CalendarList">
@@ -662,6 +744,8 @@
                         <c:SettingRow Icon="upcoming" Title="Look ahead (days)">
                             <TextBox Text="{Binding Events.LookaheadDays, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
                         </c:SettingRow>
+                        <TextBlock Text="Related settings" Style="{StaticResource SettingsGroupTitle}"/>
+                        <Button Style="{StaticResource SettingsLink}" Content="Calendar notifications" Tag="notifications:calendaralerts"/>
                     </StackPanel>
 
                     <!-- ═══ Predictions ═══ -->
@@ -689,17 +773,15 @@
 
                     <!-- ═══ AI ═══ -->
                     <StackPanel x:Name="P_ai" Visibility="Collapsed">
-                        <TextBlock Text="AI &amp; models" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
-                        <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
-                                   Text="Choose how Aqua runs your models. Your own runtime gives you control over memory, context and speed."/>
+                        <TextBlock Text="AI &amp; models" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
                         <c:SettingRow Icon="sparkle" Title="Use local AI">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.Enabled}"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="cube" Title="Provider" Keywords="llama cpp runtime model server">
+                        <c:SettingRow x:Name="Row_provider" Icon="cube" Title="Provider" Keywords="llama cpp runtime model server">
                             <c:SettingRow.Below>
                                 <ComboBox x:Name="AiProvider" SelectedValuePath="Tag" SelectionChanged="OnAiProvider" AutomationProperties.AutomationId="settings-ai-provider" AutomationProperties.Name="AI provider">
                                     <ComboBoxItem Content="Ollama" Tag="ollama"/>
-                                    <ComboBoxItem Content="Aqua's own runtime (faster, more control)" Tag="llamacpp"/>
+                                    <ComboBoxItem Content="Aqua's own runtime" Tag="llamacpp"/>
                                     <ComboBoxItem Content="OpenAI-compatible server" Tag="openai"/>
                                 </ComboBox>
                             </c:SettingRow.Below>
@@ -768,18 +850,17 @@
                         <c:SettingRow Icon="bolt" Title="Allow model 'thinking'" Description="Slower but can help reasoning models. Off is best for summaries.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.Think}"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="shield" Title="Allow a non-local endpoint" Description="Off keeps all prompts on this PC.">
+                        <c:SettingRow Icon="shield" Title="Allow a non-local endpoint" ShowDescription="True" Description="A remote server receives prompts and any attached context.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ai.AllowRemoteEndpoint}"/>
                         </c:SettingRow>
+                        <TextBlock Text="Related settings" Style="{StaticResource SettingsGroupTitle}"/>
+                        <Button Style="{StaticResource SettingsLink}" Content="Ask Aqua preferences" Tag="ask"/>
                     </StackPanel>
 
                     <!-- ═══ Ask Aqua ═══ -->
                     <StackPanel x:Name="P_ask" Visibility="Collapsed">
-                        <TextBlock Text="Ask Aqua" Style="{StaticResource T.Subtitle}" Margin="0,0,0,4"/>
-                        <TextBlock Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,0,0,12"
-                                   Text="Limits for what Ask may use. The switches under the Ask box choose per question."/>
-
-                        <TextBlock Text="THE WEB" Style="{StaticResource T.Overline}" Margin="4,6,0,8"/>
+                        <TextBlock Text="Ask Aqua" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
+                        <TextBlock Text="Web search" Style="{StaticResource SettingsGroupTitle}" Margin="2,0,0,8"/>
                         <c:SettingRow Icon="globe" Title="Let Ask search the web" Description="Off: Ask uses only your feeds, files and the model's own knowledge.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.Web}" AutomationProperties.Name="Let Ask search the web"/>
                         </c:SettingRow>
@@ -813,7 +894,7 @@
                         </c:SettingRow>
 
                         <TextBlock Text="CHATS" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
-                        <c:SettingRow x:Name="Row_chats" Icon="message" Title="Delete chats after" Description="Unused chats are deleted after this; starred chats are kept.">
+                        <c:SettingRow x:Name="Row_chats" Icon="message" Title="Delete chats after" Description="Starred chats are kept.">
                             <ComboBox x:Name="ChatRetentionCombo" Width="170" SelectedValuePath="Days" DisplayMemberPath="Label" SelectedValue="{Binding Ask.ChatRetentionDays}"
                                       AutomationProperties.Name="Delete chats after"/>
                         </c:SettingRow>
@@ -831,7 +912,7 @@
                         </c:SettingRow>
 
                         <TextBlock Text="VOICE" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
-                        <c:SettingRow x:Name="Row_voice" Icon="mic" Title="Voice input" Description="Whisper (install it below) is the most accurate. “Windows online speech” sends your voice to Microsoft and needs Online speech recognition on in Windows.">
+                        <c:SettingRow x:Name="Row_voice" Icon="mic" Title="Voice input" ShowDescription="True" Description="Windows online speech sends your voice to Microsoft.">
                             <ComboBox x:Name="VoiceCombo" Width="220" SelectedValue="{Binding Ask.Voice}" SelectedValuePath="Tag" SelectionChanged="OnVoiceEngineChanged" AutomationProperties.Name="Voice input">
                                 <ComboBoxItem Content="Whisper (on this PC)" Tag="whisper"/>
                                 <ComboBoxItem Content="Windows, on this PC" Tag="offline"/>
@@ -868,7 +949,7 @@
                         <c:SettingRow x:Name="Row_microphone" Icon="headphones" Title="Microphone" Description="Windows online speech always uses the default microphone.">
                             <StackPanel Orientation="Horizontal">
                                 <!-- Long device names end in "…" (the full name is the tooltip) rather than being cut mid-word. -->
-                                <ComboBox x:Name="MicCombo" Width="290" HorizontalContentAlignment="Stretch" SelectionChanged="OnMicChanged" AutomationProperties.Name="Microphone"
+                                <ComboBox x:Name="MicCombo" Width="250" HorizontalContentAlignment="Stretch" SelectionChanged="OnMicChanged" AutomationProperties.Name="Microphone"
                                           AutomationProperties.AutomationId="voice-microphone">
                                     <ComboBox.ItemTemplate>
                                         <DataTemplate>
@@ -876,7 +957,7 @@
                                         </DataTemplate>
                                     </ComboBox.ItemTemplate>
                                 </ComboBox>
-                                <Button Style="{StaticResource Btn.Standard}" Content="Sound settings" Click="OnSoundSettings" Margin="6,0,0,0"/>
+                                <Button x:Name="SoundSettingsButton" Style="{StaticResource Btn.Standard}" Content="Sound settings" Click="OnSoundSettings" Margin="6,0,0,0"/>
                             </StackPanel>
                         </c:SettingRow>
                         <c:SettingRow Icon="wand" Title="Tidy up what I say" Description="With Windows' recognizers, the local model fixes words that plainly don't fit and adds punctuation. Undo puts back what was heard.">
@@ -910,7 +991,7 @@
                         </c:SettingRow>
 
                         <TextBlock Text="YOUR PC" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
-                        <c:SettingRow Icon="computer" Title="Allow “Use my PC”" Description="Files in the folders below, your screen, and with your OK, opening files, links and apps. Off hides the switch.">
+                        <c:SettingRow Icon="computer" Title="Allow “Use my PC”" ShowDescription="True" Description="Gives Ask access to allowed folders and your screen when PC mode is on.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.Computer}" AutomationProperties.Name="Allow Use my PC"/>
                         </c:SettingRow>
                         <c:SettingRow Icon="folder" Title="Folders Ask may read" Description="Subfolders included. Passwords, keys and app data are never read.">
@@ -944,7 +1025,7 @@
                                 </StackPanel>
                             </c:SettingRow.Below>
                         </c:SettingRow>
-                        <c:SettingRow x:Name="Row_apps" Icon="bolt" Title="Let Ask operate apps" Description="Ask can click, type and press shortcuts in app windows, each time with your OK. Never terminals, sign-in prompts or password fields.">
+                        <c:SettingRow x:Name="Row_apps" Icon="bolt" Title="Let Ask operate apps" ShowDescription="True" Description="Aqua asks before clicking, typing or pressing shortcuts in allowed apps.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.ControlApps}" AutomationProperties.Name="Let Ask operate apps"/>
                         </c:SettingRow>
                         <c:SettingRow x:Name="Row_allowedApps" Icon="launchpad" Title="Apps Ask may operate"
@@ -1044,29 +1125,27 @@
                         <c:SettingRow Icon="markets" Title="Market moves &amp; price targets"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.PriceAlerts}"/></c:SettingRow>
                         <c:SettingRow Icon="news" Title="Breaking stories" Description="Fresh stories covered by 4+ outlets including a wire service."><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.BigStories}"/></c:SettingRow>
                         <c:SettingRow Icon="target" Title="Prediction market swings"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.PredictionSwings}"/></c:SettingRow>
-                        <c:SettingRow Icon="upcoming" Title="Calendar reminders"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.CalendarReminders}"/></c:SettingRow>
+                        <c:SettingRow x:Name="Row_calendaralerts" Icon="upcoming" Title="Calendar reminders" Description="Alerts for imported calendar events."><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.CalendarReminders}"/></c:SettingRow>
                         <c:SettingRow Icon="system" Title="PC health warnings" Description="Low disk space, memory pressure."><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.SystemWarnings}"/></c:SettingRow>
                         <c:SettingRow Icon="sparkle" Title="Brief is ready"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Notifications.BriefReady}"/></c:SettingRow>
                         <c:SettingRow Icon="hash" Title="Track keywords" Description="Get an alert when these appear in news or social posts.">
                             <c:SettingRow.Below><c:ChipEditor x:Name="Keywords"/></c:SettingRow.Below>
                         </c:SettingRow>
+                        <TextBlock Text="Related settings" Style="{StaticResource SettingsGroupTitle}"/>
+                        <Button Style="{StaticResource SettingsLink}" Content="Calendar sources and reminder timing" Tag="agenda:calendars"/>
                     </StackPanel>
 
                     <!-- ═══ Privacy & data ═══ -->
                     <StackPanel x:Name="P_privacy" Visibility="Collapsed">
                         <TextBlock Text="Privacy &amp; data" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
-                        <Border Style="{StaticResource CardInner}" Margin="0,0,0,10" Background="{DynamicResource B.AccentSoft}">
-                            <TextBlock Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}" TextWrapping="Wrap"
-                                       Text="No account, no telemetry, no cloud. Aqua talks only to the sources you enable and your local model. Keys and passwords are kept in Windows Credential Manager."/>
-                        </Border>
-                        <c:SettingRow Icon="eye" Title="Load article images" Description="Thumbnails come from publishers' servers and reveal your IP address to them.">
+                        <c:SettingRow Icon="eye" Title="Load article images" ShowDescription="True" Description="Publishers receive your IP address when Aqua loads their images.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Privacy.LoadRemoteImages}"/>
                         </c:SettingRow>
-                        <c:SettingRow Icon="ask" Title="Keep Ask chats" Description="Kept on this PC. Off deletes them all.">
+                        <c:SettingRow Icon="ask" Title="Keep Ask chats" ShowDescription="True" Description="Turning this off deletes saved chats from this PC.">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Privacy.KeepAskHistory}"/>
                         </c:SettingRow>
-                        <c:SettingRow x:Name="Row_pictures" Icon="image" Title="Keep pictures with chats"
-                                      Description="Screenshots and pictures Ask looked at stay with the chat and go when it does. Files on your PC are linked, with a thumbnail. Off deletes them."
+                        <c:SettingRow x:Name="Row_pictures" Icon="image" Title="Keep pictures with chats" ShowDescription="True"
+                                      Description="Turning this off clears pictures saved with chats. Your original files stay on disk."
                                       Keywords="screenshots images photos thumbnails screen capture media">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Ask.KeepPictures}" AutomationProperties.Name="Keep pictures with chats"/>
                         </c:SettingRow>
@@ -1083,11 +1162,7 @@
 
                     <!-- ═══ Debug ═══ -->
                     <StackPanel x:Name="P_debug" Visibility="Collapsed">
-                        <TextBlock Text="Debug" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
-                        <Border Style="{StaticResource CardInner}" Margin="0,0,0,10" Background="{DynamicResource B.AccentSoft}">
-                            <TextBlock Style="{StaticResource T.Body2}" Foreground="{DynamicResource B.Text}" TextWrapping="Wrap"
-                                       Text="Logs stay on this PC and never hold your passwords or keys."/>
-                        </Border>
+                        <TextBlock Text="Diagnostics" Style="{StaticResource T.Subtitle}" Margin="0,0,0,12"/>
                         <c:SettingRow x:Name="Row_log" Icon="book" Title="Diagnostics log" Description="Up to 2 MB, plus the 2 MB before it.">
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource Btn.Standard}" Content="Open log" Click="OnOpenLog" Margin="0,0,6,0" AutomationProperties.AutomationId="debug-open-log"/>
@@ -1106,6 +1181,11 @@
                         </c:SettingRow>
                         <c:SettingRow Icon="copy" Title="Diagnostics summary" Description="Versions, the model and the latest problems, with names, files and addresses masked.">
                             <Button Style="{StaticResource Btn.Standard}" Content="Copy summary" Click="OnCopyDiagnostics" AutomationProperties.AutomationId="debug-copy-summary"/>
+                        </c:SettingRow>
+                        <c:SettingRow Icon="wrench" Title="Settings file" Description="Edit the raw settings file in Notepad. Changes take effect when you save it."
+                                      Keywords="debug advanced JSON settings.json">
+                            <Button Style="{StaticResource Btn.Standard}" Content="Edit JSON" Click="OnEditJson" AutomationProperties.AutomationId="settings-edit-json"
+                                    AutomationProperties.Name="Edit settings.json"/>
                         </c:SettingRow>
                         <Grid Margin="4,18,0,8">
                             <TextBlock x:Name="ProblemsHeader" Text="RECENT PROBLEMS" Style="{StaticResource T.Overline}" VerticalAlignment="Center"/>

@@ -89,10 +89,10 @@ public partial class MainWindow
     {
         RefreshDeckPins();
         DeckActions.Visibility = Visibility.Visible;
+        DeckHandle.IsOpen = true;
         PlaceDeck();
         if (AnimateDeck)
         {
-            DeckActions.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(170)));
             foreach (var (button, x, y) in _deckBubbles)
             {
                 var slide = new TranslateTransform();
@@ -103,7 +103,7 @@ public partial class MainWindow
                 { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
             }
         }
-        DeckAsk.Focus();
+        if (!Hub.SnapshotMode) DeckAsk.Focus();
     }
 
     private bool CloseDeckSurfaces()
@@ -111,6 +111,7 @@ public partial class MainWindow
         if (DeckActions.Visibility != Visibility.Visible && DeckTimerPanel.Visibility != Visibility.Visible) return false;
         DeckActions.Visibility = Visibility.Collapsed;
         DeckTimerPanel.Visibility = Visibility.Collapsed;
+        DeckHandle.IsOpen = false;
         return true;
     }
 

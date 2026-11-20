@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using AquaHub.Core.Ai.Assistant;
@@ -20,7 +21,7 @@ using AquaHub.UI.ViewModels;
 
 namespace AquaHub.UI.Pages;
 
-public sealed record SectionVM(string Id, string Name, string Icon)
+public sealed record SectionVM(string Id, string Name, string Icon, string Group)
 {
     // Screen readers announce a list item by its ToString, so rows say what they show.
     public override string ToString() => Name;
@@ -36,15 +37,20 @@ public partial class SettingsPage : UserControl, IPage
     private string? _picturesText;
     private FileSystemWatcher? _watcher;
     private CancellationTokenSource? _cityCts;
+    private CancellationTokenSource? _aiCheck;
     private CancellationTokenSource? _twitchCts;
     private bool _twitchBusy, _streamsActive;
+    private int _revealVersion;
 
     private static readonly SectionVM[] SectionDefs =
     {
-        new("general", "General", "settings"), new("shortcuts", "Shortcuts", "keyboard"), new("location", "Location & weather", "location"), new("news", "News", "news"),
-        new("social", "Social", "social"), new("markets", "Markets", "markets"), new("agenda", "Agenda", "upcoming"),
-        new("predictions", "Predictions", "target"), new("ai", "AI & models", "cube"), new("ask", "Ask Aqua", "ask"), new("apps", "Apps & scenes", "launchpad"),
-        new("notifications", "Notifications", "bell"), new("privacy", "Privacy & data", "shield"), new("debug", "Debug", "bug"), new("about", "About", "info"),
+        new("general", "General", "settings", "Aqua Hub"), new("shortcuts", "Shortcuts", "keyboard", "Aqua Hub"),
+        new("notifications", "Notifications", "bell", "Aqua Hub"), new("apps", "Apps & scenes", "launchpad", "Aqua Hub"),
+        new("location", "Location & weather", "location", "Content"), new("news", "News", "news", "Content"),
+        new("social", "Social", "social", "Content"), new("markets", "Markets", "markets", "Content"),
+        new("agenda", "Agenda", "upcoming", "Content"), new("predictions", "Predictions", "target", "Content"),
+        new("ask", "Ask Aqua", "ask", "Assistant"), new("ai", "AI & models", "cube", "Assistant"),
+        new("privacy", "Privacy & data", "shield", "System"), new("debug", "Diagnostics", "bug", "System"), new("about", "About", "info", "System"),
     };
 
     private static readonly string[] StepActions = { "launch", "close", "focus", "media", "volume", "mute", "dnd", "ai", "open-url", "open-page", "wait", "music-search", "read-brief" };
@@ -55,7 +61,9 @@ public partial class SettingsPage : UserControl, IPage
         _s = Hub.Core.Settings.Clone();
         _original = SettingsStore.DeepCopy(_s);
         _save = new UiThrottle(Save, 600);
-        Sections.ItemsSource = SectionDefs;
+        var sectionView = new ListCollectionView(SectionDefs);
+        sectionView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(SectionVM.Group)));
+        Sections.ItemsSource = sectionView;
 
         AddHandler(ToggleButton.CheckedEvent, new RoutedEventHandler(OnAnyChange));
         AddHandler(ToggleButton.UncheckedEvent, new RoutedEventHandler(OnAnyChange));
@@ -112,12 +120,7 @@ public partial class SettingsPage : UserControl, IPage
         Hub.Core.YouTubeAccount.Changed -= OnYouTubeAccountChanged;
         Hub.Core.YouTubeAccount.Changed += OnYouTubeAccountChanged;
         Load();
-        // "social:youtube" opens a section and brings one of its rows into view.
-        var parts = (arg ?? "").Split(':', 2);
-        var section = SectionDefs.FirstOrDefault(s => s.Id == parts[0]) ?? (Sections.SelectedItem as SectionVM) ?? SectionDefs[0];
-        Sections.SelectedItem = section;
-        if (parts.Length == 2 && FindName("Row_" + parts[1]) is FrameworkElement row)
-            Dispatcher.BeginInvoke(() => Reveal(row), System.Windows.Threading.DispatcherPriority.Loaded);
+        NavigateToSetting(arg);
         if (!Hub.SnapshotMode && !Sandbox.Enabled) _ = BackfillChannelsAsync();
         Hub.Core.Settings.Changed -= OnSettingsChangedElsewhere;
         Hub.Core.Settings.Changed += OnSettingsChangedElsewhere;
@@ -132,18 +135,52 @@ public partial class SettingsPage : UserControl, IPage
         UpdateOllamaStatus();
     }
 
-    /// <summary>Scrolls a setting to the top of the view, flashes it and focuses its first input.</summary>
+    private void NavigateToSetting(string? arg)
+    {
+        var parts = (arg ?? "").Split(':', 2);
+        var section = SectionDefs.FirstOrDefault(s => s.Id == parts[0]) ?? Sections.SelectedItem as SectionVM ?? SectionDefs[0];
+        Sections.SelectedItem = section;
+        var row = parts.Length == 2 ? FindName("Row_" + parts[1]) as SettingRow : null;
+        QueueReveal(section, row);
+    }
+
+    private void OnRelatedSetting(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string target }) NavigateToSetting(target);
+    }
+
+    private void QueueReveal(SectionVM section, SettingRow? row)
+    {
+        var request = ++_revealVersion;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!_streamsActive || _revealVersion != request || !ReferenceEquals(Sections.SelectedItem, section)) return;
+            if (row is not null && FindName("P_" + section.Id) is Panel panel && LogicalDescendants<SettingRow>(panel).Contains(row))
+                Reveal(row);
+            else
+            {
+                Sections.ScrollIntoView(section);
+                if (!Hub.SnapshotMode && !SearchBox.IsKeyboardFocusWithin
+                    && Sections.ItemContainerGenerator.ContainerFromItem(section) is ListBoxItem category) category.Focus();
+            }
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Opens disclosure around a setting and moves focus to the first usable input.</summary>
     private void Reveal(FrameworkElement row)
     {
         for (DependencyObject? p = row; p is not null; p = LogicalTreeHelper.GetParent(p))
             if (p is Expander expander) expander.IsExpanded = true;
+        if (row is SettingRow { Below: Expander disclosure }) disclosure.IsExpanded = true;
         Scroller.UpdateLayout();
+        if (!row.IsVisible || !Panels.IsAncestorOf(row)) return;
         var top = row.TransformToAncestor(Panels).Transform(new Point(0, 0)).Y;
-        Scroller.ScrollToVerticalOffset(Math.Max(0, top - 12));
-        var flash = new System.Windows.Media.Animation.DoubleAnimation(0.35, 1, TimeSpan.FromMilliseconds(900)) { EasingFunction = new System.Windows.Media.Animation.QuadraticEase() };
-        row.BeginAnimation(OpacityProperty, flash);
+        Scroller.ScrollToVerticalOffset(Math.Max(0, top));
+        if (Hub.SnapshotMode) return;
+        if (row is SettingRow { FocusTarget: { IsVisible: true, IsEnabled: true } target } && target.Focus()) return;
         // Not a shortcut box: focusing one starts recording (and pauses Aqua's hotkeys), which nobody asked for by searching.
-        FindFirst<Control>(row, c => c.Focusable && c.IsEnabled && c.IsVisible && c is not HotkeyBox)?.Focus();
+        FindFirst<Control>(row, c => c.Focusable && c.IsEnabled && c.IsVisible
+            && c is (Button or CheckBox or ComboBox or TextBoxBase or PasswordBox) and not (HotkeyBox or HintButton))?.Focus();
     }
 
     private static T? FindFirst<T>(DependencyObject root, Func<T, bool> fits) where T : DependencyObject
@@ -213,7 +250,7 @@ public partial class SettingsPage : UserControl, IPage
                     ? new SettingsSearch.Entry(x.Section.Name, row.Title, row.Description ?? "", row.Keywords ?? "")
                     : new SettingsSearch.Entry(x.Section.Name, x.Section.Name))
             .Select(x => x.Row is { } row
-                ? new SettingHit(x.Section, row, row.Title, string.IsNullOrEmpty(row.Description) ? x.Section.Name : $"{x.Section.Name} · {row.Description}")
+                ? new SettingHit(x.Section, row, row.Title, x.Section.Name)
                 : new SettingHit(x.Section, null, x.Section.Name, "Section"))
             .ToList();
         SearchResults.ItemsSource = hits;
@@ -232,7 +269,7 @@ public partial class SettingsPage : UserControl, IPage
         SearchPopup.IsOpen = false;
         SearchBox.Text = "";
         Sections.SelectedItem = hit.Section;
-        if (hit.Row is { } row) Dispatcher.BeginInvoke(() => Reveal(row), System.Windows.Threading.DispatcherPriority.Loaded);
+        QueueReveal(hit.Section, hit.Row);
     }
 
     public sealed record IdleOption(int Minutes, string Label);
@@ -265,9 +302,11 @@ public partial class SettingsPage : UserControl, IPage
     public void OnNavigatedFrom()
     {
         _streamsActive = false;
+        _revealVersion++;
         SettingsFeedback.Hide();
         _twitchCts?.Cancel();
         _googleCts?.Cancel();
+        _aiCheck?.Cancel();
         Hub.Core.Streams.Changed -= OnStreamConnectionChanged;
         Hub.Core.YouTubeAccount.Changed -= OnYouTubeAccountChanged;
         _voiceTest?.Dispose();
@@ -470,7 +509,7 @@ public partial class SettingsPage : UserControl, IPage
 
     private void OnAnyChange(object sender, RoutedEventArgs e)
     {
-        if (_loading) return;
+        if (_loading || e.OriginalSource is ToggleButton { TemplatedParent: Expander }) return;
         _save.Request();
     }
 
@@ -536,6 +575,8 @@ public partial class SettingsPage : UserControl, IPage
     private void OnSection(object sender, SelectionChangedEventArgs e)
     {
         if (Sections.SelectedItem is not SectionVM s) return;
+        _revealVersion++;
+        Sections.ScrollIntoView(s);
         foreach (var panel in Panels.Children.OfType<StackPanel>())
             panel.Visibility = panel.Name == "P_" + s.Id ? Visibility.Visible : Visibility.Collapsed;
         if (s.Id == "debug") ShowProblems();
@@ -708,9 +749,9 @@ public partial class SettingsPage : UserControl, IPage
         var bsky = Hub.Core.Secrets.Get(SecretKeys.BlueskyAppPassword) is { Length: > 0 };
         BskyStatus.Text = bsky && _s.Social.BlueskyHandle.Length > 0
             ? $"Connected as @{_s.Social.BlueskyHandle}"
-            : "Not connected — only public posts are read.";
+            : "Not connected";
         var masto = Hub.Core.Secrets.Get(SecretKeys.MastodonToken) is { Length: > 0 };
-        MastodonStatus.Text = masto ? $"Connected to {_s.Social.MastodonInstance}" : "Not connected — only public hashtags are read.";
+        MastodonStatus.Text = masto ? $"Connected to {_s.Social.MastodonInstance}" : "Not connected";
     }
 
     private async void OnConnectBluesky(object sender, RoutedEventArgs e)
@@ -998,7 +1039,15 @@ public partial class SettingsPage : UserControl, IPage
         DeepModelCombo.Items.Add(new ComboBoxItem { Content = "Same as main model", Tag = "" });
         foreach (var m in installed) DeepModelCombo.Items.Add(new ComboBoxItem { Content = m, Tag = m });
         DeepModelCombo.SelectedItem = DeepModelCombo.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == _s.Ai.DeepModel) ?? DeepModelCombo.Items[0];
-        AiTest.Text = AiStatus(Hub.State.Ai);
+        ShowAiConnection(Hub.State.Ai);
+    }
+
+    private void ShowAiConnection(Core.Ai.LlmHealth? health)
+    {
+        AiTest.Text = health is null ? "Unchecked" : health.Available ? "Connected" : "Unavailable";
+        var detail = AiStatus(health);
+        AiTest.ToolTip = detail.Length == 0 ? null : detail;
+        System.Windows.Automation.AutomationProperties.SetHelpText(AiTest, detail);
     }
 
     /// <summary>"Connected to Ollama 0.12.3 · 3 models · using qwen3.5:9b", or why not — for the Connection row.</summary>
@@ -1020,14 +1069,33 @@ public partial class SettingsPage : UserControl, IPage
 
     private async void OnTestAi(object sender, RoutedEventArgs e)
     {
+        if (_aiCheck is not null || sender is not Button button) return;
         Save();
-        AiTest.Text = "Testing…";
-        var h = await Hub.Core.Llm.CheckAsync();
-        _loading = true;
-        FillModels();
-        _loading = false;
-        // After FillModels, which shows the last known state: this is the answer to the button.
-        AiTest.Text = AiStatus(h);
+        using var check = new CancellationTokenSource();
+        _aiCheck = check;
+        button.IsEnabled = false;
+        SettingsFeedback.Show("Checking the AI connection…", "ai-connection-feedback", busy: true);
+        try
+        {
+            var health = await Hub.Core.Llm.CheckAsync(check.Token);
+            if (check.IsCancellationRequested) return;
+            _loading = true;
+            try { FillModels(); }
+            finally { _loading = false; }
+            ShowAiConnection(health);
+            SettingsFeedback.Show(AiStatus(health), "ai-connection-feedback", error: !health.Available);
+        }
+        catch (OperationCanceledException) { SettingsFeedback.Hide("ai-connection-feedback"); }
+        catch (Exception ex)
+        {
+            Log.Warn("settings", "AI connection check failed", ex);
+            if (!check.IsCancellationRequested) SettingsFeedback.Show("Couldn’t check the AI connection.", "ai-connection-feedback", error: true);
+        }
+        finally
+        {
+            _aiCheck = null;
+            button.IsEnabled = true;
+        }
     }
 
     // ───────────── Apps & scenes ─────────────

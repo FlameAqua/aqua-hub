@@ -51,10 +51,10 @@ public sealed class Z01_LifecycleTests : E2ETestBase
     [Fact]
     public void T02_CloseToTraySettingIsHonoured() => Run(() =>
     {
-        Check("Lifecycle", "with 'Closing the window keeps Aqua Hub running' OFF, closing the window quits", () =>
+        Check("Lifecycle", "with 'Keep running in the tray' off, closing the window quits", () =>
         {
             var settings = GoTo("settings");
-            var sw = Ui.WaitFind(settings, Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Closing the window keeps Aqua Hub running")), "close-to-tray switch");
+            var sw = Ui.WaitFind(settings, Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Keep running in the tray")), "close-to-tray switch");
             Ui.SetToggle(sw, false);
             App.Settings.WaitForBool("general.closeToTray", false);
             GoTo("today");
@@ -68,7 +68,7 @@ public sealed class Z01_LifecycleTests : E2ETestBase
                 AllowsExit = false;
                 App.Command("activate");
                 Wait.For(() => App.TryMain() is not null, "main window back");
-                var s = Ui.WaitFind(GoTo("settings"), Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Closing the window keeps Aqua Hub running")), "switch");
+                var s = Ui.WaitFind(GoTo("settings"), Ui.And(Ui.Type(ControlType.CheckBox), Ui.Name("Keep running in the tray")), "switch");
                 Ui.SetToggle(s, true);
                 App.Settings.WaitForBool("general.closeToTray", true);
                 throw new Xunit.Sdk.XunitException("The setting is saved but ignored: the app keeps running in the tray after the window is closed");

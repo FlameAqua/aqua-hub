@@ -1011,3 +1011,24 @@ light themes. Documentation and whitespace checks passed.
 Legacy Settings, Feeds and Workbench desktop runs were skipped. Physical Deck drag and dial use, screen-reader speech,
 real ComfyUI inference and real Windows notification behavior remain manual acceptance. The current committed CI
 baseline was green at `96c216b`, before this local refinement.
+
+## 20 November 2026 · Settings, Deck contrast and off-screen checks
+
+The Deck uses solid theme surfaces and an accent fill with contrasting symbols for active states. Its expansion moves
+the buttons without fading their fills or icons. Settings groups the navigation by task and puts searchable explanations
+behind hint icons. Social gives Twitch, Google, live channel selection and feeds separate controls with on-demand setup.
+Related links go directly to the row that handles the task, including uploaded versus live YouTube channels, calendar
+sources versus alerts, the AI provider and voice input. The raw settings JSON editor is under Diagnostics. Privacy and
+data loss warnings stay with the controls. Clicked hints use a dismissible disclosure instead of opening a tooltip
+indefinitely. No persisted settings or account protocols needed changes.
+
+The unit suite passed **1,287** cases with **23** opt-in live cases skipped. Both the scratch Release app and the Release
+desktop harness compiled with zero warnings and errors. Selection, documentation and whitespace checks passed. The
+focused off-screen renderer produced eight captures and confirmed the render window stayed inactive and off-screen, a
+Twitch row link opened setup, the related YouTube link opened the upload form, and the microphone controls fit at the
+minimum window width. Visual review caught a clipped sound settings button in an earlier narrow render. Its corrected
+layout passed the repeat render and bounds check. The last committed main CI run was green on `69a19c3`.
+
+The interactive desktop suite was skipped to keep Adrian's display available. Physical hover and drag, native hint
+dismissal with mouse and keyboard, screen-reader use and connected-account interaction are manual acceptance before the
+version bump and release build.

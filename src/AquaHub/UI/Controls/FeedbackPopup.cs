@@ -14,6 +14,8 @@ public sealed class FeedbackPopup : Canvas
     private readonly TextBlock _message;
     private readonly Icon _icon;
     private readonly ProgressBar _progress;
+    private readonly Button _actionButton;
+    private Action? _action;
     private readonly DispatcherTimer _expiry = new() { Interval = TimeSpan.FromSeconds(5) };
     private HorizontalAlignment _noticeAlignment = HorizontalAlignment.Right;
     private bool _alignBottom;
@@ -72,6 +74,11 @@ public sealed class FeedbackPopup : Canvas
         detail.Children.Add(new ScrollViewer { Content = _message, MaxHeight = 160, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         _progress = new ProgressBar { IsIndeterminate = true, Height = 3, Margin = new Thickness(0, 9, 0, 0) };
         detail.Children.Add(_progress);
+        _actionButton = new Button { Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
+        _actionButton.SetResourceReference(StyleProperty, "Btn.Link");
+        AutomationProperties.SetAutomationId(_actionButton, "feedback-action");
+        _actionButton.Click += (_, _) => { var action = _action; Hide(); action?.Invoke(); };
+        detail.Children.Add(_actionButton);
         body.Children.Add(detail);
         _card.Child = body;
         Children.Add(_card);
@@ -83,7 +90,8 @@ public sealed class FeedbackPopup : Canvas
         Unloaded += (_, _) => Hide();
     }
 
-    public void Show(string message, string id = "feedback-message", bool error = false, bool busy = false, bool persistent = false)
+    public void Show(string message, string id = "feedback-message", bool error = false, bool busy = false, bool persistent = false,
+        string? actionLabel = null, Action? action = null)
     {
         if (string.IsNullOrWhiteSpace(message)) { Hide(id); return; }
         _expiry.Stop();
@@ -94,6 +102,9 @@ public sealed class FeedbackPopup : Canvas
         var announce = _card.Visibility != Visibility.Visible || !string.Equals(_message.Text, message, StringComparison.Ordinal);
         _message.Text = message;
         _progress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        _action = action;
+        _actionButton.Content = actionLabel;
+        _actionButton.Visibility = action is not null && !string.IsNullOrWhiteSpace(actionLabel) ? Visibility.Visible : Visibility.Collapsed;
         IsHitTestVisible = true;
         _card.Visibility = Visibility.Visible;
         Place();
@@ -111,6 +122,9 @@ public sealed class FeedbackPopup : Canvas
         IsHitTestVisible = false;
         _card.Visibility = Visibility.Collapsed;
         _message.Text = "";
+        _action = null;
+        _actionButton.Content = null;
+        _actionButton.Visibility = Visibility.Collapsed;
         AutomationProperties.SetAutomationId(_message, "");
         if (restore is { IsVisible: true, IsEnabled: true }) restore.Focus();
     }

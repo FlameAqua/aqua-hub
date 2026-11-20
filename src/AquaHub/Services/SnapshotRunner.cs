@@ -1,4 +1,7 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -26,6 +29,7 @@ public static class SnapshotRunner
             // Focused Phase 4 QA needs no feeds or inference. Read the library and render the real controls only.
             if (only == "models") { await ModelsAsync(outDir); return; }
             if (only == "studio") { await StudioAsync(outDir); return; }
+            if (only == "settings-ui") { await SettingsAsync(outDir); return; }
             if (scratchProfile) Hub.Core.Chats.DeleteAll();
             // QA mode renders AI content even if a game is running (normal mode pauses AI then).
             Hub.Core.Llm.PauseReason = () => null;
@@ -193,6 +197,83 @@ public static class SnapshotRunner
             }
         }
         win.Close();
+    }
+
+    private static async Task SettingsAsync(string outDir)
+    {
+        Hub.Core.Settings.Update(s =>
+        {
+            s.Ai.Enabled = s.Ai.ManageOllama = s.Ai.StartOllamaOnDemand = false;
+            s.Ask.Computer = s.Privacy.LoadRemoteImages = false;
+        });
+        var win = new MainWindow { Width = 1440, Height = 880, Left = -32000, Top = -32000,
+            WindowStartupLocation = WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false };
+        try
+        {
+            win.Show();
+            await LayoutAsync();
+            foreach (var (theme, width) in new[] { ("dark", 1440), ("light", 820) })
+            {
+                var settings = Hub.Core.Settings.Clone();
+                settings.General.Theme = theme;
+                Hub.Theme.Apply(settings.General);
+                win.Width = width;
+                win.Height = theme == "light" ? 700 : 880;
+                win.Navigate("settings", "social");
+                await LayoutAsync();
+                var page = (UI.Pages.SettingsPage)win.PageHost.Content;
+                var twitch = Disclosure(page, "twitch");
+                if (twitch is not { IsVisible: true, IsExpanded: false }) throw new InvalidOperationException("Twitch setup should start collapsed.");
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"settings-social-{theme}.png"), scale: 1);
+
+                win.Navigate("settings", "social:twitch");
+                await LayoutAsync();
+                if (!twitch.IsExpanded || page.FindName("TwitchClientId") is not FrameworkElement { IsVisible: true, ActualWidth: > 120 })
+                    throw new InvalidOperationException("The Twitch deep link did not reveal its setup form.");
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"settings-twitch-{theme}.png"), scale: 1);
+                twitch.IsExpanded = false;
+
+                win.Navigate("settings", "social:livechannels");
+                await LayoutAsync();
+                if (page.FindName("UploadChannelsLink") is not Button { IsVisible: true } link
+                    || new ButtonAutomationPeer(link).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)
+                    throw new InvalidOperationException("The link from live channels to uploads was not exposed.");
+                invoke.Invoke();
+                await LayoutAsync();
+                var uploads = Disclosure(page, "youtube");
+                if (uploads is not { IsExpanded: true } || page.FindName("NewChannelId") is not FrameworkElement { IsVisible: true })
+                    throw new InvalidOperationException("The related settings link did not reveal the upload channel form.");
+                uploads.IsExpanded = false;
+                if (Disclosure(page, "livechannels") is { } liveChannels) liveChannels.IsExpanded = false;
+
+                win.Navigate("settings", "ask:voice");
+                await LayoutAsync();
+                if (page.FindName("SoundSettingsButton") is not Button { IsVisible: true } sound
+                    || page.FindName("Row_microphone") is not FrameworkElement micRow
+                    || sound.TransformToAncestor(micRow).TransformBounds(new Rect(sound.RenderSize)).Right > micRow.ActualWidth - 12)
+                    throw new InvalidOperationException("The microphone controls must fit inside their setting row.");
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"settings-voice-{theme}.png"), scale: 1);
+
+                win.Navigate("today");
+                win.DeckHandle.Visibility = Visibility.Visible;
+                win.DeckHandle.ToggleRequested?.Invoke();
+                await LayoutAsync();
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"deck-{theme}.png"), scale: 1);
+                win.DeckHandle.ToggleRequested?.Invoke();
+                win.DeckHandle.Visibility = Visibility.Collapsed;
+            }
+        }
+        finally { win.Close(); }
+
+        static Expander? Disclosure(UI.Pages.SettingsPage page, string row) => (page.FindName("Row_" + row) as UI.Controls.SettingRow)?.Below as Expander;
+
+        async Task LayoutAsync()
+        {
+            await win.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+            win.UpdateLayout();
+            if (win.IsActive || win.Left > -20000 || win.Top > -20000)
+                throw new InvalidOperationException("The render window must stay off-screen and inactive.");
+        }
     }
 
     private static async Task ModelsAsync(string outDir)

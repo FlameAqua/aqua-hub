@@ -96,5 +96,5 @@ public partial class UpcomingPage : UserControl, IPage
         _vm.Changed();
     }
 
-    private void OnAddCalendar(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "agenda");
+    private void OnAddCalendar(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "agenda:calendars");
 }

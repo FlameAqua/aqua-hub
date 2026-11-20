@@ -73,6 +73,13 @@ public partial class App : Application
         var args = AppArgs.Parse(e.Args);
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         UseConsistentMonthNames();
+        var settingsSnapshot = args.Snapshot is not null && args.SnapshotPages == "settings-ui";
+        if (settingsSnapshot && (!args.E2e || args.Measure || string.IsNullOrWhiteSpace(args.DataDir)
+            || (Directory.Exists(args.DataDir) && Directory.EnumerateFileSystemEntries(args.DataDir).Any())))
+        {
+            Shutdown(2);
+            return;
+        }
         var paths = HubPaths.Resolve(args.DataDir);
 
         if (args.Snapshot is null)
@@ -146,7 +153,7 @@ public partial class App : Application
             Hub.Platform.RecordGpu(snap.Gpu?.Utilization ?? 0, Hub.Core.Llm.IsBusy);
             Hub.State.SetSystem(snap);
         };
-        if (!Sandbox.OfflineComponents && !(args.Measure && args.SnapshotPages == "performance")) _initialization = FirstRun.EnsureDefaultsAsync();
+        if (!Sandbox.OfflineComponents && !settingsSnapshot && !(args.Measure && args.SnapshotPages == "performance")) _initialization = FirstRun.EnsureDefaultsAsync();
 
         if (Hub.SnapshotMode)
         {

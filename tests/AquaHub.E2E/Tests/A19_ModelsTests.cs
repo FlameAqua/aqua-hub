@@ -90,7 +90,7 @@ public sealed class A19_ModelsTests : E2ETestBase
         GoTo("models");
         Ui.Invoke(Ui.WaitFind(Models, Ui.Name("AI settings"), "AI settings link"));
         PageRoot("settings");
-        Ui.SelectComboItem(Field("settings-ai-provider"), "Aqua's own runtime (faster, more control)", Pid);
+        Ui.SelectComboItem(Field("settings-ai-provider"), "Aqua's own runtime", Pid);
         Expect(App.Settings.GetString("ai.provider") == "ollama", "missing runtime leaves existing provider active");
         ExpectJournal("llama-install", () => Ui.Invoke(Field("settings-ai-runtime-install")));
         Expect(App.Settings.GetString("ai.provider") == "ollama", "dry-run install doesn't activate a missing executable");

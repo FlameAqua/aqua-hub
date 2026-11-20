@@ -25,6 +25,10 @@ agent handoffs, screenshots, scratch binaries and run artifacts do not belong in
 - Keep action labels and information people need to make a decision visible. Put supplementary explanation behind a
   named hint icon or a control tooltip. Give icon-only controls accessible names and expose important help through UI
   Automation. Mouse hover, keyboard focus and activation should all make help discoverable.
+- Use `HintButton` for help that opens on click or keyboard activation. Its expanded hint dismisses on outside click,
+  Escape, lost focus, navigation or window deactivation. Keep privacy and data loss warnings alongside the setting.
+- Route contextual Settings links through a section and, when helpful, a specific row. Prefer an existing action or
+  a link near the task. Search results and links should expand the destination when necessary and focus a usable input.
 - Show transient progress, validation errors and confirmations in a pop-up over the owning surface. Use `FeedbackPopup`
   for short notices and an overlay outside the layout flow when progress needs its own Cancel action. Keep focus in the
   current task, provide dismissal and announce changes through live regions. A notice appearing or clearing must leave
@@ -111,6 +115,23 @@ CI first checks Markdown encoding, relative link targets and archive locations, 
 Runtime/normal unit dependencies restore locked; the E2E project currently restores its centrally pinned dependencies
 without a lock file. Do not describe a compiled desktop harness as a passed desktop run. Keep test artifacts in temporary
 or dedicated test-run locations rather than repository documentation.
+
+### Off-screen visual checks
+
+Prefer the unit suite and off-screen renders while Adrian is using the desktop. The focused Settings and Deck render
+opens an inactive window outside the display area. It skips first-run discovery, agents and media setup. It uses a
+new or empty scratch profile and disables AI, Ollama management, PC access and remote images in that profile.
+
+```powershell
+$aquaProfile = Join-Path $aquaScratch 'settings-profile'
+$aquaCaptures = Join-Path $aquaScratch 'settings-captures'
+$render = Start-Process -FilePath (Join-Path $aquaScratch 'app-build\AquaHub.exe') -WindowStyle Hidden -PassThru -Wait `
+    -ArgumentList @('--e2e', '--data-dir', "`"$aquaProfile`"", '--snapshot', "`"$aquaCaptures`"", '--pages', 'settings-ui')
+```
+
+Check the exit code, `error.txt` if present and the eight PNGs. The render verifies disclosure and related Settings
+navigation, and captures light and dark layouts. Physical drag, hover, focus, screen readers and native pop-up
+dismissal remain desktop acceptance. Coordinate a visible desktop run when its interaction coverage is needed.
 
 ### Targeted desktop components
 

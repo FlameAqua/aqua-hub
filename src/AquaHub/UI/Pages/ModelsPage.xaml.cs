@@ -69,7 +69,7 @@ public partial class ModelsPage : UserControl, IPage
     }
 
     private void OnSettingsChanged(HubSettings _) => Hub.OnUi(() => { if (_active) Refresh(); });
-    private void OnSettings(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "ai");
+    private void OnSettings(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "ai:provider");
     private void OnCopyMatrix(object sender, RoutedEventArgs e)
     {
         try { var matrix = Hub.LocalAi.CompatibilityMatrix(); if (!Sandbox.Intercept("clipboard", matrix)) Clipboard.SetText(matrix); ModelsFeedback.Show("Compatibility matrix copied."); }

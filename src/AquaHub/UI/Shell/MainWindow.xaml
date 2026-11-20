@@ -14,19 +14,37 @@
     <Window.Resources>
         <Style x:Key="Deck.Action" TargetType="Button">
             <Setter Property="Width" Value="44"/><Setter Property="Height" Value="44"/>
-            <Setter Property="Foreground" Value="{DynamicResource B.AccentText}"/>
+            <Setter Property="Foreground" Value="{DynamicResource B.Text}"/>
+            <Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
             <Setter Property="ToolTipService.ShowsToolTipOnKeyboardFocus" Value="True"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Circle" CornerRadius="22" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}" BorderThickness="1">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        <Grid>
+                            <Border CornerRadius="22" Background="{DynamicResource B.Popup}" IsHitTestVisible="False">
+                                <Border.Effect><DropShadowEffect BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.24"/></Border.Effect>
+                            </Border>
+                            <Border x:Name="Circle" CornerRadius="22" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.ControlStrokeStrong}" BorderThickness="1">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Circle" Property="Background" Value="{DynamicResource B.AccentSoft}"/></Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Circle" Property="BorderBrush" Value="{DynamicResource B.Accent}"/></Trigger>
-                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Circle" Property="Background" Value="{DynamicResource B.ControlHover}"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Circle" Property="Background" Value="{DynamicResource B.Accent}"/>
+                                <Setter TargetName="Circle" Property="BorderBrush" Value="{DynamicResource B.Accent}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Circle" Property="BorderBrush" Value="{DynamicResource B.Accent}"/>
+                                <Setter TargetName="Circle" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Circle" Property="Background" Value="{DynamicResource B.Accent}"/>
+                                <Setter TargetName="Circle" Property="BorderBrush" Value="{DynamicResource B.OnAccent}"/>
+                                <Setter TargetName="Circle" Property="BorderThickness" Value="2"/>
+                                <Setter Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -221,9 +239,9 @@
                             <Button x:Name="DeckApp1" Style="{StaticResource Deck.Action}" Click="OnDeckPinnedApp" AutomationProperties.AutomationId="deck-app-1"/>
                             <Button x:Name="DeckApp2" Style="{StaticResource Deck.Action}" Click="OnDeckPinnedApp" AutomationProperties.AutomationId="deck-app-2"/>
                         </Canvas>
-                        <c:GroupBorder x:Name="DeckTimerPanel" Width="164" Height="194" CornerRadius="20"
+                        <c:GroupBorder x:Name="DeckTimerPanel" Width="164" Height="194" CornerRadius="16"
                                        Padding="12" BorderThickness="1" Visibility="Collapsed"
-                                       Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.PopupStroke}"
+                                       Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.ControlStrokeStrong}"
                                        AutomationProperties.Name="Quick timer" AutomationProperties.AutomationId="deck-timer-panel">
                             <StackPanel>
                                 <DockPanel Margin="0,0,0,4">
@@ -252,17 +270,37 @@
                                     AutomationProperties.Name="Open Deck" AutomationProperties.AutomationId="deck-move"
                                     AutomationProperties.HelpText="Press Enter to open Deck. Use the arrow keys to move it.">
                             <c:DeckGrip.Template>
-                                <ControlTemplate TargetType="Thumb">
-                                    <Border x:Name="Grip" CornerRadius="28" Background="{DynamicResource B.AccentSoft}" BorderBrush="{DynamicResource B.Accent}" BorderThickness="1.5">
+                                <ControlTemplate TargetType="c:DeckGrip">
+                                    <Grid>
+                                      <Border CornerRadius="28" Background="{DynamicResource B.Popup}" IsHitTestVisible="False">
+                                          <Border.Effect><DropShadowEffect BlurRadius="14" ShadowDepth="3" Direction="270" Opacity="0.28"/></Border.Effect>
+                                      </Border>
+                                      <Border x:Name="Grip" CornerRadius="28" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.Accent}" BorderThickness="1.5">
                                         <Grid>
                                             <c:Icon x:Name="DeckLogo" Kind="bolt" Width="22" Height="22" Foreground="{DynamicResource B.AccentText}"/>
                                             <TextBlock Text="{Binding ToolTip, RelativeSource={RelativeSource TemplatedParent}}" x:Name="Countdown"
                                                        VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" FontWeight="SemiBold"
                                                        Foreground="{DynamicResource B.AccentText}" Visibility="Collapsed"/>
                                         </Grid>
-                                    </Border>
+                                      </Border>
+                                    </Grid>
                                     <ControlTemplate.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Popup}"/></Trigger>
+                                        <Trigger Property="IsOpen" Value="True">
+                                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Accent}"/>
+                                            <Setter TargetName="DeckLogo" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="Countdown" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Accent}"/>
+                                            <Setter TargetName="DeckLogo" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="Countdown" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsDragging" Value="True">
+                                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Accent}"/>
+                                            <Setter TargetName="Grip" Property="BorderBrush" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="DeckLogo" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="Countdown" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                        </Trigger>
                                         <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Grip" Property="BorderThickness" Value="3"/></Trigger>
                                         <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Value="timer">
                                             <Setter TargetName="DeckLogo" Property="Visibility" Value="Collapsed"/>

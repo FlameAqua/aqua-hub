@@ -114,7 +114,9 @@ public partial class SettingsPage
             .OrderByDescending(c => selectedIds.Contains(c.ChannelId)).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
             .Select(c => new YouTubeChoice(c, selectedIds.Contains(c.ChannelId), $"{(c.Name.Length > 0 ? c.Name : c.ChannelId)} · {(saved.Contains(c.ChannelId) ? "saved channel" : "subscription")}", ChooseYouTubeLive)).ToArray();
         YouTubeLiveChoices.ItemsSource = choices;
-        YouTubeSelectionStatus.Text = $"{selected.Count} of {StreamsSession.MaxYouTubeChannels} live channels selected · {choices.Length} shown." + (all.Length == 0 ? " Add a saved channel below or connect Google." : "") + (_s.Social.Streams.YouTube ? "" : " Turn on YouTube live checks above to monitor them.");
+        YouTubeSelectionStatus.Text = $"{selected.Count} of {StreamsSession.MaxYouTubeChannels} selected";
+        YouTubeChoiceEmpty.Visibility = choices.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        YouTubeChoiceEmpty.Text = all.Length == 0 ? "Add a channel or import Google subscriptions." : "No matching channels.";
     }
     private bool ChooseYouTubeLive(ChannelRef channel, bool include)
     {
@@ -133,7 +135,7 @@ public partial class SettingsPage
         SaveNow();
         // Keep the current row/focus in place while its saved state changes.
         SettingsFeedback.Hide("youtube-selection-feedback");
-        YouTubeSelectionStatus.Text = $"{selected.Count} of {StreamsSession.MaxYouTubeChannels} live channels selected.";
+        YouTubeSelectionStatus.Text = $"{selected.Count} of {StreamsSession.MaxYouTubeChannels} selected";
         return include;
     }
 }

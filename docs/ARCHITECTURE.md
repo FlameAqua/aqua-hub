@@ -267,6 +267,14 @@ does not exist yet; it belongs to Phase 9. Image Gen shipped early from that pha
 
 ## 7. Windows effects, storage and updates
 
+### Settings and contextual help
+
+Settings groups its existing sections by task. Navigation, search and related links share the section and optional row
+addresses, for example `social:youtube`. The page opens the destination disclosure before scrolling and refocusing.
+Related links stay within the existing Settings editor, preserving its draft and merge behavior. Row descriptions remain
+searchable when shown as contextual help. The Twitch, Google and channel disclosures retain their existing settings and
+account handlers.
+
 ### Agenda, reminders and the deck
 
 Upcoming projects the existing read-only agenda snapshot onto one selected local day. Agenda Scout widens its
@@ -277,6 +285,9 @@ profile settings. Move by dragging, with arrow keys on the bubble, or through UI
 for Ask, Launchpad, up to two pinned apps, today's agenda, a new reminder, the timer and hide. The shortcut direction
 uses available space, and animations follow Aqua's and Windows' motion settings. The settings store replaces the file
 atomically, including while shareable readers have it open.
+
+Deck surfaces use the active theme's opaque popup and accent brushes. Hover and press use the same accent and foreground
+pair. Expansion animates position without changing the opacity of the controls.
 
 The Deck timer accepts 1–60 minutes and creates a normal one-off reminder at a fixed instant. Optional duration
 metadata lets the shell resume displaying the countdown after restart. Edits retain the metadata when the schedule

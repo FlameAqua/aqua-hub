@@ -731,10 +731,7 @@
                                           ToolTip="Use my PC: find and read files in your allowed folders, see your screen, and with your OK open things and work in apps">
                                 <StackPanel Orientation="Horizontal"><c:Icon Kind="computer" Width="12" Height="12"/><TextBlock Text="Use my PC" Margin="5,0,0,0"/></StackPanel>
                             </ToggleButton>
-                            <Button x:Name="ModeHelp" Style="{StaticResource Btn.Icon}" Width="28" Height="28" Margin="4,0,0,0"
-                                    Click="OnModeHelp" AutomationProperties.Name="About Ask modes">
-                                <c:Icon Kind="info" Width="14" Height="14"/>
-                            </Button>
+                            <c:HintButton x:Name="ModeHelp" Margin="4,0,0,0" AutomationProperties.Name="About Ask modes"/>
                             <Button x:Name="TidyUndo" Style="{StaticResource Btn.Link}" Content="Undo" Visibility="Collapsed" Click="OnUndoTidy" VerticalAlignment="Center"
                                     Margin="6,0,0,0" FontSize="12" AutomationProperties.AutomationId="ask-tidy-undo" ToolTip="Put back the words exactly as the recognizer heard them"/>
                         </WrapPanel>

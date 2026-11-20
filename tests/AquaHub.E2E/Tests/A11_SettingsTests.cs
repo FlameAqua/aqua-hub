@@ -35,7 +35,7 @@ public sealed class A11_SettingsTests : E2ETestBase
     private static readonly string[] SectionNames =
     {
         "General", "Shortcuts", "Location & weather", "News", "Social", "Markets", "Agenda", "Predictions", "AI & models", "Ask Aqua", "Apps & scenes", "Notifications", "Privacy & data",
-        "Debug", "About",
+        "Diagnostics", "About",
     };
 
     // ───────────── helpers ─────────────
@@ -198,7 +198,7 @@ public sealed class A11_SettingsTests : E2ETestBase
             ExpectJournal("autostart", () => Ui.Toggle(Field("Start with Windows", ControlType.CheckBox)), d => d == before.ToString());
             App.Settings.WaitForBool("general.launchAtStartup", before);
         });
-        Flip("Settings general", "Closing the window keeps Aqua Hub running", "general.closeToTray");
+        Flip("Settings general", "Keep running in the tray", "general.closeToTray");
         Flip("Settings general", "24-hour clock", "general.use24Hour");
         Flip("Settings general", "Eco mode", "general.ecoMode");
         Flip("Settings general", "Reduce motion", "general.reduceMotion");
@@ -626,7 +626,7 @@ public sealed class A11_SettingsTests : E2ETestBase
         {
             var test = Ui.ButtonWithText(Page, "Test") ?? Ui.WaitFind(Page, Ui.Button("Connection"), "test button");
             Ui.Invoke(test);
-            Wait.For(() => Ui.NameOf(Ui.WaitFind(Page, Ui.Id("AiTest"), "test result")).StartsWith("Connected to", StringComparison.Ordinal), "'Connected to …'", TimeSpan.FromSeconds(20));
+            Wait.For(() => Ui.NameOf(Ui.WaitFind(Page, Ui.Id("ai-connection-feedback"), "test result")).StartsWith("Connected to", StringComparison.Ordinal), "connection result", TimeSpan.FromSeconds(20));
         });
         Flip("Settings AI", "Pause AI while gaming", "ai.pauseWhenFullscreen");
         AddChip("Settings AI", "BriefTimes", "12:30", "12:30", "ai.briefTimes");
@@ -779,9 +779,9 @@ public sealed class A11_SettingsTests : E2ETestBase
             Wait.For(() => Ui.Find(Page, Ui.Text("Caches cleared")) is not null, "'Caches cleared'");
             App.Log.WaitForLine(mark, l => l.Contains("[agents] "), "agents rerun", TimeSpan.FromSeconds(30));
         });
-        Check("Settings privacy", "Edit JSON → journal edit-json", () =>
-            ExpectJournal("edit-json", () => Ui.Invoke(Ui.WaitFind(Page, Ui.Button("Open settings.json in Notepad (power users)"), "Edit JSON")), d => d.EndsWith("settings.json", StringComparison.OrdinalIgnoreCase)));
-        Section("Debug");
+        Section("Diagnostics");
+        Check("Settings diagnostics", "Edit JSON → journal edit-json", () =>
+            ExpectJournal("edit-json", () => Ui.Invoke(Ui.WaitFind(Page, Ui.Id("settings-edit-json"), "Edit JSON")), d => d.EndsWith("settings.json", StringComparison.OrdinalIgnoreCase)));
         Check("Settings debug", "Diagnostics log › Open log → journal open-log", () =>
             ExpectJournal("open-log", () => Ui.Invoke(Ui.WaitFind(Page, Ui.Id("debug-open-log"), "Open log")), d => d.EndsWith("aquahub.log", StringComparison.OrdinalIgnoreCase)));
         Section("About");

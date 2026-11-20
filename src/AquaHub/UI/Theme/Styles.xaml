@@ -859,6 +859,13 @@
         </Setter>
     </Style>
 
+    <Style TargetType="c:HintButton" BasedOn="{StaticResource Btn.Icon}">
+        <Setter Property="Width" Value="26"/><Setter Property="Height" Value="26"/>
+        <Setter Property="Content" Value="Help"/>
+        <Setter Property="ToolTipService.ShowsToolTipOnKeyboardFocus" Value="True"/>
+        <Setter Property="ContentTemplate"><Setter.Value><DataTemplate><c:Icon Kind="info" Width="14" Height="14"/></DataTemplate></Setter.Value></Setter>
+    </Style>
+
     <!-- Setting row -->
     <Style TargetType="c:SettingRow">
         <Setter Property="Foreground" Value="{DynamicResource B.Text}"/>
@@ -870,6 +877,7 @@
                     <Border Background="{DynamicResource B.Card}" BorderBrush="{DynamicResource B.CardStroke}" BorderThickness="1" CornerRadius="8" Padding="16,12">
                         <StackPanel>
                             <Grid MinHeight="36">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="36"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
@@ -877,10 +885,14 @@
                                 </Grid.ColumnDefinitions>
                                 <c:Icon x:Name="Ico" Kind="{TemplateBinding Icon}" Width="18" Height="18" Margin="2,0,16,0" Foreground="{DynamicResource B.Text2}" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="{TemplateBinding Title}" FontSize="14"/>
+                                    <DockPanel HorizontalAlignment="Left">
+                                        <c:HintButton x:Name="Hint" DockPanel.Dock="Right" HelpText="{TemplateBinding Description}" Margin="4,0,0,0" Visibility="Collapsed"
+                                                      AutomationProperties.Name="{Binding Title, RelativeSource={RelativeSource TemplatedParent}, StringFormat=About {0}}"/>
+                                        <TextBlock Text="{TemplateBinding Title}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                    </DockPanel>
                                     <TextBlock x:Name="Desc" Text="{TemplateBinding Description}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,2,0,0"/>
                                 </StackPanel>
-                                <ContentPresenter Grid.Column="2" VerticalAlignment="Center"/>
+                                <ContentPresenter x:Name="ControlHost" Grid.Column="2" VerticalAlignment="Center"/>
                             </Grid>
                             <ContentPresenter x:Name="BelowHost" Content="{TemplateBinding Below}" Margin="36,10,0,0"/>
                         </StackPanel>
@@ -890,8 +902,20 @@
                             <Setter TargetName="Ico" Property="Visibility" Value="Collapsed"/>
                             <Setter TargetName="BelowHost" Property="Margin" Value="0,10,0,0"/>
                         </Trigger>
+                        <Trigger Property="ShowDescription" Value="False">
+                            <Setter TargetName="Desc" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="Hint" Property="Visibility" Value="Visible"/>
+                        </Trigger>
                         <Trigger Property="Description" Value="">
                             <Setter TargetName="Desc" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="Hint" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                        <Trigger Property="StackControls" Value="True">
+                            <Setter TargetName="ControlHost" Property="Grid.Row" Value="1"/>
+                            <Setter TargetName="ControlHost" Property="Grid.Column" Value="1"/>
+                            <Setter TargetName="ControlHost" Property="Grid.ColumnSpan" Value="2"/>
+                            <Setter TargetName="ControlHost" Property="HorizontalAlignment" Value="Left"/>
+                            <Setter TargetName="ControlHost" Property="Margin" Value="0,6,0,0"/>
                         </Trigger>
                         <Trigger Property="Below" Value="{x:Null}">
                             <Setter TargetName="BelowHost" Property="Visibility" Value="Collapsed"/>

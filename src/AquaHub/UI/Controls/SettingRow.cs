@@ -14,6 +14,14 @@ public class SettingRow : ContentControl
     public static readonly DependencyProperty IconProperty = DependencyProperty.Register(nameof(Icon), typeof(string), typeof(SettingRow), new PropertyMetadata(null));
     public static readonly DependencyProperty BelowProperty = DependencyProperty.Register(nameof(Below), typeof(object), typeof(SettingRow), new PropertyMetadata(null));
     public static readonly DependencyProperty KeywordsProperty = DependencyProperty.Register(nameof(Keywords), typeof(string), typeof(SettingRow), new PropertyMetadata(""));
+    public static readonly DependencyProperty ShowDescriptionProperty = DependencyProperty.Register(nameof(ShowDescription), typeof(bool),
+        typeof(SettingRow), new PropertyMetadata(true));
+    public static readonly DependencyProperty ReflowControlsProperty = DependencyProperty.Register(nameof(ReflowControls), typeof(bool),
+        typeof(SettingRow), new PropertyMetadata(false, (sender, _) => ((SettingRow)sender).UpdateLayoutMode()));
+    public static readonly DependencyProperty FocusTargetProperty = DependencyProperty.Register(nameof(FocusTarget), typeof(Control), typeof(SettingRow));
+    private static readonly DependencyPropertyKey StackControlsPropertyKey = DependencyProperty.RegisterReadOnly(nameof(StackControls), typeof(bool),
+        typeof(SettingRow), new PropertyMetadata(false));
+    public static readonly DependencyProperty StackControlsProperty = StackControlsPropertyKey.DependencyProperty;
 
     public string Title { get => (string)GetValue(TitleProperty); set => SetValue(TitleProperty, value); }
     public string Description { get => (string)GetValue(DescriptionProperty); set => SetValue(DescriptionProperty, value); }
@@ -22,11 +30,25 @@ public class SettingRow : ContentControl
     public object? Below { get => GetValue(BelowProperty); set => SetValue(BelowProperty, value); }
     /// <summary>Other words people might search Settings with ("dark mode" for Theme). Not shown.</summary>
     public string Keywords { get => (string)GetValue(KeywordsProperty); set => SetValue(KeywordsProperty, value); }
+    public bool ShowDescription { get => (bool)GetValue(ShowDescriptionProperty); set => SetValue(ShowDescriptionProperty, value); }
+    public bool ReflowControls { get => (bool)GetValue(ReflowControlsProperty); set => SetValue(ReflowControlsProperty, value); }
+    public Control? FocusTarget { get => (Control?)GetValue(FocusTargetProperty); set => SetValue(FocusTargetProperty, value); }
+    public bool StackControls => (bool)GetValue(StackControlsProperty);
 
     public SettingRow()
     {
         Loaded += (_, _) => NameControls();
+        SizeChanged += (_, e) => { if (e.WidthChanged) UpdateLayoutMode(); };
     }
+
+    protected override void OnContentChanged(object oldContent, object newContent)
+    {
+        base.OnContentChanged(oldContent, newContent);
+        UpdateLayoutMode();
+    }
+
+    private void UpdateLayoutMode() => SetValue(StackControlsPropertyKey,
+        ReflowControls && ActualWidth > 0 && ActualWidth < 570 && Content is not (null or CheckBox));
 
     /// <summary>
     /// Gives the row's inputs an accessible name (screen readers, UI automation): the row title. A name set on the

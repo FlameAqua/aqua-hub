@@ -730,7 +730,8 @@ public partial class AskPage : UserControl, IPage
         if (Session.Voice.IsListening) { Session.Voice.Stop(); return; }
         if (Hub.S.Ask.Voice == "off")
         {
-            AskFeedback.Show("Turn on voice input in Settings › Ask Aqua.", "ask-voice-feedback", error: true);
+            AskFeedback.Show("Voice input is off.", "ask-voice-feedback", error: true, actionLabel: "Voice settings",
+                action: () => Hub.Windows.ShowMain("settings", "ask:voice"));
             return;
         }
         _tidyCts?.Cancel();
@@ -1226,14 +1227,7 @@ public partial class AskPage : UserControl, IPage
             : Session.Computer ? "Files in " + string.Join(", ", s.Folders.Take(3).Select(FolderLabel)) + (s.Folders.Count > 3 ? "…" : "") + (s.ConfirmActions ? " · actions ask first" : "")
             : Session.Think ? "Think gives the model more time to answer."
             : "Use the mode buttons to choose how Aqua answers.";
-        if (ModeHelp.ToolTip is ToolTip { Content: string existing } && existing == help) return;
-        ModeHelp.ToolTip = new ToolTip { Content = help, PlacementTarget = ModeHelp };
-        System.Windows.Automation.AutomationProperties.SetHelpText(ModeHelp, help);
-    }
-
-    private void OnModeHelp(object sender, RoutedEventArgs e)
-    {
-        if (ModeHelp.ToolTip is ToolTip tip) tip.IsOpen = true;
+        ModeHelp.HelpText = help;
     }
 
     internal static string FolderLabel(string folder) => folder.ToUpperInvariant() switch

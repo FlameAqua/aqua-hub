@@ -8,6 +8,9 @@ namespace AquaHub.UI.Controls;
 /// <summary>Exposes the same movement as dragging through the standard UI Automation Move action.</summary>
 public sealed class DeckGrip : Thumb
 {
+    public static readonly DependencyProperty IsOpenProperty = DependencyProperty.Register(nameof(IsOpen), typeof(bool), typeof(DeckGrip));
+
+    public bool IsOpen { get => (bool)GetValue(IsOpenProperty); set => SetValue(IsOpenProperty, value); }
     internal Action<Point>? MoveRequested { get; set; }
     internal Action? ToggleRequested { get; set; }
 

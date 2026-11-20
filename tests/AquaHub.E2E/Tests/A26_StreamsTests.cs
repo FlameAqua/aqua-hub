@@ -65,6 +65,8 @@ public sealed class A26_StreamsTests(AppFixture fixture, ITestOutputHelper outpu
     public void T03_TwitchRequiresPublicClientIdAndNeverSignsInDuringOfflineE2E() => Run(() =>
     {
         GoTo("social"); Ui.Invoke(Field("streams-sources")); PageRoot("settings");
+        Assert.Null(Ui.Find(PageRoot("settings"), Ui.Id("settings-twitch-connect")));
+        Ui.Expand(Field("settings-twitch-details"));
         Ui.SetValue(Field("settings-twitch-client-id"), "");
         Ui.Invoke(Field("settings-twitch-connect"));
         Wait.For(() => Ui.NameOf(Field("twitch-feedback")).Contains("public Twitch client ID"), "client ID explanation");
@@ -119,8 +121,10 @@ public sealed class A26_StreamsTests(AppFixture fixture, ITestOutputHelper outpu
             ((WindowPattern)Main.GetCurrentPattern(WindowPattern.Pattern)).SetWindowVisualState(WindowVisualState.Normal);
             ((TransformPattern)Main.GetCurrentPattern(TransformPattern.Pattern)).Resize(1000, 760);
             GoTo("social"); Ui.Invoke(Field("streams-sources")); PageRoot("settings");
+            Ui.Expand(Field("settings-google-details"));
             ExpectJournal("google-connect", () => Ui.Invoke(Field("settings-google-connect")));
             Assert.Contains("intercepted", Ui.NameOf(Field("google-feedback")));
+            Ui.Expand(Field("settings-livechannels-details"));
             Ui.SetValue(Field("settings-youtube-filter"), "Fixture");
             ShowChoice(Field("settings-youtube-live-choice"));
             Shot("google-channel-chooser-light");
@@ -149,6 +153,7 @@ public sealed class A26_StreamsTests(AppFixture fixture, ITestOutputHelper outpu
         Run(() =>
         {
             GoTo("social"); Ui.Invoke(Field("streams-sources")); PageRoot("settings");
+            Ui.Expand(Field("settings-livechannels-details"));
             Ui.SetValue(Field("settings-youtube-filter"), "Channel G");
             var seventh = Field("settings-youtube-live-choice");
             Ui.Toggle(seventh);

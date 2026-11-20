@@ -151,6 +151,9 @@ These ship independently of reactions, interest decay or a For You ranking layer
   Verify the setup, generation and error recovery with the installed ComfyUI engine in dark and light themes.
 - Apply the [interaction and feedback standard](DEVELOPMENT.md#interaction-and-feedback) to subsequent UI work.
   Verify the Deck's physical drag, keyboard traversal, reduced motion and screen-reader announcements in a normal build.
+- Settings groups related preferences, reveals detailed Social setup on demand and supports links to specific rows.
+  Try mouse and keyboard dismissal of Ask's mode hint, Deck hover in both themes, and Social source setup and related
+  links in the owner build before preparing the next release.
 
 ## Then Phase 8: find anything
 

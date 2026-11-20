@@ -30,9 +30,8 @@
       <Border Background="{DynamicResource B.Card}" BorderBrush="{DynamicResource B.CardStroke}" BorderThickness="1" CornerRadius="16" Padding="16">
        <StackPanel>
         <DockPanel Margin="0,0,0,8">
-         <Button DockPanel.Dock="Right" Style="{StaticResource StudioTool}" Width="28" Height="28"
-                 AutomationProperties.Name="Prompt help" AutomationProperties.HelpText="Describe what you want to see. With a reference image, describe what should change."
-                 ToolTipService.ShowsToolTipOnKeyboardFocus="True" ToolTip="Describe what you want to see. With a reference image, describe what should change."><c:Icon Kind="info" Width="15" Height="15"/></Button>
+         <c:HintButton DockPanel.Dock="Right" Width="28" Height="28" AutomationProperties.Name="Prompt help"
+                       HelpText="Describe what you want to see. With a reference image, describe what should change."/>
          <TextBlock Text="Prompt" Style="{StaticResource T.Subtitle}" VerticalAlignment="Center"/>
         </DockPanel>
         <TextBox x:Name="Prompt" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="238" MaxLength="4000"
@@ -131,9 +130,8 @@
          <ComboBoxItem Content="Draft (20)" Tag="20"/><ComboBoxItem Content="Standard (35)" Tag="35"/><ComboBoxItem Content="Fine (50)" Tag="50"/>
         </ComboBox>
         <DockPanel Margin="0,14,0,6">
-         <Button DockPanel.Dock="Right" Style="{StaticResource StudioTool}" Width="26" Height="26"
-                 AutomationProperties.Name="Seed help" AutomationProperties.HelpText="Leave blank for a random seed or reuse a seed to reproduce an image."
-                 ToolTipService.ShowsToolTipOnKeyboardFocus="True" ToolTip="Leave blank for a random seed or reuse a seed to reproduce an image."><c:Icon Kind="info" Width="15" Height="15"/></Button>
+         <c:HintButton DockPanel.Dock="Right" AutomationProperties.Name="Seed help"
+                       HelpText="Leave blank for a random seed or reuse a seed to reproduce an image."/>
          <TextBlock Text="Seed" Style="{StaticResource T.CardTitle}" VerticalAlignment="Center"/>
         </DockPanel>
         <TextBox x:Name="Seed" ui:UiProps.Placeholder="Random" MaxLength="16" AutomationProperties.Name="Image seed"/>
@@ -157,10 +155,8 @@
         </StackPanel>
         <Button x:Name="Recover" Content="Check GPU release" Click="OnRecover" Style="{StaticResource Btn.Standard}" Visibility="Collapsed" Margin="0,12,0,0" AutomationProperties.AutomationId="image-recover"/>
         <DockPanel Margin="0,22,0,8">
-         <Button DockPanel.Dock="Right" Style="{StaticResource StudioTool}" Width="26" Height="26" AutomationProperties.Name="Gallery storage help"
-                 AutomationProperties.HelpText="Expiry runs when Aqua opens and hourly. Aqua removes tracked copies from the selected output folder. Exports are kept."
-                 ToolTipService.ShowsToolTipOnKeyboardFocus="True"
-                 ToolTip="Expiry runs when Aqua opens and hourly. Aqua removes tracked copies from the selected output folder. Exports are kept."><c:Icon Kind="info" Width="15" Height="15"/></Button>
+         <c:HintButton DockPanel.Dock="Right" AutomationProperties.Name="Gallery storage help"
+                       HelpText="Expiry runs when Aqua opens and hourly. Aqua removes tracked copies from the selected output folder. Exports are kept."/>
          <TextBlock Text="Gallery storage" Style="{StaticResource T.CardTitle}" VerticalAlignment="Center"/>
         </DockPanel>
         <DockPanel><TextBlock Text="Keep images" VerticalAlignment="Center" Margin="0,0,12,0"/>

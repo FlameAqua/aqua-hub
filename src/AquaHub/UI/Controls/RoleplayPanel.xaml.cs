@@ -116,11 +116,6 @@ public partial class RoleplayPanel : UserControl
         RoleplayFeedback.Show(State.Status, "roleplay-feedback", State.Error, State.Busy);
     }
 
-    private void OnRoleplayHint(object sender, RoutedEventArgs e)
-    {
-        if (ModelHint.ToolTip is ToolTip tip) tip.IsOpen = true;
-    }
-
     private void OnSceneEdited(object sender, TextChangedEventArgs e)
     {
         if (_syncing) return;
@@ -325,15 +320,9 @@ public partial class RoleplayPanel : UserControl
             InputBox.Text = State.Draft;
             _syncing = false;
         }
-        if (ModelHint.ToolTip is null)
-        {
-            var model = Hub.S.Ai.Provider.Equals("llamacpp", StringComparison.OrdinalIgnoreCase)
-                ? "Uses your Creative or Main model."
-                : "Uses your configured AI model.";
-            var help = model + " Copy the transcript to keep it after closing Aqua.";
-            ModelHint.ToolTip = new ToolTip { Content = help, PlacementTarget = ModelHint };
-            System.Windows.Automation.AutomationProperties.SetHelpText(ModelHint, help);
-        }
+        ModelHint.HelpText = Hub.S.Ai.Provider.Equals("llamacpp", StringComparison.OrdinalIgnoreCase)
+            ? "Uses your Creative or Main model. Copy the transcript to keep it after closing Aqua."
+            : "Uses your configured AI model. Copy the transcript to keep it after closing Aqua.";
     }
 
     private void ScrollToEnd() => Dispatcher.BeginInvoke(() => TranscriptScroll.ScrollToEnd(), System.Windows.Threading.DispatcherPriority.Background);
