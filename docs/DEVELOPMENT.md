@@ -146,6 +146,9 @@ quiet hours/fullscreen, screen-reader use and physical sleep/resume remain manua
 read-aloud and personality flows. It uses the app's speech intercept, local template data and UI Automation button
 patterns. The render exercises dark and light themes, narrow width, saved personality editing and scene creation.
 Audio devices, physical interaction, model output quality and real concurrent engine resource use require separate checks.
+`./scripts/e2e.ps1 -Component Recipes -Filter T01 -Root <scratch-parent>` uses fixture Windows readings in an inactive
+off-screen window to verify the Workbench and Agents path, the explicit confirmation, cancellation, run selection and
+the This PC status display. Real Windows reads, native deletion dialogs and physical accessibility remain acceptance.
 `-Component Ask,Images` unions groups; `-Filter A24` or `-Smoke` narrows them. `-ListComponents` lists scope, `-Plan`
 resolves the filter without building, and `-ListTests` discovers the selection without launching Aqua or creating profiles.
 CI runs `scripts/check-e2e-selection.ps1`; it compiles, but does not execute, desktop tests. Dependencies must already

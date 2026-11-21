@@ -22,7 +22,7 @@ namespace AquaHub.Services;
 /// It seeds demo chats, skills and memories, so run it against a scratch profile (--data-dir): there, each run
 /// starts with no chats, so the captures never show an earlier run's demo chats twice.
 /// </summary>
-public static class SnapshotRunner
+public static partial class SnapshotRunner
 {
     public static async Task RunAsync(string outDir, int waitSeconds, string? only, bool scratchProfile = false)
     {
@@ -35,6 +35,7 @@ public static class SnapshotRunner
             if (only == "settings-ui") { await SettingsAsync(outDir); return; }
             if (only == "search-ui") { await SearchAsync(outDir); return; }
             if (only == "creativity-ui") { await CreativityAsync(outDir); return; }
+            if (only == "recipes-ui") { await RecipesAsync(outDir); return; }
             if (scratchProfile) Hub.Core.Chats.DeleteAll();
             // QA mode renders AI content even if a game is running (normal mode pauses AI then).
             Hub.Core.Llm.PauseReason = () => null;

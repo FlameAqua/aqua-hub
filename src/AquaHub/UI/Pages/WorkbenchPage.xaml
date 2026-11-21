@@ -68,11 +68,66 @@
             <RadioButton x:Name="PersonalitiesTab" Style="{StaticResource Tab}" Checked="OnTab" AutomationProperties.AutomationId="wb-tab-personalities">
                 <TextBlock Text="Personalities"/>
             </RadioButton>
+            <RadioButton x:Name="RecipesTab" Style="{StaticResource Tab}" Content="Recipes" Checked="OnTab" AutomationProperties.AutomationId="wb-tab-recipes"/>
         </WrapPanel>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <Grid Margin="0,0,8,8">
                 <c:PersonalityWorkbench x:Name="PersonalitiesPanel" Visibility="Collapsed"/>
+                <StackPanel x:Name="RecipesPanel" Visibility="Collapsed">
+                    <c:Card x:Name="SavedRecipesCard" Title="Saved recipes" Icon="book">
+                        <StackPanel>
+                            <Button x:Name="NewRecipe" Content="New recipe" Click="OnNewRecipe" Style="{StaticResource Btn.Accent}"
+                                    HorizontalAlignment="Left" AutomationProperties.AutomationId="wb-recipe-new"/>
+                            <TextBlock x:Name="NoRecipes" Text="Create a recipe to check your PC and review the findings."
+                                       Style="{StaticResource T.Body2}" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                            <ItemsControl x:Name="SavedRecipes" Margin="0,6,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <WrapPanel Margin="0,4,0,0">
+                                            <Button Style="{StaticResource Btn.Link}" Content="{Binding Draft.Name}" Click="OnEditRecipe"
+                                                    AutomationProperties.Name="{Binding Draft.Name, StringFormat=Edit recipe {0}}"
+                                                    AutomationProperties.AutomationId="{Binding Id, StringFormat=wb-recipe-edit-{0}}"/>
+                                            <Button Style="{StaticResource Btn.Link}" Content="View in Agents" Margin="12,0,0,0" Click="OnViewRecipe"
+                                                    AutomationProperties.Name="{Binding Draft.Name, StringFormat=View {0} in Agents}"/>
+                                        </WrapPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </c:Card>
+                    <c:GroupBorder x:Name="RecipeEditor" Style="{StaticResource Card}" Padding="18,14" Margin="0,2,0,0"
+                                   Visibility="Collapsed" PreviewKeyDown="OnRecipeEditorKey"
+                                   AutomationProperties.Name="Recipe editor" AutomationProperties.AutomationId="wb-recipe-editor">
+                        <StackPanel>
+                            <TextBlock Text="Recipe editor" Style="{StaticResource T.CardTitle}"/>
+                            <Label Content="_Name" Target="{Binding ElementName=RecipeName}" Padding="0,10,0,4" Foreground="{DynamicResource B.Text2}"/>
+                            <TextBox x:Name="RecipeName" MaxLength="80" AutomationProperties.AutomationId="wb-recipe-name"/>
+                            <Label Content="_Purpose (optional)" Target="{Binding ElementName=RecipePurpose}" Padding="0,10,0,4" Foreground="{DynamicResource B.Text2}"/>
+                            <TextBox x:Name="RecipePurpose" MaxLength="200" TextWrapping="Wrap" AutomationProperties.AutomationId="wb-recipe-purpose"/>
+                            <TextBlock Text="1. Run PC health check" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,14,0,0"/>
+                            <TextBlock Text="Reads Windows diagnostics and replaces the latest report in This PC." Style="{StaticResource T.Body2}"
+                                       TextWrapping="Wrap" Margin="0,4,0,8"/>
+                            <CheckBox x:Name="RecipeReport" Content="Add step 2 · Build local report" AutomationProperties.AutomationId="wb-recipe-report"/>
+                            <WrapPanel Margin="18,6,0,0" Visibility="{Binding IsChecked, ElementName=RecipeReport, Converter={StaticResource Vis}}">
+                                <Label Content="_Include" Target="{Binding ElementName=RecipeScope}" Padding="0,6,10,4" Foreground="{DynamicResource B.Text2}"/>
+                                <ComboBox x:Name="RecipeScope" HorizontalAlignment="Left" MinWidth="180" AutomationProperties.AutomationId="wb-recipe-scope">
+                                    <ComboBoxItem Content="Actionable findings"/>
+                                    <ComboBoxItem Content="All findings"/>
+                                </ComboBox>
+                            </WrapPanel>
+                            <TextBlock Text="Runs require your approval in Agents. Health results stay on this PC." Style="{StaticResource T.Body2}"
+                                       TextWrapping="Wrap" Margin="0,14,0,8"/>
+                            <WrapPanel>
+                                <Button x:Name="SaveRecipe" Content="Save recipe" Click="OnSaveRecipe" Style="{StaticResource Btn.Accent}"
+                                        Margin="0,0,8,6" AutomationProperties.AutomationId="wb-recipe-save"/>
+                                <Button Content="Cancel" Click="OnCloseRecipeEditor" Style="{StaticResource Btn.Standard}" Margin="0,0,8,6"/>
+                                <Button x:Name="DeleteRecipe" Content="Delete recipe" Click="OnDeleteRecipe" Style="{StaticResource Btn.Link}" Margin="0,0,0,6"
+                                        AutomationProperties.AutomationId="wb-recipe-delete"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </c:GroupBorder>
+                </StackPanel>
                 <!-- ═══ Skills ═══ -->
                 <StackPanel x:Name="SkillsPanel">
                     <!-- Teach -->

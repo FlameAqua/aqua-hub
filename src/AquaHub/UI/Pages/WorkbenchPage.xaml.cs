@@ -54,6 +54,8 @@ public partial class WorkbenchPage : UserControl, IPage
     {
         Hub.Core.Workbench.Changed -= OnChanged;
         Hub.Core.Workbench.Changed += OnChanged;
+        Hub.Core.Recipes.Changed -= OnRecipesChanged;
+        Hub.Core.Recipes.Changed += OnRecipesChanged;
         Refresh();
         BuildAbilities();
         switch (arg)
@@ -61,6 +63,14 @@ public partial class WorkbenchPage : UserControl, IPage
             case "memory": MemoryTab.IsChecked = true; break;
             case "abilities": AbilitiesTab.IsChecked = true; break;
             case "personalities": PersonalitiesTab.IsChecked = true; break;
+            case "recipes": RecipesTab.IsChecked = true; RefreshRecipes(); break;
+            case not null when arg.StartsWith("recipe:", StringComparison.Ordinal):
+                RecipesTab.IsChecked = true;
+                RefreshRecipes();
+                if (Guid.TryParse(arg.AsSpan(7), out var recipeId) && Hub.Core.Recipes.State.Recipes.FirstOrDefault(r => r.Id == recipeId) is { } recipe)
+                    OpenRecipeEditor(recipe);
+                break;
+            case null when RecipesTab.IsChecked == true: RefreshRecipes(); break;
             case null when PersonalitiesTab.IsChecked == true: break;
             case not null when arg.StartsWith("teach:", StringComparison.Ordinal):
                 SkillsTab.IsChecked = true;
@@ -78,6 +88,7 @@ public partial class WorkbenchPage : UserControl, IPage
     public void OnNavigatedFrom()
     {
         Hub.Core.Workbench.Changed -= OnChanged;
+        Hub.Core.Recipes.Changed -= OnRecipesChanged;
         _cts?.Cancel();
         WorkbenchFeedback.Hide();
     }
@@ -92,6 +103,8 @@ public partial class WorkbenchPage : UserControl, IPage
         MemoryPanel.Visibility = MemoryTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         AbilitiesPanel.Visibility = AbilitiesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         PersonalitiesPanel.Visibility = PersonalitiesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        RecipesPanel.Visibility = RecipesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        if (RecipesTab.IsChecked == true) RefreshRecipes();
         if (AbilitiesTab.IsChecked == true) BuildAbilities();
     }
 

@@ -309,7 +309,12 @@ public sealed record AgentStatus
     public bool UsesAi { get; init; }
 }
 
-public sealed record AgentRunRecord(string Agent, DateTimeOffset Started, TimeSpan Duration, bool Ok, string Message);
+public enum BuiltInRunOutcome { Finished, Waiting, Failed, Cancelled }
+
+public sealed record AgentRunRecord(string Agent, DateTimeOffset Started, TimeSpan Duration, bool Ok, string Message)
+{
+    public BuiltInRunOutcome Outcome { get; init; } = Ok ? BuiltInRunOutcome.Finished : BuiltInRunOutcome.Failed;
+}
 
 // ───────────────────────────── System ─────────────────────────────
 

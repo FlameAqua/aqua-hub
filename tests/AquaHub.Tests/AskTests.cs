@@ -563,6 +563,7 @@ internal sealed class FakeOllama : IDisposable
     public string[] Models { get; set; } = { "qwen3.5:9b" };
     /// <summary>Per-model capabilities; null uses <see cref="Capabilities"/> for every model.</summary>
     public Func<string, string[]>? CapabilitiesFor { get; set; }
+    public string? ChatRedirect { get; set; }
 
     public FakeOllama()
     {
@@ -627,6 +628,12 @@ internal sealed class FakeOllama : IDisposable
                 var caps = CapabilitiesFor?.Invoke(model) ?? Capabilities;
                 payload = new JsonObject { ["capabilities"] = new JsonArray(caps.Select(c => (JsonNode)c).ToArray()) }.ToJsonString();
             }
+            else if (path.EndsWith("/api/chat") && ChatRedirect is { } redirect)
+            {
+                await stream.WriteAsync(Encoding.ASCII.GetBytes(
+                    $"HTTP/1.1 307 Temporary Redirect\r\nLocation: {redirect}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+                return;
+            }
             else if (path.EndsWith("/api/chat") && JsonNode.Parse(new string(body)) is { } json && json["format"] is not null)
             {
                 lock (JsonChats) JsonChats.Add(json);
@@ -668,6 +675,24 @@ public class AskAgentTests
         var http = new HttpFetcher(null);
         var agent = new AskAgent(state, null, llm, () => s, new WebSearch(http, () => s, new InMemorySecretStore()), new WebReader());
         return (agent, state, s, llm);
+    }
+
+    [Fact]
+    public async Task LocalOnlyCompletionDoesNotForwardItsBodyOrCaptureOutput()
+    {
+        using var destination = new FakeOllama();
+        using var server = new FakeOllama { ChatRedirect = destination.Endpoint + "/api/chat" };
+        var settings = new HubSettings();
+        settings.Ai.Endpoint = server.Endpoint;
+        using var llm = new LlmClient(() => settings.Ai, new InMemorySecretStore());
+        var request = new LlmRequest { LocalOnly = true, CaptureOutput = false, Messages = { new("user", "private health report") } };
+        Assert.True((await llm.CheckAsync()).Available);
+        await Assert.ThrowsAsync<HttpRequestException>(() => llm.CompleteAsync(request));
+        Assert.Empty(destination.Chats);
+        server.ChatRedirect = null;
+        await llm.CheckAsync(); // An HTTP failure marks the route unavailable until its next probe.
+        Assert.Equal("Hello", (await llm.CompleteAsync(request)).Text);
+        Assert.Empty(llm.RecentOutputs);
     }
 
     [Fact]

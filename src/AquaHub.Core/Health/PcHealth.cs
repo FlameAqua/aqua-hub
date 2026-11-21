@@ -5,6 +5,22 @@ using AquaHub.Core.Util;
 namespace AquaHub.Core.Health;
 
 public enum HealthLevel { Good, Info, Warning, Problem }
+public enum HealthReadingState { Observed, Partial, Unavailable, Unsupported, Denied, TimedOut }
+
+public sealed record HealthReading(string Name, HealthReadingState State)
+{
+    public bool Incomplete => State is not (HealthReadingState.Observed or HealthReadingState.Unsupported);
+    public string Description => State switch
+    {
+        HealthReadingState.Observed => "Read from Windows",
+        HealthReadingState.Partial => "Some readings were unavailable or reached the collection limit",
+        HealthReadingState.Unavailable => "Windows returned no usable reading",
+        HealthReadingState.Unsupported => "Not reported on this PC",
+        HealthReadingState.Denied => "Windows denied access",
+        HealthReadingState.TimedOut => "Windows did not respond in time",
+        _ => "Unavailable",
+    };
+}
 
 /// <summary>
 /// One result of the health check: what it looked at, how it is, what that means and what to do. <see cref="Tool"/> names a
@@ -18,6 +34,7 @@ public sealed record PhysicalDiskFact(string Name, string Media, string Health);
 public sealed record BatteryFact(double DesignWh, double FullWh, int? Cycles);
 public sealed record AntivirusFact(string Name, bool Enabled, bool UpToDate);
 public sealed record CrashFact(string App, int Count);
+public sealed record FirewallProfileFact(string Profile, bool? Enabled);
 
 /// <summary>What the health check found out about the PC (read-only checks). Null means that check couldn't run.</summary>
 public sealed record HealthFacts
@@ -46,6 +63,11 @@ public sealed record HealthFacts
     public double TopMemoryMb { get; init; }
     /// <summary>Checks that couldn't run, and why ("Battery wear: Windows didn't say").</summary>
     public List<string> Skipped { get; init; } = new();
+    public List<HealthReading> Readings { get; init; } = new();
+    public int IncompleteChecks => Readings.Count > 0 ? Readings.Count(r => r.Incomplete) : Skipped.Count;
+    public List<FirewallProfileFact>? FirewallProfiles { get; init; }
+    public int? StorageRetries { get; init; }
+    public DateTimeOffset? MemorySampled { get; init; }
 }
 
 /// <summary>A finished health check: the facts, the findings, and the local model's summary when it wrote one.</summary>
@@ -57,6 +79,8 @@ public sealed record HealthReport(HealthFacts Facts, List<HealthFinding> Finding
     /// <summary>"Good", "2 things to look at", "1 problem, 2 warnings".</summary>
     public string Verdict => (Problems, Warnings) switch
     {
+        (0, 0) when Facts.IncompleteChecks > 0 => "Health check incomplete",
+        (0, 0) when Findings.Count == 0 => "No findings reported",
         (0, 0) => "Looks healthy",
         (0, var w) => Plural.Of(w, "thing") + " to look at",
         (var p, 0) => Plural.Of(p, "problem"),
@@ -94,17 +118,26 @@ public static class PcHealth
 
         if (f.PhysicalDisks is { } disks)
         {
-            foreach (var d in disks.Where(d => !d.Health.Equals("Healthy", StringComparison.OrdinalIgnoreCase)))
+            foreach (var d in disks.Where(d => d.Health is "Warning" or "Unhealthy"))
             {
                 var bad = d.Health.Equals("Unhealthy", StringComparison.OrdinalIgnoreCase);
                 list.Add(new("Storage", bad ? HealthLevel.Problem : HealthLevel.Warning, $"{d.Name} reports it is {d.Health.ToLowerInvariant()}",
                     $"Windows' storage health for this {d.Media} says {d.Health}. A drive that reports trouble can fail without more warning.",
                     "Back up anything important on it now, then check it with the maker's tool.", "devices"));
             }
-            if (disks.Count > 0 && disks.All(d => d.Health.Equals("Healthy", StringComparison.OrdinalIgnoreCase)))
-                list.Add(new("Storage", HealthLevel.Good, disks.Count == 1 ? "The drive reports healthy" : $"All {disks.Count} drives report healthy",
-                    string.Join(", ", disks.Select(d => $"{d.Name} ({d.Media})")) + "."));
+            var healthy = disks.Where(d => d.Health.Equals("Healthy", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (healthy.Count > 0)
+                list.Add(new("Storage", HealthLevel.Good, healthy.Count == 1 ? "One drive reports healthy" : $"{healthy.Count} drives report healthy",
+                    string.Join(", ", healthy.Select(d => $"{d.Name} ({d.Media})")) + "."));
         }
+
+        if (f.StorageRetries is > 0 and var retries)
+            list.Add(new("Storage", HealthLevel.Warning, "Windows retried disk I/O",
+                $"{(retries >= 100 ? "At least 100" : retries.ToString(Inv))} retry events in the System log in the last seven days.",
+                "Check Event Viewer if retries recur. Keep important files backed up.", "events"));
+        else if (f.StorageRetries == 0)
+            list.Add(new("Storage", HealthLevel.Good, "No disk I/O retries found",
+                "No matching disk retry events in the available System log in the last seven days."));
 
         // Updates and restarts.
         if (f.RestartPending == true)
@@ -115,7 +148,7 @@ public static class PcHealth
             var when = $"The last update installed {On(last, f.Checked)}" + (f.LastUpdateTitle is { Length: > 0 } t ? $": {HtmlText.Truncate(t, 90)}." : ".");
             if (days > 90) list.Add(new("Updates", HealthLevel.Problem, "Windows hasn't updated in months", when + " Security fixes come every month.", "Open Windows Update and check for updates.", "update"));
             else if (days > 45) list.Add(new("Updates", HealthLevel.Warning, "Windows is behind on updates", when, "Open Windows Update and check for updates.", "update"));
-            else list.Add(new("Updates", HealthLevel.Good, "Windows is up to date", when));
+            else list.Add(new("Updates", HealthLevel.Good, "Windows installed an update recently", when));
         }
         if (f.FailedUpdates is { Count: > 0 } failed)
             list.Add(new("Updates", HealthLevel.Warning, Plural.Of(failed.Count, "update") + " failed to install lately",
@@ -157,6 +190,17 @@ public static class PcHealth
             else
                 list.Add(new("Security", HealthLevel.Good, "Antivirus is on and up to date", string.Join(", ", on.Select(a => a.Name)) + "."));
         }
+        if (f.FirewallProfiles is { Count: > 0 } firewall)
+        {
+            var off = firewall.Where(profile => profile.Enabled == false).Select(profile => profile.Profile).ToList();
+            if (off.Count > 0)
+                list.Add(new("Security", HealthLevel.Warning, "Windows Firewall reports an active profile is off",
+                    string.Join(", ", off) + ". This reading is from the local Windows Firewall setting.",
+                    "Review Firewall & network protection in Windows Security.", "security"));
+            else if (firewall.All(profile => profile.Enabled == true))
+                list.Add(new("Security", HealthLevel.Good, "Active Windows Firewall profiles report enabled",
+                    string.Join(", ", firewall.Select(profile => profile.Profile)) + ". Applied policy can differ from this local setting."));
+        }
 
         // Devices.
         if (f.DeviceProblems is { Count: > 0 } devices)
@@ -182,7 +226,8 @@ public static class PcHealth
             list.Add(new("Upkeep", f.Uptime.TotalDays > 30 ? HealthLevel.Warning : HealthLevel.Info, $"Running for {(int)f.Uptime.TotalDays} days without a restart",
                 "A restart finishes updates and clears apps that slowly use up memory.", "Restart when it suits you."));
         if (f.RamPercent >= 90)
-            list.Add(new("Upkeep", HealthLevel.Warning, "Memory is nearly full", $"{f.RamPercent:0}% of {Gb(f.RamTotalGb)} in use" + (f.TopMemoryApp is { } app ? $"; {app} uses the most ({Fmt(f.TopMemoryMb)})." : "."),
+            list.Add(new("Upkeep", HealthLevel.Warning, "Memory is nearly full", $"{f.RamPercent:0}% of {Gb(f.RamTotalGb)} in use" + (f.TopMemoryApp is { } app ? $"; {app} uses the most ({Fmt(f.TopMemoryMb)})." : ".")
+                + (f.MemorySampled is { } sample ? $" Sampled at {sample.ToLocalTime().ToString("HH:mm", Inv)}." : ""),
                 "Close apps you aren't using; Task Manager shows what uses it.", "taskmgr"));
         if (f.StartupApps is { Count: > 12 } startup)
             list.Add(new("Upkeep", HealthLevel.Info, $"{startup.Count} apps start with Windows", string.Join(", ", startup.Take(6)) + "…",
@@ -210,15 +255,21 @@ public static class PcHealth
             if (x.Fix is { Length: > 0 } fix) sb.Append(" What to do: ").Append(fix);
             sb.Append('\n');
         }
-        if (f.Skipped.Count > 0) sb.Append("\nNot checked: ").Append(string.Join("; ", f.Skipped)).Append('\n');
+        if (f.Readings.Count > 0)
+        {
+            foreach (var reading in f.Readings.Where(reading => reading.State != HealthReadingState.Observed))
+                sb.Append("- ").Append(reading.Name).Append(": ").Append(reading.Description).Append('\n');
+        }
+        else if (f.Skipped.Count > 0) sb.Append("\nNot checked: ").Append(string.Join("; ", f.Skipped)).Append('\n');
         return sb.ToString();
     }
 
     public const string SummaryInstructions = """
         You are Aqua, the owner's assistant on their Windows PC. Write a short health report from the check results below:
         3 to 6 sentences in plain words, the most important thing first, saying what to do about each problem or warning
-        (use the "What to do" given). If everything is fine, say so in a sentence or two, and sum up what passed in one short
-        sentence rather than listing it. Only use what the results say, in their own words (a drive that "has room" isn't "full";
+        (use the "What to do" given). If readings are incomplete, say so and distinguish this from a confirmed problem.
+        If all applicable readings were available and there are no warnings or problems, sum up what passed in one short
+        sentence. Only use what the results say, in their own words (a drive that "has room" isn't "full";
         a "restart" isn't a "shutdown") —
         don't guess at causes they don't mention, don't add numbers, and don't recommend "PC cleaner" or "driver updater" apps.
         """;

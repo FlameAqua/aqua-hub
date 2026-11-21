@@ -1162,3 +1162,31 @@ a cramped narrow transcript. The updated renderer monitors activation and checks
 Physical keyboard, mouse, screen-reader and audio-device acceptance are left for an interactive session. Real
 Creative generation and resource coexistence with CPU Search embeddings and a GPU model or ComfyUI remain open.
 No independent review score was assigned.
+
+## 21 November 2026 · Phase 6 manual recipes and PC health
+
+Adrian chose Workbench for authoring, Agents for execution and inspection, and a manual PC health briefing with an
+optional local report. Actionable findings include warnings and problems. A saved draft grants no execution
+authority. Agents shows the current revision and asks before each run. It retains ten runs with times, step
+outcomes and short counts. This PC retains the latest full report with a separate clear control. Scheduled recipes
+are deferred until after manual acceptance. Phase 6 does not include an elevated helper. The unelevated storage
+reliability probe produced no usable counters and did not establish that elevation would surface actionable data.
+
+The normal Debug unit suite passed 1,343 tests with 23 opt-in cases skipped and zero failures. Added coverage includes
+invalid step IDs and bindings, approval revocation, duplicate starts, cancellation, edit/delete during a run, shutdown,
+restart without replay, history retention, legacy built-in history migration, incomplete Windows readings and an
+intercepted private local model redirect. The sandboxed unit attempt could not connect to the local .NET test host.
+
+The isolated Release app and E2E harness built without warnings or errors. The off-screen Recipes T01 case checked
+saving without execution, explicit review, a completed health report, cancellation during the first step, selection
+stability and built-in agent details using UI Automation Invoke and Expand patterns. Captures used 1440 × 880 dark
+and 820 × 580 light windows with reduced motion. The first run caught an inactive window being activated by focus
+transfer. Visual review also caught dark form labels and missing icons. An early render reached the existing Ollama
+status-read path while opening This PC. The final fixture uses synthetic system readings and skips that status
+probe in offline mode. The test made no model calls for the recipe, and did not start or reconfigure a service.
+
+Separate unelevated shell probes read two active Windows Firewall profiles and successfully ran the fixed seven-day
+disk retry query without collecting raw log records in the fixture. A normal build's complete live health flow,
+physical keyboard and screen-reader use and native confirmation dialogs remain owner acceptance.
+Documentation, selection and whitespace checks passed. Committed main CI passed on 4fec007 before these local
+changes. [GitHub Actions run 44935601878](https://github.com/FlameAqua/aqua-hub/actions/runs/44935601878).

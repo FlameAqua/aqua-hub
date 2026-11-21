@@ -13,7 +13,7 @@ commits and releases. The release tag and the outstanding live acceptance items 
 | 3 | **7:** everyday wins | Deck, quick reminders, day agenda and confirmed scene actions implemented. Trading 212 deferred by Adrian |
 | 4 | **8:** powerful file and semantic search | Local implementation and scratch CPU retrieval verified. Desktop and concurrent GPU acceptance remain. |
 | 5 | **9:** remaining voice and creativity features | Read-aloud and personality flows implemented. Native audio, physical interaction and live model acceptance remain. |
-| 6 | **6:** user-built agents and deeper health tools | Later |
+| 6 | **6:** user-built agents and deeper health tools | Manual recipes, agent details and standard-user checks implemented; Windows acceptance below |
 | 7 | **5.1 / 5.2:** reactions, interests and For You | Deferred until the functional features above |
 
 Streams, daily utilities and search deliver useful functions without first building a recommendation system. Search
@@ -182,11 +182,20 @@ The initial scope leaves OCR, PDF content, media understanding, archives, remova
   recovery to that selector. Model training affects refusals, style and consistency regardless of where it runs.
   Live quality and fit for any chosen Creative model remain owner acceptance.
 
-## Then Phase 6: your own agents
+## Phase 6: your own agents
 
-**6.1** Agent Engineer and recipe builder composed from Aqua's own parts, never arbitrary code. **6.2** Agent detail
-views need further scope. **6.3** Deeper health checking may use an optional read-only admin helper, if Adrian chooses it.
-Reuse the existing scheduling/permission model with explicit step inputs, outcomes and cancellation.
+- **6.1:** Workbench → Recipes creates and edits a PC health recipe. Run the check alone or add a local report
+  filtered to all findings or actionable findings. Agents → Review run → Run now authorizes the saved revision
+  once. Scheduling is a follow-up decision after owner acceptance of manual runs.
+- **6.2:** Agents shows built-in purpose, access, timing, dependencies and recent outcomes. Recipe details include
+  pausing, cancellation and ten runs with step outcomes and counts. This PC retains the latest full report.
+- **6.3:** This PC reports active Windows Firewall settings, recent disk I/O retries and incomplete readings.
+  The checks run as the signed-in user. A storage reliability query yielded no usable counters in an unelevated
+  read-only probe. A helper needs evidence that elevation exposes an actionable diagnostic and separate owner approval.
+- Owner acceptance includes a normal build's live Windows readings and timings on representative PCs, physical
+  keyboard and screen reader use, and the native confirmation dialogs for deleting a recipe and clearing run
+  history or the latest full health report.
+  See [Architecture](ARCHITECTURE.md#manual-agent-recipes) and [Security](SECURITY.md#recipe-authority-and-retention).
 
 ## Last: deferred 5.1 and 5.2
 
@@ -195,7 +204,7 @@ Preserve the ideas without making them dependencies of streams, X or search.
 
 ## Cross-cutting work and owner decisions
 
-- Choose a licence, Twitch route, optional admin helper and Trading 212 scope beyond CSV.
+- Choose a licence, Twitch route and Trading 212 scope beyond CSV.
 - Verify the release/update rehearsal, private vulnerability reporting and remaining dependency-update follow-up.
 - Improve deterministic scheduling/lifecycle checks, Windows/WPF test seams and a hermetic desktop scenario; baseline
   coverage before selecting a floor. Existing passing test counts do not establish complete coverage.

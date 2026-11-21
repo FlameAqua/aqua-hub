@@ -27,6 +27,7 @@
             </Grid>
         </DataTemplate>
     </UserControl.Resources>
+    <Grid>
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="32,26,32,36" MaxWidth="1560">
             <Grid Margin="0,0,0,18">
@@ -106,12 +107,14 @@
             </c:FlowGrid>
 
             <!-- Health check: Windows' own readings, the findings, and the local model's summary -->
-            <c:Card Title="Health check" Icon="pulse" Subtitle="{Binding HealthSub}" Margin="0,16,0,0" AutomationProperties.AutomationId="system-health">
+            <c:Card x:Name="HealthCard" Title="Health check" Icon="pulse" Subtitle="{Binding HealthSub}" Margin="0,16,0,0" AutomationProperties.AutomationId="system-health">
                 <c:Card.HeaderAction>
-                    <StackPanel Orientation="Horizontal" Visibility="{Binding HasHealth, Converter={StaticResource Vis}}">
+                    <WrapPanel Visibility="{Binding HasHealth, Converter={StaticResource Vis}}">
                         <Button Style="{StaticResource Btn.Link}" Content="Copy report" Click="OnCopyHealth" FontSize="12.5" Margin="0,0,8,0" AutomationProperties.AutomationId="system-health-copy"/>
-                        <Button Style="{StaticResource Btn.Link}" Content="Ask Aqua about it" Click="OnAskHealth" FontSize="12.5" AutomationProperties.AutomationId="system-health-ask"/>
-                    </StackPanel>
+                        <Button Style="{StaticResource Btn.Link}" Content="Ask Aqua about it" Click="OnAskHealth" FontSize="12.5" Margin="0,0,8,0" AutomationProperties.AutomationId="system-health-ask"/>
+                        <Button Style="{StaticResource Btn.Link}" Content="Clear report" Click="OnClearHealth" IsEnabled="{Binding HealthIdle}"
+                                FontSize="12.5" AutomationProperties.AutomationId="system-health-clear"/>
+                    </WrapPanel>
                 </c:Card.HeaderAction>
                 <StackPanel>
                     <Grid>
@@ -122,11 +125,7 @@
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="{Binding HealthVerdict}" FontSize="18" FontWeight="SemiBold" Foreground="{Binding HealthBrush}" Visibility="{Binding HasHealth, Converter={StaticResource Vis}}"/>
                             <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Visibility="{Binding HasHealth, Converter={StaticResource VisNot}}"
-                                       Text="Checks drives, Windows Update, crashes, antivirus, devices, battery, startup apps and clutter. It only reads, and takes about ten seconds."/>
-                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="{Binding HealthRunning, Converter={StaticResource Vis}}">
-                                <ProgressBar IsIndeterminate="True" Width="90" Height="4" VerticalAlignment="Center"/>
-                                <TextBlock Text="{Binding HealthStep}" Style="{StaticResource T.Caption}" Margin="10,0,0,0" VerticalAlignment="Center"/>
-                            </StackPanel>
+                                       Text="Read-only checks for storage, updates, stability, security and devices."/>
                         </StackPanel>
                         <Button Grid.Column="1" Style="{StaticResource Btn.Accent}" Click="OnHealthCheck" IsEnabled="{Binding HealthIdle}" Margin="16,0,0,0" VerticalAlignment="Top"
                                 AutomationProperties.AutomationId="system-health-run">
@@ -140,6 +139,18 @@
                         <ItemsControl ItemsSource="{Binding Passed}" ItemTemplate="{StaticResource FindingTemplate}" Margin="0,0,0,4"/>
                     </Expander>
                     <TextBlock Text="{Binding NotChecked}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,10,0,0" Visibility="{Binding HasNotChecked, Converter={StaticResource Vis}}"/>
+                    <Expander Header="Windows readings" Margin="0,12,0,0" Foreground="{DynamicResource B.Text}"
+                              Visibility="{Binding HasReadings, Converter={StaticResource Vis}}" AutomationProperties.AutomationId="system-health-readings">
+                        <ItemsControl ItemsSource="{Binding Readings}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Style="{StaticResource T.Body2}" Margin="0,3" TextWrapping="Wrap">
+                                        <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=" · "/><Run Text="{Binding Description, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Expander>
                 </StackPanel>
             </c:Card>
 
@@ -364,4 +375,6 @@
             </Grid>
         </StackPanel>
     </ScrollViewer>
+    <c:FeedbackPopup x:Name="HealthFeedback"/>
+    </Grid>
 </UserControl>

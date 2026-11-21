@@ -1,6 +1,7 @@
 using AquaHub.Core.Agents;
 using AquaHub.Core.Ai;
 using AquaHub.Core.Data;
+using AquaHub.Core.Health;
 using AquaHub.Core.Net;
 using AquaHub.Core.Reminders;
 using AquaHub.Core.Settings;
@@ -44,6 +45,7 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
     public LlmClient Llm { get; }
     public HubState State { get; }
     public AgentRuntime Agents { get; }
+    public RecipeService Recipes { get; }
     public ReminderService Reminders { get; }
     public AskService Ask { get; }
     /// <summary>Ask Aqua's tool-using engine (web, files, research).</summary>
@@ -71,7 +73,8 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
     /// <summary>Hugging Face's model search and file lists, and model downloads into the library.</summary>
     public Ai.Local.ModelDownloads ModelDownloads { get; }
 
-    public HubCore(HubPaths paths, ISecretStore secrets, IPlatform platform)
+    public HubCore(HubPaths paths, ISecretStore secrets, IPlatform platform,
+        Func<CancellationToken, Task<HealthReport>>? checkHealth = null)
     {
         Paths = paths;
         Secrets = secrets;
@@ -81,6 +84,7 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
         Log.MinLevel = Settings.Current.General.VerboseLog ? LogLevel.Debug : LogLevel.Info;
         Settings.Changed += s => Log.MinLevel = s.General.VerboseLog ? LogLevel.Debug : LogLevel.Info;
         Db = new HubDatabase(paths.Database);
+        Recipes = new RecipeService(Db, checkHealth);
         Http = new HttpFetcher(Db);
         Whisper = new Speech.WhisperSetup(Path.Combine(paths.Root, "whisper"), Http.Client);
         LlamaSetup = new Ai.Local.LlamaSetup(paths.Llama, Http.Client);
@@ -155,7 +159,7 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
     public ValueTask DisposeAsync() { lock (_disposalGate) return new(_disposal ??= DisposeOwnedAsync()); }
     private async Task DisposeOwnedAsync()
     {
-        await Task.WhenAll(Agents.StopAsync(), Streams.StopAsync(), YouTubeAccount.StopAsync()).ConfigureAwait(false);
+        await Task.WhenAll(Agents.StopAsync(), Recipes.StopAsync(), Streams.StopAsync(), YouTubeAccount.StopAsync()).ConfigureAwait(false);
         await Streams.DisposeAsync().ConfigureAwait(false);
         await YouTubeAccount.DisposeAsync().ConfigureAwait(false);
         Llm.Dispose();

@@ -58,6 +58,7 @@ public partial class App : Application
         Hub.Updates?.StopScheduling();
         Hub.Ollama?.StopScheduling();
         var agents = Hub.Core.Agents.StopAsync();
+        var recipes = Hub.Core.Recipes.StopAsync();
         var local = Hub.LocalAi.StopAsync();
         var ask = Hub.Ask.StopAsync();
         var roleplay = Hub.Roleplay?.ShutdownAsync() ?? Task.CompletedTask;
@@ -66,7 +67,7 @@ public partial class App : Application
         var streams = Hub.Core.Streams.StopAsync();
         var youtube = Hub.Core.YouTubeAccount.StopAsync();
         var folderListener = _single?.StopFolderListenerAsync() ?? Task.CompletedTask;
-        await Task.WhenAll(agents, local, ask, images, llm, streams, youtube, reminderScene, speech, roleplay, Hub.Windows.DeckSaved, _initialization, _mediaInitialization, folderListener);
+        await Task.WhenAll(agents, recipes, local, ask, images, llm, streams, youtube, reminderScene, speech, roleplay, Hub.Windows.DeckSaved, _initialization, _mediaInitialization, folderListener);
         await Hub.Search.StopAsync();
         await Hub.Llama.StopAsync();
         _shutdownComplete = true;
@@ -78,7 +79,7 @@ public partial class App : Application
         var args = AppArgs.Parse(e.Args);
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         UseConsistentMonthNames();
-        var settingsSnapshot = args.Snapshot is not null && args.SnapshotPages is "settings-ui" or "search-ui" or "creativity-ui";
+        var settingsSnapshot = args.Snapshot is not null && args.SnapshotPages is "settings-ui" or "search-ui" or "creativity-ui" or "recipes-ui";
         if (settingsSnapshot && (!args.E2e || args.Measure || string.IsNullOrWhiteSpace(args.DataDir)
             || (Directory.Exists(args.DataDir) && Directory.EnumerateFileSystemEntries(args.DataDir).Any())))
         {
@@ -124,7 +125,7 @@ public partial class App : Application
         Hub.SnapshotMode = args.Snapshot is not null;
         ISecretStore secrets = Hub.SnapshotMode || Sandbox.Enabled ? new InMemorySecretStore() : new CredentialVault();
         Hub.Platform = new PlatformServices(() => Hub.Core.Settings.Current);
-        Hub.Core = new HubCore(paths, secrets, Hub.Platform);
+        Hub.Core = new HubCore(paths, secrets, Hub.Platform, ct => Hub.Health.RunAsync(summarise: false, ct));
         Hub.Core.Llm.PauseReason = () => Hub.Platform.AiPauseReason();
 
         Hub.Theme = new ThemeService();
@@ -357,6 +358,7 @@ public partial class App : Application
         {
             Cleanup(() => { if (Hub.Actions is not null) _ = Hub.Actions.StopReminderSceneAsync(); });
             Cleanup(() => { _ = Hub.Core.Agents.StopAsync(); });
+            Cleanup(() => { _ = Hub.Core.Recipes.StopAsync(); });
             Cleanup(() => { _ = Hub.Core.Streams.StopAsync(); });
             Cleanup(() => { _ = Hub.Core.YouTubeAccount.StopAsync(); });
             Cleanup(() => { if (Hub.Search is not null) _ = Hub.Search.StopAsync(); });

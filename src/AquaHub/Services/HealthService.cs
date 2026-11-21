@@ -15,12 +15,15 @@ public sealed class HealthService
 {
     private const string Key = "health.last";
     private readonly SemaphoreSlim _one = new(1, 1);
+    private readonly object _lastGate = new();
     private HealthReport? _last;
     private bool _loaded;
 
     /// <summary>A step of a check in progress, or a finished report (UI thread not guaranteed).</summary>
     public event Action<string>? Progress;
     public event Action<HealthReport>? Finished;
+    public event Action? Stopped;
+    internal Func<Action<string>?, CancellationToken, Task<HealthFacts>> Inspect { get; set; } = HealthInspector.InspectAsync;
 
     public bool Running => _one.CurrentCount == 0;
 
@@ -28,13 +31,36 @@ public sealed class HealthService
     {
         get
         {
-            if (!_loaded)
+            lock (_lastGate)
             {
-                _loaded = true;
-                try { _last = Hub.Core.Db.GetJson<HealthReport>(Key); }
-                catch (Exception ex) when (ex is not OutOfMemoryException) { Log.Debug("health", "Couldn't read the last report: " + ex.Message); }
+                if (!_loaded)
+                {
+                    _loaded = true;
+                    try { _last = Hub.Core.Db.GetJson<HealthReport>(Key); }
+                    catch (Exception ex) when (ex is not OutOfMemoryException) { Log.Debug("health", "Couldn't read the last report: " + ex.Message); }
+                }
+                return _last;
             }
-            return _last;
+        }
+    }
+
+    public async Task<bool> ClearAsync()
+    {
+        if (!_one.Wait(0)) return false;
+        try
+        {
+            await Task.Run(() => Hub.Core.Db.DeleteJson(Key));
+            lock (_lastGate)
+            {
+                _last = null;
+                _loaded = true;
+            }
+            return true;
+        }
+        finally
+        {
+            _one.Release();
+            Stopped?.Invoke();
         }
     }
 
@@ -49,24 +75,32 @@ public sealed class HealthService
         try
         {
             if (Last is { } fresh && (fresh.Facts.Checked >= started || (reuseFor is { } age && DateTimeOffset.Now - fresh.Facts.Checked < age))) return fresh;
-            var facts = await HealthInspector.InspectAsync(step => Progress?.Invoke(step), ct);
+            var facts = await Inspect(step => Progress?.Invoke(step), ct);
             var report = new HealthReport(facts, PcHealth.Evaluate(facts), null);
-            Log.Info("health", $"Health check: {report.Verdict} ({report.Findings.Count} findings, {facts.Skipped.Count} not checked)");
+            Log.Info("health", $"Health check: {report.Verdict} ({report.Findings.Count} findings, {facts.IncompleteChecks} incomplete checks)");
             if (summarise && await SummariseAsync(report, ct) is { } summary) report = report with { Summary = summary };
-            _last = report;
-            _loaded = true;
+            ct.ThrowIfCancellationRequested();
             try { Hub.Core.Db.PutJson(Key, report); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { Log.Debug("health", "Couldn't keep the report: " + ex.Message); }
+            lock (_lastGate)
+            {
+                _last = report;
+                _loaded = true;
+            }
             Finished?.Invoke(report);
             return report;
         }
-        finally { _one.Release(); }
+        finally
+        {
+            _one.Release();
+            Stopped?.Invoke();
+        }
     }
 
     /// <summary>The local model's few sentences on the findings, or null when it isn't running or says nothing useful.</summary>
     private async Task<string?> SummariseAsync(HealthReport report, CancellationToken ct)
     {
-        if (!Hub.Core.Llm.Health.Available || Hub.Core.Llm.UserPaused) return null;
+        if (!Hub.Core.Llm.Health.Available || Hub.Core.Llm.UserPaused || CreativeModels.IsRemote) return null;
         Progress?.Invoke("Writing the report…");
         try
         {
@@ -81,6 +115,8 @@ public sealed class HealthService
                 Temperature = 0.3,
                 MaxTokens = 450,
                 Think = false,
+                LocalOnly = true,
+                CaptureOutput = false,
             }, slow.Token);
             // Plain sentences for the page: no markdown emphasis or headings.
             var text = Regex.Replace(result.Text, @"\*\*|__|^#+\s*", "", RegexOptions.Multiline).Trim();
@@ -88,7 +124,7 @@ public sealed class HealthService
         }
         catch (Exception ex) when (ex is LlmUnavailableException or System.Net.Http.HttpRequestException or OperationCanceledException or InvalidOperationException)
         {
-            Log.Debug("health", "No summary: " + ex.Message);
+            Log.Debug("health", "No summary: " + ex.GetType().Name);
             return null;
         }
     }

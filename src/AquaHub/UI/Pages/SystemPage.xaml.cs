@@ -100,7 +100,6 @@ public sealed class SystemVM : ObservableObject
     public bool HealthRunning { get; set; }
     public bool HealthIdle => !HealthRunning;
     public string HealthButton => HealthRunning ? "Checking…" : HasHealth ? "Check again" : "Run health check";
-    public string HealthStep { get; set; } = "";
     public string HealthSub { get; set; } = "Not run yet";
     public string HealthVerdict { get; set; } = "";
     public Brush HealthBrush { get; set; } = Brushes.Gray;
@@ -112,6 +111,8 @@ public sealed class SystemVM : ObservableObject
     public string PassedHeader => Plural.Of(Passed.Count, "check") + " passed";
     public string NotChecked { get; set; } = "";
     public bool HasNotChecked => NotChecked.Length > 0;
+    public IReadOnlyList<HealthReading> Readings { get; set; } = Array.Empty<HealthReading>();
+    public bool HasReadings => Readings.Count > 0;
 
     public string AiModel { get; set; } = "";
     public string AiState { get; set; } = "";
@@ -150,16 +151,19 @@ public partial class SystemPage : UserControl, IPage
         Hub.Health.Progress += OnHealthProgress;
         Hub.Health.Finished -= OnHealthFinished;
         Hub.Health.Finished += OnHealthFinished;
+        Hub.Health.Stopped -= OnHealthStopped;
+        Hub.Health.Stopped += OnHealthStopped;
         Hub.Windows.UpdateVisibility();
         Hub.System.DetailedProcesses = true;
         Hub.System.ProcessCount = _vm.ShowMore ? 20 : 8;
         Hub.System.SetInterval(TimeSpan.FromSeconds(1.5));
-        Hub.System.Sample();
+        if (!Sandbox.OfflineComponents) Hub.System.Sample();
         _vm.HealthRunning = Hub.Health.Running;
         ShowHealth();
         Refresh();
         _ = RefreshAiAsync();
         if (arg == "health" && !Hub.Health.Running) OnHealthCheck(this, new RoutedEventArgs());
+        if (arg == "health-report") Dispatcher.BeginInvoke(() => { HealthCard.BringIntoView(); }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     public void OnNavigatedFrom()
@@ -167,6 +171,8 @@ public partial class SystemPage : UserControl, IPage
         Hub.State.Changed -= OnChanged;
         Hub.Health.Progress -= OnHealthProgress;
         Hub.Health.Finished -= OnHealthFinished;
+        Hub.Health.Stopped -= OnHealthStopped;
+        HealthFeedback.Hide();
         Hub.System.DetailedProcesses = false;
         Hub.System.ProcessCount = 8;
         _refresh.Stop();
@@ -234,7 +240,9 @@ public partial class SystemPage : UserControl, IPage
             d.Name.Equals(systemRoot, StringComparison.OrdinalIgnoreCase) ? "Windows is on this drive" : "")).ToList();
         if (!disks.SequenceEqual(_vm.Disks)) _vm.Disks = disks;
         _vm.StorageSub = health is { Count: > 0 }
-            ? (health.All(h => h.Health == "Healthy") ? Plural.Of(health.Count, "drive") + " healthy at the last check" : "a drive reported trouble — see Health check")
+            ? health.Any(h => h.Health is "Warning" or "Unhealthy") ? "A drive reported trouble. See Health check."
+                : health.All(h => h.Health == "Healthy") ? Plural.Of(health.Count, "drive") + " healthy at the last check"
+                : "Some drive readings were unavailable. See Health check."
             : "";
         using var self = Process.GetCurrentProcess();
         var mem = MemoryStats.Current();
@@ -286,6 +294,7 @@ public partial class SystemPage : UserControl, IPage
     private async Task RefreshAiAsync()
     {
         _lastAi = DateTime.UtcNow;
+        if (Sandbox.OfflineComponents) return;
         var running = await Hub.Core.Llm.RunningModelsAsync();
         _vm.Loaded = running.Select(r => new NameDetail(r.Name, $"{Fmt.Bytes(r.VramBytes)} VRAM" +
             (r.ExpiresAt is { } exp ? $" · unloads {TimeText.Until(exp)}" : ""))).ToList();
@@ -485,13 +494,13 @@ public partial class SystemPage : UserControl, IPage
     {
         if (Hub.Health.Running) return;
         _vm.HealthRunning = true;
-        _vm.HealthStep = "Starting…";
+        HealthFeedback.Show("Starting the health check…", "health-check", busy: true);
         _vm.Changed();
         try { await Hub.Health.RunAsync(summarise: true, CancellationToken.None); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log.Warn("health", "The health check failed", ex);
-            _vm.HealthStep = "The check stopped: " + ex.Message;
+            if (IsVisible) HealthFeedback.Show("The health check stopped. Try again.", error: true);
         }
         finally
         {
@@ -503,7 +512,7 @@ public partial class SystemPage : UserControl, IPage
     private void OnHealthProgress(string step) => Hub.OnUi(() =>
     {
         _vm.HealthRunning = true;
-        _vm.HealthStep = step;
+        if (IsVisible) HealthFeedback.Show(step, "health-check", busy: true);
         _vm.Changed();
     });
 
@@ -513,22 +522,39 @@ public partial class SystemPage : UserControl, IPage
         ShowHealth();
     });
 
+    private void OnHealthStopped() => Hub.OnUi(() =>
+    {
+        _vm.HealthRunning = Hub.Health.Running;
+        if (!_vm.HealthRunning) HealthFeedback.Hide("health-check");
+        _vm.Changed();
+    });
+
     private void ShowHealth()
     {
         var r = Hub.Health.Last;
         _vm.HasHealth = r is not null;
         if (r is null)
         {
+            _vm.HealthSub = "Not run yet";
+            _vm.HealthVerdict = _vm.HealthSummary = _vm.NotChecked = "";
+            _vm.Findings = new();
+            _vm.Passed = new();
+            _vm.Readings = Array.Empty<HealthReading>();
             _vm.Changed();
+            Refresh();
             return;
         }
-        _vm.HealthSub = "Checked " + TimeText.Ago(r.Facts.Checked);
+        _vm.HealthSub = $"Checked {r.Facts.Checked.ToLocalTime():g}";
         _vm.HealthVerdict = r.Verdict;
-        _vm.HealthBrush = Fmt.Res(r.Problems > 0 ? "B.Down" : r.Warnings > 0 ? "B.Warn" : "B.Up");
+        _vm.HealthBrush = Fmt.Res(r.Problems > 0 ? "B.Down" : r.Warnings > 0 || r.Facts.IncompleteChecks > 0 ? "B.Warn"
+            : r.Findings.Count == 0 ? "B.Text2" : "B.Up");
         _vm.HealthSummary = r.Summary ?? "";
         _vm.Findings = r.Findings.Where(f => f.Level != HealthLevel.Good).Select(ToVM).ToList();
         _vm.Passed = r.Findings.Where(f => f.Level == HealthLevel.Good).Select(ToVM).ToList();
-        _vm.NotChecked = r.Facts.Skipped.Count > 0 ? "Not checked: " + string.Join("; ", r.Facts.Skipped) + "." : "";
+        _vm.Readings = r.Facts.Readings;
+        _vm.NotChecked = r.Facts.Readings.Count > 0
+            ? r.Facts.IncompleteChecks > 0 ? Plural.Of(r.Facts.IncompleteChecks, "reading") + " incomplete. See Windows readings." : ""
+            : r.Facts.Skipped.Count > 0 ? "Not checked: " + string.Join("; ", r.Facts.Skipped) + "." : "";
         _vm.Changed();
         Refresh();   // the Storage card shows the drives' health from the check
     }
@@ -551,6 +577,25 @@ public partial class SystemPage : UserControl, IPage
             Say("Health report copied — paste it anywhere.");
         }
         catch (System.Runtime.InteropServices.COMException ex) { Log.Warn("health", "Couldn't copy the report", ex); }
+    }
+
+    private async void OnClearHealth(object sender, RoutedEventArgs e)
+    {
+        if (Hub.Health.Running || Hub.Health.Last is null) return;
+        if (MessageBox.Show(Window.GetWindow(this)!, "Clear the latest full PC health report? Agents keeps its separate run history.",
+                "Clear health report", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+        try
+        {
+            var cleared = await Hub.Health.ClearAsync();
+            if (!IsVisible) return;
+            ShowHealth();
+            HealthFeedback.Show(cleared ? "Health report cleared." : "A health check is running. Try again after it finishes.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.Warn("health", "Could not clear the health report", ex);
+            if (IsVisible) HealthFeedback.Show("Couldn’t clear the health report. Try again.", error: true);
+        }
     }
 
     private void OnAskHealth(object sender, RoutedEventArgs e) =>

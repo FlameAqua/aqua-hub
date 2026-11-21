@@ -10,6 +10,7 @@
   "Reminders": { "description": "Daily deck, quick reminders, read-only agenda and intercepted notification and scene effects" },
   "Search": { "description": "Local file search, filters, persisted pause and empty-folder state" },
   "Creativity": { "description": "Off-screen read-aloud controls, Workbench personalities and starting a Roleplay scene" },
+  "Recipes": { "description": "Off-screen recipe editing, confirmation, cancellation, run history and PC health readings" },
   "Shell": { "legacy": true, "description": "Legacy startup, navigation, title bar and notifications" },
   "Settings": { "legacy": true, "description": "Legacy full settings flows" },
   "Feeds": { "legacy": true, "description": "Legacy Today, news, social, markets and agenda flows" },

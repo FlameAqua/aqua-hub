@@ -63,9 +63,13 @@ public partial class AgentsPage : UserControl, IPage
         Hub.State.Changed += OnChanged;
         Hub.Ollama.Changed -= OnOllamaChanged;
         Hub.Ollama.Changed += OnOllamaChanged;
+        Hub.Core.Recipes.Changed -= OnRecipesChanged;
+        Hub.Core.Recipes.Changed += OnRecipesChanged;
         UpdateOllama();
         _tick.Start();
         Build();
+        if (arg?.StartsWith("recipe:", StringComparison.Ordinal) == true && Guid.TryParse(arg.AsSpan(7), out var id))
+            OpenRecipe(id, null);
         Refresh();
     }
 
@@ -73,6 +77,10 @@ public partial class AgentsPage : UserControl, IPage
     {
         Hub.State.Changed -= OnChanged;
         Hub.Ollama.Changed -= OnOllamaChanged;
+        Hub.Core.Recipes.Changed -= OnRecipesChanged;
+        CloseReview();
+        _builtInHistoryKey = null;
+        AgentsFeedback.Hide();
         _tick.Stop();
         _refresh.Stop();
     }
@@ -84,7 +92,7 @@ public partial class AgentsPage : UserControl, IPage
 
     private void Build()
     {
-        _agents.Clear();
+        if (_agents.Count > 0) return;
         var statuses = Hub.Core.Agents.Statuses;
         var stages = new List<StageVM>();
         var n = 1;
@@ -132,6 +140,7 @@ public partial class AgentsPage : UserControl, IPage
         foreach (var vm in outputs) _outputs[vm.Key] = vm;
         if (Outputs.ItemsSource is not List<OutputVM> shown || !shown.SequenceEqual(outputs)) Outputs.ItemsSource = outputs;
         NoOutputs.Visibility = outputs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RefreshInspector();
     }
 
     private void OnRunAll(object sender, RoutedEventArgs e) => Hub.Core.Agents.RunAll();

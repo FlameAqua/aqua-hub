@@ -72,6 +72,29 @@ Settings are copy-on-write. `SettingsStore` validates, migrates and atomically p
 merge so unrelated changes from the tray or another page survive. New settings need defaults, validation, migration
 where needed, and a clear owner. Do not save a stale whole settings object from a page.
 
+### Manual agent recipes
+
+Workbench owns authoring. A recipe has a stable ID, a revision, a paused flag and one or two typed steps. The fixed
+`pc.health.check` capability takes no inputs. Optional `pc.health.report` consumes the health reading from step one
+and a typed All or Actionable selection. Actionable includes warnings and problems. Core validates at save, review
+and admission, and rechecks the saved revision before step access. Agents must review the saved revision and invoke
+**Run now**. Workbench saving does not admit a run.
+
+`RecipeService` follows AgentRuntime's owned worker and shutdown pattern. Manual runs use one worker globally,
+a 40-second cooperative deadline and no replay or retry. Concurrent approvals for the same pending or active
+revision join its run ID. One confirmation cannot start again, even after its run finishes. Edits and pauses invalidate
+older reviews and cancel outstanding steps. Delete also removes that recipe's history. In-flight completion cannot
+recreate deleted state. A profile reopen records persisted queued or running work as interrupted. Normal Quit
+cancels and joins the owned worker. Manual recipes remain independent of the collector pause and scheduling tick.
+
+The additive SQLite data holds up to 30 recipes, names up to 80 characters and purposes up to 200 characters. The
+recipe store has a 512 KiB read limit and retains at most ten runs per recipe including active work. Each run
+records its recipe revision, capability IDs, timestamps, typed outcomes and short counts. At most eight finding
+headlines from the newest completed report step remain available in the running session. Clearing recipe history
+removes finished rows and their preview. This PC retains its latest full report separately and offers **Clear report**.
+Built-in history
+remains in the same table with an additive outcome column. Old rows use their original success/failure flag.
+
 ### Live streams (5.3)
 
 `StreamsSession` owns public-page refresh and Twitch sign-in/credential rotation. `StreamScoutAgent` requests checks
@@ -415,9 +438,14 @@ SQLite (`HubDatabase`) uses WAL, parameterized statements, normalized FTS querie
 owns settings, database, logs, caches, chat media, generated images and optional runtime/model files; Secrets live in
 Windows Credential Manager. User model/output paths can point outside the profile and retain their separate ownership.
 
-Health collection is read-only and unelevated. Process actions recheck identity/ownership and require the app's existing
-confirmation policy. Voice input is explicitly initiated through Windows or Whisper, with an optional online Windows
-mode. Read-aloud output uses the separate offline speech coordinator.
+Health collection is read-only and unelevated. It records the check time and the timestamp of a recent memory sample.
+Fixed checks include active Windows Firewall profile settings and up to 100 matching disk retry events from seven
+days of the available System log. Firewall readings describe local settings, which applied policy can override.
+Windows readings distinguish observed, partial, unavailable, unsupported, denied and timed out. An incomplete
+check with no warnings or problems does not produce a healthy verdict. Timed-out synchronous Windows calls remain
+owned by their probe until they return, limiting each probe to one in-flight read. Process actions recheck identity
+and ownership and require the existing confirmation policy. Voice input is explicitly initiated through Windows
+or Whisper, with an optional online Windows mode. Read-aloud output uses the separate offline speech coordinator.
 Whisper is an optional verified download, not a dependency installed at every start.
 
 Velopack handles per-user installation and updates. Release metadata fixes the GitHub repository; source builds without

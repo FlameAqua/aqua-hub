@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
 using System.Reflection;
@@ -18,67 +19,123 @@ namespace AquaHub.Platform;
 /// </summary>
 public static class HealthInspector
 {
+    private static readonly ConcurrentDictionary<string, byte> ActiveReads = new();
+
     public static async Task<HealthFacts> InspectAsync(Action<string>? progress, CancellationToken ct)
     {
-        var skipped = new List<string>();
-        var snap = Hub.System.Latest ?? await Task.Run(() => { Hub.System.Sample(); return Hub.System.Latest; }, ct);
+        var readings = new ConcurrentQueue<HealthReading>();
 
-        async Task<T?> Check<T>(string what, string step, Func<T?> read, int seconds = 15) where T : class
+        async Task<T?> Check<T>(string what, string step, Func<T?> read, int seconds = 15,
+            Func<T, HealthReadingState>? quality = null) where T : class
         {
+            ct.ThrowIfCancellationRequested();
             progress?.Invoke(step);
-            try { return await Task.Run(read, ct).WaitAsync(TimeSpan.FromSeconds(seconds), ct); }
-            catch (TimeoutException) { lock (skipped) skipped.Add(what + ": Windows took too long to answer"); }
-            catch (Exception ex) when (ex is COMException or UnauthorizedAccessException or InvalidOperationException or InvalidCastException
-                                          or TargetInvocationException or EventLogException or IOException or System.Security.SecurityException)
+            if (!ActiveReads.TryAdd(what, 0))
             {
-                var inner = ex is TargetInvocationException { InnerException: { } e } ? e : ex;
-                Log.Debug("health", $"{what} not checked: {inner.Message}");
-                lock (skipped) skipped.Add(what + ": " + (inner is UnauthorizedAccessException ? "needs administrator rights" : "Windows didn't say"));
+                readings.Enqueue(new(what, HealthReadingState.TimedOut));
+                return null;
             }
-            return null;
+            // COM calls may outlive the wait. Keep ownership until the call actually returns, even after a timeout.
+            var worker = Task.Run(() =>
+            {
+                try
+                {
+                    var value = read();
+                    return (value, value is null ? HealthReadingState.Unavailable : quality?.Invoke(value) ?? HealthReadingState.Observed);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { return (null, Classify(ex)); }
+                finally { ActiveReads.TryRemove(what, out _); }
+            });
+            try
+            {
+                var (value, state) = await worker.WaitAsync(TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(false);
+                readings.Enqueue(new(what, state));
+                return value;
+            }
+            catch (TimeoutException)
+            {
+                readings.Enqueue(new(what, HealthReadingState.TimedOut));
+                return null;
+            }
         }
 
-        var drives = Drives();
-        // The slow ones run side by side.
-        var disks = Check("Drive health", "Asking the drives how they are…", PhysicalDisks);
-        var updates = Check("Windows Update", "Reading Windows Update's history…", UpdateHistory, 25);
+        var snap = await Check("Memory", "Reading the latest memory sample…", () =>
+        {
+            if (Hub.System.Latest is { } recent && DateTimeOffset.Now - recent.Time <= TimeSpan.FromSeconds(10)) return recent;
+            Hub.System.Sample();
+            return Hub.System.Latest is { } current && DateTimeOffset.Now - current.Time <= TimeSpan.FromSeconds(10) ? current : null;
+        }, seconds: 5, quality: snapshot => snapshot.RamTotalGb > 0 ? HealthReadingState.Observed : HealthReadingState.Unavailable);
+        var drives = Check("Drive space", "Reading available disk space…", Drives, quality: rows =>
+            rows.Count > 0 && rows.Any(d => d.System) ? HealthReadingState.Observed : HealthReadingState.Partial);
+        var disks = Check("Drive health", "Asking the drives how they are…", PhysicalDisks, quality: rows =>
+            rows.Count == 0 ? HealthReadingState.Unsupported
+            : rows.Any(d => d.Health == "Unknown") ? HealthReadingState.Partial : HealthReadingState.Observed);
+        var updates = Check("Windows Update", "Reading Windows Update’s history…", UpdateHistory, 25, history =>
+            history.Last is null ? HealthReadingState.Partial : HealthReadingState.Observed);
+        var restart = Check("Pending restart", "Checking for a pending restart…", () => (object)RestartPending());
         var bsod = Check("Blue screens", "Looking for crashes in Windows' logs…", () => (object)Count("System", "Microsoft-Windows-WER-SystemErrorReporting", 1001, 30));
         var shutdowns = Check("Unexpected shutdowns", "Looking for crashes in Windows' logs…", () => (object)Count("System", "Microsoft-Windows-Kernel-Power", 41, 30));
         var crashes = Check("App crashes", "Looking for crashes in Windows' logs…", AppCrashes);
-        var antivirus = Check("Antivirus", "Checking Windows Security…", Antivirus);
+        var diskRetries = Check("Disk I/O retries", "Reading recent disk events…", () => (object)Count("System", "disk", 153, 7, 100));
+        var antivirus = Check("Antivirus", "Checking Windows Security…", Antivirus, quality: rows =>
+            rows.Count == 0 ? HealthReadingState.Unavailable : HealthReadingState.Observed);
+        var firewall = Check("Windows Firewall", "Reading active firewall profiles…", Firewall, quality: rows =>
+            rows.Count == 0 ? HealthReadingState.Unavailable
+            : rows.Any(profile => profile.Enabled is null) ? HealthReadingState.Partial : HealthReadingState.Observed);
         var devices = Check("Devices", "Checking devices…", DeviceProblems);
         var battery = snap?.Battery is not null ? Check("Battery wear", "Checking the battery…", Battery) : Task.FromResult<BatteryFact?>(null);
+        if (snap is not null && snap.Battery is null) readings.Enqueue(new("Battery wear", HealthReadingState.Unsupported));
         var startup = Check("Startup apps", "Counting startup apps…", StartupApps);
-        var temp = Check("Temporary files", "Measuring temporary files…", () => (object)FolderGb(Path.GetTempPath(), TimeSpan.FromSeconds(6)), 12);
-        await Task.WhenAll(disks, updates, bsod, shutdowns, crashes, antivirus, devices, battery, startup, temp);
+        var temp = Check("Temporary files", "Measuring temporary files…", () => (object)FolderGb(Path.GetTempPath(), TimeSpan.FromSeconds(6), ct), 12);
+        var recycle = Check("Recycle Bin", "Checking the Recycle Bin…", () => RecycleBinGb() as object);
+        await Task.WhenAll(drives, disks, updates, restart, bsod, shutdowns, crashes, diskRetries, antivirus, firewall, devices, battery, startup, temp, recycle).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
 
         var update = await updates;
+        var av = await antivirus;
         var top = snap?.TopProcesses.OrderByDescending(p => p.MemoryMb).FirstOrDefault();
         return new HealthFacts
         {
             Checked = DateTimeOffset.Now,
             Machine = snap is null ? Environment.MachineName : $"{snap.MachineName} · {snap.OsName}",
-            Drives = drives,
+            Drives = await drives ?? new(),
             PhysicalDisks = await disks,
             Battery = await battery,
             Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64),
-            RestartPending = RestartPending(),
+            RestartPending = await restart as bool?,
             LastUpdate = update?.Last,
             LastUpdateTitle = update?.Title,
             FailedUpdates = update?.Failed,
             BlueScreens = await bsod as int?,
             UnexpectedShutdowns = await shutdowns as int?,
             AppCrashes = await crashes,
-            Antivirus = await antivirus,
+            Antivirus = av is { Count: > 0 } ? av : null,
+            FirewallProfiles = await firewall,
+            StorageRetries = await diskRetries as int?,
             DeviceProblems = await devices,
             StartupApps = await startup,
             TempGb = await temp as double?,
-            RecycleBinGb = RecycleBinGb(),
+            RecycleBinGb = await recycle as double?,
             RamPercent = snap?.RamPercent ?? 0,
             RamTotalGb = snap?.RamTotalGb ?? 0,
             TopMemoryApp = top?.Name,
             TopMemoryMb = top?.MemoryMb ?? 0,
-            Skipped = skipped.Distinct().ToList(),
+            MemorySampled = snap?.Time,
+            Readings = readings.OrderBy(reading => reading.Name, StringComparer.Ordinal).ToList(),
+        };
+    }
+
+    private static HealthReadingState Classify(Exception ex)
+    {
+        while (ex is TargetInvocationException { InnerException: { } inner }) ex = inner;
+        return ex switch
+        {
+            TimeoutException => HealthReadingState.TimedOut,
+            UnauthorizedAccessException or System.Security.SecurityException => HealthReadingState.Denied,
+            { HResult: unchecked((int)0x80070005) or unchecked((int)0x80041003) } => HealthReadingState.Denied,
+            { HResult: unchecked((int)0x80040154) or unchecked((int)0x8004100E) or unchecked((int)0x80041010) } => HealthReadingState.Unsupported,
+            PlatformNotSupportedException or DllNotFoundException or EntryPointNotFoundException => HealthReadingState.Unsupported,
+            _ => HealthReadingState.Unavailable,
         };
     }
 
@@ -110,7 +167,30 @@ public static class HealthInspector
             .Select(r => new PhysicalDiskFact(r["FriendlyName"]?.ToString() ?? "Drive",
                 Convert.ToInt32(r["MediaType"] ?? 0) switch { 3 => "hard drive", 4 => "SSD", 5 => "SCM drive", _ => "drive" },
                 Convert.ToInt32(r["HealthStatus"] ?? 5) switch { 0 => "Healthy", 1 => "Warning", 2 => "Unhealthy", _ => "Unknown" }))
-            .Where(d => d.Health != "Unknown").ToList();
+            .ToList();
+
+    private static List<FirewallProfileFact> Firewall()
+    {
+        var type = Type.GetTypeFromProgID("HNetCfg.FwPolicy2") ?? throw new PlatformNotSupportedException();
+        var policy = Activator.CreateInstance(type)!;
+        try
+        {
+            var active = Convert.ToInt32(Wmi.Call(policy, "CurrentProfileTypes", BindingFlags.GetProperty));
+            var result = new List<FirewallProfileFact>();
+            foreach (var (id, name) in new[] { (1, "Domain"), (2, "Private"), (4, "Public") })
+            {
+                if ((active & id) == 0) continue;
+                try { result.Add(new(name, Wmi.Call(policy, "FirewallEnabled", BindingFlags.GetProperty, id) as bool?)); }
+                catch (Exception ex) when (ex is COMException or TargetInvocationException or UnauthorizedAccessException)
+                {
+                    if (result.Count == 0 && (active & 7) == id) throw;
+                    result.Add(new(name, null));
+                }
+            }
+            return result;
+        }
+        finally { Marshal.FinalReleaseComObject(policy); }
+    }
 
     private static List<AntivirusFact> Antivirus() =>
         Wmi.Query(@"root\SecurityCenter2", "SELECT displayName, productState FROM AntiVirusProduct", "displayName", "productState")
@@ -165,24 +245,21 @@ public static class HealthInspector
         finally { Marshal.FinalReleaseComObject(session); }
     }
 
-    private static bool? RestartPending()
+    private static bool RestartPending()
     {
-        try
-        {
-            using var wu = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired");
-            using var cbs = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending");
-            return wu is not null || cbs is not null;
-        }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException) { return null; }
+        using var wu = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired");
+        if (wu is not null) return true;
+        using var cbs = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending");
+        return cbs is not null;
     }
 
-    private static int Count(string log, string provider, int id, int days)
+    private static int Count(string log, string provider, int id, int days, int limit = 500)
     {
         var query = new EventLogQuery(log, PathType.LogName,
             $"*[System[Provider[@Name='{provider}'] and (EventID={id}) and TimeCreated[timediff(@SystemTime) <= {(long)TimeSpan.FromDays(days).TotalMilliseconds}]]]");
         using var reader = new EventLogReader(query);
         var n = 0;
-        while (n < 500 && reader.ReadEvent() is { } e)
+        while (n < limit && reader.ReadEvent(TimeSpan.FromSeconds(1)) is { } e)
         {
             e.Dispose();
             n++;
@@ -198,12 +275,13 @@ public static class HealthInspector
         using var reader = new EventLogReader(query);
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var n = 0;
-        while (n++ < 1000 && reader.ReadEvent() is { } e)
+        while (n++ < 1000 && reader.ReadEvent(TimeSpan.FromSeconds(1)) is { } e)
         {
             using (e)
             {
                 // The first value is the program that crashed or hung ("chrome.exe").
-                if (e.Properties.Count == 0 || e.Properties[0].Value is not string { Length: > 0 } app) continue;
+                var properties = e.Properties;
+                if (properties.Count == 0 || properties[0].Value is not string { Length: > 0 } app) continue;
                 var name = Path.GetFileNameWithoutExtension(app.Trim());
                 counts[name] = counts.GetValueOrDefault(name) + 1;
             }
@@ -240,8 +318,8 @@ public static class HealthInspector
         return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>A folder's size, giving up after <paramref name="budget"/> (the answer is then "at least").</summary>
-    internal static double FolderGb(string path, TimeSpan budget)
+    /// <summary>A bounded estimate of a folder's size. A scan beyond the time or file limit produces no estimate.</summary>
+    internal static double FolderGb(string path, TimeSpan budget, CancellationToken ct = default)
     {
         if (!Directory.Exists(path)) return 0;
         var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
@@ -251,7 +329,9 @@ public static class HealthInspector
         foreach (var file in new DirectoryInfo(path).EnumerateFiles("*", options))
         {
             try { bytes += file.Length; } catch (IOException) { }
-            if (++files % 2000 == 0 && watch.Elapsed > budget) break;
+            if (++files % 256 != 0) continue;
+            ct.ThrowIfCancellationRequested();
+            if (watch.Elapsed > budget || files >= 100_000) throw new TimeoutException();
         }
         return bytes / 1073741824.0;
     }
@@ -269,8 +349,9 @@ public static class HealthInspector
     private static double? RecycleBinGb()
     {
         var info = new RecycleBinInfo { Size = Marshal.SizeOf<RecycleBinInfo>() };
-        try { return SHQueryRecycleBinW(null, ref info) == 0 ? info.Bytes / 1073741824.0 : null; }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { return null; }
+        var result = SHQueryRecycleBinW(null, ref info);
+        Marshal.ThrowExceptionForHR(result);
+        return result == 0 ? info.Bytes / 1073741824.0 : null;
     }
 }
 
@@ -294,6 +375,7 @@ internal static class Wmi
             if (Call(services, "ExecQuery", BindingFlags.InvokeMethod, wql, "WQL", 0) is not IEnumerable results) return rows;
             foreach (var item in results)
             {
+                if (rows.Count >= 256) throw new InvalidOperationException("The WMI reading exceeded its row limit.");
                 var values = Call(item, "Properties_", BindingFlags.GetProperty)!;
                 var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
                 foreach (var p in properties) row[p] = Call(Call(values, "Item", BindingFlags.InvokeMethod, p)!, "Value", BindingFlags.GetProperty);

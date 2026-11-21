@@ -53,6 +53,21 @@ the egress checks. Ask directly fetches only supplied/authorized chat links or l
 invented model URLs are not automatic fetch authority. Remote AI opt-in is a separate disclosure choice: approved context
 sent to that endpoint leaves the PC. Local operation claims must not be shown for a remote endpoint.
 
+### Recipe authority and retention
+
+Saved descriptions, step bindings and findings are data. The manual recipe runner uses a separate fixed allow-list for
+Windows health checks and local report formatting. It does not inherit Ask's per-chat tools, file grants or the Search
+index. The explicit run review authorizes one saved revision. Edits, pause and delete revoke access for future steps.
+The runner has no provider, network, shell, scheduler, process launch or elevation capability. A recipe does not initiate
+Windows maintenance; This PC offers those actions through the existing user-initiated controls.
+
+Recipe history contains run IDs, revision numbers, capability IDs, times, outcomes and counts. It excludes raw Windows
+logs and diagnostic detail. The latest report step can display up to eight headings until the app closes. The profile's
+latest full This PC report is separate from recipe history and can include local device names and installed software
+names. Internal event checks keep only the relevant count or summarized findings. Direct This PC model summaries use
+the local route and are excluded from the Agents model output inspector. Explicit Ask requests continue to follow
+Ask's private-data and provider policy.
+
 ## 3. Files, parsing and output
 
 `LocalFiles` checks configured roots and per-chat folder grants, canonicalizes existing Windows short-name components

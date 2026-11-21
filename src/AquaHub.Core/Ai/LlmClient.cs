@@ -107,6 +107,7 @@ public sealed record LlmRequest
     public bool RequireModel { get; init; }
     /// <summary>Whether diagnostics can retain the model's raw text during this app session.</summary>
     public bool CaptureOutput { get; init; } = true;
+    public bool LocalOnly { get; init; }
     /// <summary>Context window for this request; null = Settings. A different size reloads the model, so only long jobs raise it.</summary>
     public int? ContextTokens { get; init; }
     public LlmReasoningControl? ReasoningControl { get; init; }
@@ -159,7 +160,8 @@ public sealed partial class LlmClient : IDisposable
 {
     private readonly Func<AiSettings> _settings;
     private readonly ISecretStore _secrets;
-    private readonly HttpClient _http;
+    private readonly HttpClient _http = CreateHttp(followRedirects: true);
+    private readonly HttpClient _localHttp = CreateHttp(followRedirects: false);
     /// <summary>The graphics card: one request at a time (the only lane for Ollama and other servers).</summary>
     private readonly PriorityGate _gate = new();
     /// <summary>Aqua's runtime's processor-lane models (such as embeddings), which run beside the card's.</summary>
@@ -202,14 +204,17 @@ public sealed partial class LlmClient : IDisposable
     {
         _settings = settings;
         _secrets = secrets;
-        _http = new HttpClient(new SocketsHttpHandler
-        {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-            ConnectTimeout = TimeSpan.FromSeconds(4),
-            UseProxy = false, // local traffic must never be routed through a proxy
-        })
-        { Timeout = Timeout.InfiniteTimeSpan };
     }
+
+    private static HttpClient CreateHttp(bool followRedirects) => new(new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        ConnectTimeout = TimeSpan.FromSeconds(4),
+        UseProxy = false,
+        AllowAutoRedirect = followRedirects,
+    }) { Timeout = Timeout.InfiniteTimeSpan };
+
+    private HttpClient HttpFor(LlmRequest request) => request.LocalOnly ? _localHttp : _http;
 
     public bool InteractiveWaiting => _gate.InteractiveWaiting;
 
@@ -228,11 +233,13 @@ public sealed partial class LlmClient : IDisposable
         return null;
     }
 
-    private Uri BaseUri()
+    private Uri BaseUri(bool localOnly = false)
     {
         var s = _settings();
         if (!Uri.TryCreate(s.Endpoint, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
             throw new LlmUnavailableException("Invalid AI endpoint");
+        if (localOnly && !uri.IsLoopback)
+            throw new LlmUnavailableException("This request requires a local AI endpoint.");
         if (!(uri.IsLoopback || uri.Host == "localhost") && !s.AllowRemoteEndpoint)
             throw new LlmUnavailableException("Remote AI endpoints are disabled (privacy). Enable 'Allow remote endpoint' to use one.");
         return uri;
@@ -701,7 +708,7 @@ public sealed partial class LlmClient : IDisposable
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Key);
             try
             {
-                var response = await _http.SendAsync(req, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
+                var response = await HttpFor(request).SendAsync(req, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
                 return (response, endpoint, load);
             }
             catch (HttpRequestException ex) when (attempt == 0 && ex.StatusCode is null && !ct.IsCancellationRequested)
@@ -775,6 +782,7 @@ public sealed partial class LlmClient : IDisposable
         CancelWarmup();
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
+        if (request.LocalOnly && !IsLlama) _ = BaseUri(localOnly: true);
         await EnsureAvailableAsync(request.Priority == LlmPriority.Interactive || request.WakeServer, ct).ConfigureAwait(false);
         if (IsLlama) return await LlamaCompleteAsync(request, s, ct).ConfigureAwait(false);
         var model = ModelFor(request.Model, request.Deep);
@@ -1109,11 +1117,11 @@ public sealed partial class LlmClient : IDisposable
     {
         var sw = Stopwatch.StartNew();
         var body = await OllamaBodyAsync(model, request, s, stream: false, ct).ConfigureAwait(false);
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "api/chat"))
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(request.LocalOnly), "api/chat"))
         { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromMinutes(4));
-        using var resp = await _http.SendAsync(req, cts.Token).ConfigureAwait(false);
+        using var resp = await HttpFor(request).SendAsync(req, cts.Token).ConfigureAwait(false);
         var json = await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
             throw new HttpRequestException($"Ollama error {(int)resp.StatusCode}: {HtmlText.Truncate(json, 200)}");
@@ -1130,12 +1138,12 @@ public sealed partial class LlmClient : IDisposable
     {
         var sw = Stopwatch.StartNew();
         var body = OpenAiBody(model, request, s, stream: false);
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "v1/chat/completions"))
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(request.LocalOnly), "v1/chat/completions"))
         { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
         AddAuth(req);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromMinutes(4));
-        using var resp = await _http.SendAsync(req, cts.Token).ConfigureAwait(false);
+        using var resp = await HttpFor(request).SendAsync(req, cts.Token).ConfigureAwait(false);
         var json = await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
             throw new HttpRequestException($"Model server error {(int)resp.StatusCode}: {HtmlText.Truncate(json, 200)}");
@@ -1197,6 +1205,7 @@ public sealed partial class LlmClient : IDisposable
         CancelWarmup();
         var s = _settings();
         if (!s.Enabled) throw new LlmUnavailableException("AI is disabled in settings");
+        if (request.LocalOnly && !IsLlama) _ = BaseUri(localOnly: true);
         await EnsureAvailableAsync(wake: true, ct).ConfigureAwait(false);
         string model;
         IDisposable? lease;
@@ -1231,12 +1240,12 @@ public sealed partial class LlmClient : IDisposable
                 if (IsOllama)
                 {
                     var body = await OllamaBodyAsync(model, request, s, stream: true, ct).ConfigureAwait(false);
-                    req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "api/chat"))
+                    req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(request.LocalOnly), "api/chat"))
                     { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
                 }
                 else
                 {
-                    req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(), "v1/chat/completions"))
+                    req = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri(request.LocalOnly), "v1/chat/completions"))
                     { Content = new StringContent(OpenAiBody(model, request, s, stream: true).ToJsonString(), Encoding.UTF8, "application/json") };
                     AddAuth(req);
                 }
@@ -1246,7 +1255,7 @@ public sealed partial class LlmClient : IDisposable
 
         using (lease)
         using (req)
-        using (var resp = sent ?? await _http.SendAsync(req!, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
+        using (var resp = sent ?? await HttpFor(request).SendAsync(req!, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
         {
             if (!resp.IsSuccessStatusCode)
             {
@@ -1484,7 +1493,12 @@ public sealed partial class LlmClient : IDisposable
         if (warm is not null) await warm.ConfigureAwait(false);
     }
 
-    public void Dispose() { StopAsync().GetAwaiter().GetResult(); _http.Dispose(); }
+    public void Dispose()
+    {
+        StopAsync().GetAwaiter().GetResult();
+        _localHttp.Dispose();
+        _http.Dispose();
+    }
 }
 
 /// <summary>

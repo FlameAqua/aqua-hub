@@ -76,6 +76,12 @@ public enum AgentRunEnd { Finished, Disabled, Paused, StillRunning }
 /// <summary>The outcome of <see cref="AgentRuntime.RunAndWaitAsync"/>: how it ended and the agent's status by then.</summary>
 public sealed record AgentRunReport(AgentRunEnd End, AgentStatus Status);
 
+public sealed record BuiltInAgentDetail(AgentStatus Status, bool Enabled, bool Paused, bool Requested,
+    TimeSpan Interval, DateTimeOffset? NextRun, IReadOnlyList<string> Dependencies)
+{
+    public bool CanRun => Enabled && !Paused && !Requested && Status.State is not (AgentState.Running or AgentState.Waiting);
+}
+
 public abstract class Agent
 {
     public abstract string Id { get; }
@@ -159,6 +165,19 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
     public IReadOnlyList<AgentStatus> Statuses
     {
         get { lock (_slots) return _slots.Select(s => s.Status).ToList(); }
+    }
+
+    public BuiltInAgentDetail? Detail(string id)
+    {
+        lock (_slots)
+        {
+            var slot = _slots.Find(s => s.Agent.Id == id);
+            if (slot is null) return null;
+            var enabled = slot.Agent.IsEnabled(_ctx);
+            var paused = Paused || _stopping;
+            return new(slot.Status, enabled, paused, slot.Forced && !paused && enabled, EffectiveInterval(slot.Agent),
+                paused || !enabled || slot.Running ? null : slot.NextRun, slot.Agent.After);
+        }
     }
 
     public void Register(Agent agent)
@@ -339,7 +358,7 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 Log.Error("agents", $"{agent.Id} failed", ex);
-                result = AgentResult.Fail(ex.Message);
+                result = AgentResult.Fail("The agent stopped unexpectedly. Try running it again.");
             }
             finally
             {
@@ -379,7 +398,10 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
                 Errors = slot.Status.Errors + (result.Ok ? 0 : 1),
             };
 
-            try { _ctx.Db.AddRun(new AgentRunRecord(agent.Id, started, sw.Elapsed, result.Ok, result.Message)); } catch { }
+            RecordRun(new AgentRunRecord(agent.Id, started, sw.Elapsed, result.Ok, result.Message)
+            {
+                Outcome = result.Waiting ? BuiltInRunOutcome.Waiting : result.Ok ? BuiltInRunOutcome.Finished : BuiltInRunOutcome.Failed,
+            });
             Log.Info("agents", $"{agent.Id}: {(result.Ok ? "ok" : "FAIL")} in {sw.ElapsedMilliseconds} ms — {result.Message}");
 
             if (result.Ok && result.Changed)
@@ -394,7 +416,13 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) { terminal = slot.Status with { State = AgentState.Paused, LastMessage = "Stopped", NextRun = null }; }
+        catch (OperationCanceledException)
+        {
+            if (slot.Status.State == AgentState.Running)
+                RecordRun(new AgentRunRecord(agent.Id, started, DateTimeOffset.Now - started, false, "Aqua was closing.")
+                    { Outcome = BuiltInRunOutcome.Cancelled });
+            terminal = slot.Status with { State = AgentState.Paused, LastMessage = "Stopped", NextRun = null };
+        }
         finally
         {
             lock (_slots)
@@ -408,6 +436,12 @@ public sealed class AgentRuntime : IDisposable, IAsyncDisposable
             // Terminal status must never become observable while RunNow would still join the completed run.
             if (terminal is not null) Publish(terminal);
         }
+    }
+
+    private void RecordRun(AgentRunRecord run)
+    {
+        try { _ctx.Db.AddRun(run); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log.Warn("agents", "Could not save run history", ex); }
     }
 
     private void Update(Slot slot, AgentStatus status)

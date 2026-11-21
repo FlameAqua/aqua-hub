@@ -39,7 +39,41 @@ public class PcHealthTests
         var report = new HealthReport(Healthy(), findings, null);
         Assert.Equal("Looks healthy", report.Verdict);
         Assert.Contains(findings, f => f.Title == "Antivirus is on and up to date");
-        Assert.Contains(findings, f => f.Title == "Windows is up to date" && f.Detail.Contains("9 days ago"));
+        Assert.Contains(findings, f => f.Title == "Windows installed an update recently" && f.Detail.Contains("9 days ago"));
+    }
+
+    [Fact]
+    public void PartialReadingsDoNotImplyGoodHealth()
+    {
+        var facts = Healthy() with
+        {
+            Readings = new() { new("Drive health", HealthReadingState.Partial), new("Windows Firewall", HealthReadingState.Denied),
+                new("Disk I/O retries", HealthReadingState.TimedOut), new("Battery", HealthReadingState.Unsupported) },
+            PhysicalDisks = new() { new("Reported SSD", "SSD", "Healthy"), new("Other SSD", "SSD", "Unknown") },
+            FirewallProfiles = new() { new("Public", null) },
+        };
+        var report = new HealthReport(facts, PcHealth.Evaluate(facts), null);
+        Assert.Equal("Health check incomplete", report.Verdict);
+        Assert.Equal(3, facts.IncompleteChecks);
+        Assert.Contains(report.Findings, f => f.Title == "One drive reports healthy");
+        Assert.DoesNotContain(report.Findings, f => f.Title.Contains("Other SSD") || f.Title.Contains("Firewall"));
+        Assert.Contains("Windows denied access", PcHealth.ToText(report));
+        Assert.Contains("Windows did not respond in time", PcHealth.ToText(report));
+    }
+
+    [Fact]
+    public void FirewallAndStorageEventsReportOnlyWhatWindowsObserved()
+    {
+        var facts = Healthy() with
+        {
+            FirewallProfiles = new() { new("Private", true), new("Public", false) },
+            StorageRetries = 100,
+        };
+        var findings = PcHealth.Evaluate(facts);
+        Assert.Contains(findings, f => f.Level == HealthLevel.Warning && f.Tool == "security" && f.Detail.Contains("Public"));
+        Assert.Contains(findings, f => f.Level == HealthLevel.Warning && f.Tool == "events" && f.Detail.Contains("At least 100"));
+        Assert.DoesNotContain(findings, f => f.Title == "No disk I/O retries found");
+        Assert.Contains(PcHealth.Evaluate(facts with { StorageRetries = 0 }), f => f.Title == "No disk I/O retries found");
     }
 
     [Fact]

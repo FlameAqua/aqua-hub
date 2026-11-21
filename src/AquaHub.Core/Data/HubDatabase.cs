@@ -96,12 +96,44 @@ public sealed partial class HubDatabase
             CREATE INDEX IF NOT EXISTS ix_alerts_created ON alerts(created DESC);
             CREATE TABLE IF NOT EXISTS agent_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, started INTEGER NOT NULL,
               duration_ms INTEGER NOT NULL, ok INTEGER NOT NULL, message TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS ix_agent_runs_agent_id ON agent_runs(agent, id DESC);
             CREATE TABLE IF NOT EXISTS price_history(symbol TEXT NOT NULL, day INTEGER NOT NULL, close REAL NOT NULL,
               PRIMARY KEY(symbol, day)) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, at INTEGER NOT NULL) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS reminder_state(id INTEGER PRIMARY KEY CHECK(id = 1), data TEXT NOT NULL);
-            PRAGMA user_version = 1;
             """);
+        using var migration = c.BeginTransaction();
+        using var version = c.CreateCommand();
+        version.Transaction = migration;
+        version.CommandText = "SELECT COUNT(*) FROM pragma_table_info('agent_runs') WHERE name = 'outcome';";
+        if (Convert.ToInt64(version.ExecuteScalar()) == 0)
+        {
+            version.CommandText = "ALTER TABLE agent_runs ADD COLUMN outcome INTEGER;";
+            version.ExecuteNonQuery();
+        }
+        version.CommandText = "PRAGMA user_version;";
+        if (Convert.ToInt64(version.ExecuteScalar()) < 2)
+        {
+            version.CommandText = "PRAGMA user_version = 2;";
+            version.ExecuteNonQuery();
+        }
+        migration.Commit();
+    }
+
+    internal T? GetBoundedJson<T>(string key, int maxBytes) where T : class
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT CASE WHEN length(CAST(value AS BLOB)) <= $max THEN value END FROM kv WHERE key = $key;";
+        cmd.Parameters.AddWithValue("$max", maxBytes);
+        cmd.Parameters.AddWithValue("$key", key);
+        return cmd.ExecuteScalar() switch
+        {
+            null => null,
+            string json => System.Text.Json.JsonSerializer.Deserialize<T>(json, JsonUtil.Options)
+                ?? throw new InvalidDataException("The saved data is missing."),
+            _ => throw new InvalidDataException("The saved data exceeds its size limit.")
+        };
     }
 
     private static long Now() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -486,26 +518,33 @@ public sealed partial class HubDatabase
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO agent_runs(agent, started, duration_ms, ok, message) VALUES($a, $s, $d, $o, $m);";
+        cmd.CommandText = "INSERT INTO agent_runs(agent, started, duration_ms, ok, message, outcome) VALUES($a, $s, $d, $o, $m, $outcome);";
         cmd.Parameters.AddWithValue("$a", run.Agent);
         cmd.Parameters.AddWithValue("$s", run.Started.ToUnixTimeSeconds());
         cmd.Parameters.AddWithValue("$d", (long)run.Duration.TotalMilliseconds);
         cmd.Parameters.AddWithValue("$o", run.Ok ? 1 : 0);
         cmd.Parameters.AddWithValue("$m", run.Message);
+        cmd.Parameters.AddWithValue("$outcome", (int)run.Outcome);
         cmd.ExecuteNonQuery();
     }
 
-    public List<AgentRunRecord> GetRuns(int limit = 100)
+    public List<AgentRunRecord> GetRuns(int limit = 100, string? agentId = null)
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT agent, started, duration_ms, ok, message FROM agent_runs ORDER BY id DESC LIMIT $n;";
+        cmd.CommandText = agentId is null
+            ? "SELECT agent, started, duration_ms, ok, message, outcome FROM agent_runs ORDER BY id DESC LIMIT $n;"
+            : "SELECT agent, started, duration_ms, ok, message, outcome FROM agent_runs WHERE agent = $agent ORDER BY id DESC LIMIT $n;";
+        if (agentId is not null) cmd.Parameters.AddWithValue("$agent", agentId);
         cmd.Parameters.AddWithValue("$n", limit);
         using var r = cmd.ExecuteReader();
         var list = new List<AgentRunRecord>();
         while (r.Read())
-            list.Add(new AgentRunRecord(r.GetString(0), DateTimeOffset.FromUnixTimeSeconds(r.GetInt64(1)),
-                TimeSpan.FromMilliseconds(r.GetInt64(2)), r.GetInt32(3) == 1, r.GetString(4)));
+        {
+            var run = new AgentRunRecord(r.GetString(0), DateTimeOffset.FromUnixTimeSeconds(r.GetInt64(1)),
+                TimeSpan.FromMilliseconds(r.GetInt64(2)), r.GetInt32(3) == 1, r.GetString(4));
+            list.Add(r.IsDBNull(5) ? run : run with { Outcome = (BuiltInRunOutcome)r.GetInt32(5) });
+        }
         return list;
     }
 
