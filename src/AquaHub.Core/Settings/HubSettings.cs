@@ -33,6 +33,7 @@ public sealed class GeneralSettings
 {
     public string UserName { get; set; } = "";
     public bool LaunchAtStartup { get; set; }
+    public bool SearchInExplorerMenu { get; set; }
     public bool CloseToTray { get; set; } = true;
     /// <summary>system | dark | light</summary>
     public string Theme { get; set; } = "system";

@@ -83,6 +83,7 @@
                 <RadioButton Style="{StaticResource NavItem}" Tag="launchpad" ui:UiProps.Icon="launchpad" Content="Launchpad" ToolTip="Apps, music &amp; scenes (Ctrl+7)"/>
                 <Rectangle Style="{StaticResource Divider}" Margin="18,8"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="ask" ui:UiProps.Icon="ask" Content="Ask Aqua" ToolTip="Ask Aqua (Ctrl+8)"/>
+                <RadioButton Style="{StaticResource NavItem}" Tag="search" ui:UiProps.Icon="search" Content="Search files" ToolTip="Search your folders" AutomationProperties.AutomationId="nav-search"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="workbench" ui:UiProps.Icon="wand" Content="Workbench" ToolTip="Teach Aqua skills and things to remember"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="agents" ui:UiProps.Icon="agents" Content="Agents" ToolTip="Agents (Ctrl+9)"/>
                 <RadioButton Style="{StaticResource NavItem}" Tag="models" ui:UiProps.Icon="cube" Content="Models" ToolTip="Your local model library" AutomationProperties.AutomationId="nav-models"/>
@@ -231,6 +232,7 @@
                     <Canvas x:Name="DeckSurface" Grid.Row="1" ClipToBounds="True" SizeChanged="OnDeckSizeChanged">
                         <Canvas x:Name="DeckActions" Visibility="Collapsed" Width="{Binding ActualWidth, ElementName=DeckSurface}" Height="{Binding ActualHeight, ElementName=DeckSurface}">
                             <Button x:Name="DeckAsk" Style="{StaticResource Deck.Action}" Click="OnDeckAsk" ToolTip="Ask Aqua" AutomationProperties.Name="Ask Aqua" AutomationProperties.AutomationId="deck-ask"><c:Icon Kind="sparkle" Width="19" Height="19"/></Button>
+                            <Button x:Name="DeckSearch" Style="{StaticResource Deck.Action}" Click="OnDeckSearch" ToolTip="Search files" AutomationProperties.Name="Search files" AutomationProperties.AutomationId="deck-search"><c:Icon Kind="search" Width="19" Height="19"/></Button>
                             <Button x:Name="DeckLaunchpad" Style="{StaticResource Deck.Action}" Click="OnDeckLaunchpad" ToolTip="Launchpad" AutomationProperties.Name="Launchpad" AutomationProperties.AutomationId="deck-launchpad"><c:Icon Kind="launchpad" Width="18" Height="18"/></Button>
                             <Button x:Name="DeckToday" Style="{StaticResource Deck.Action}" Click="OnDeckToday" ToolTip="Today's agenda" AutomationProperties.Name="Today's agenda" AutomationProperties.AutomationId="deck-today"><c:Icon Kind="upcoming" Width="18" Height="18"/></Button>
                             <Button x:Name="DeckAdd" Style="{StaticResource Deck.Action}" Click="OnDeckAddReminder" ToolTip="Add reminder" AutomationProperties.Name="Add reminder" AutomationProperties.AutomationId="deck-add-reminder"><c:Icon Kind="bell" Width="18" Height="18"/></Button>
@@ -277,10 +279,12 @@
                                       </Border>
                                       <Border x:Name="Grip" CornerRadius="28" Background="{DynamicResource B.Popup}" BorderBrush="{DynamicResource B.Accent}" BorderThickness="1.5">
                                         <Grid>
-                                            <c:Icon x:Name="DeckLogo" Kind="bolt" Width="22" Height="22" Foreground="{DynamicResource B.AccentText}"/>
-                                            <TextBlock Text="{Binding ToolTip, RelativeSource={RelativeSource TemplatedParent}}" x:Name="Countdown"
-                                                       VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource B.AccentText}" Visibility="Collapsed"/>
+                                            <c:Icon x:Name="DeckLogo" Kind="bolt" Width="22" Height="22" Foreground="{DynamicResource B.AccentText}" Visibility="Collapsed"/>
+                                            <StackPanel x:Name="Countdown" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                <c:Icon x:Name="CountdownClock" Kind="clock" Width="15" Height="15" Foreground="{DynamicResource B.AccentText}"/>
+                                                <TextBlock x:Name="CountdownTime" Text="{TemplateBinding Countdown}"
+                                                           HorizontalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource B.AccentText}"/>
+                                            </StackPanel>
                                         </Grid>
                                       </Border>
                                     </Grid>
@@ -288,24 +292,27 @@
                                         <Trigger Property="IsOpen" Value="True">
                                             <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Accent}"/>
                                             <Setter TargetName="DeckLogo" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
-                                            <Setter TargetName="Countdown" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="CountdownClock" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="CountdownTime" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
                                         </Trigger>
                                         <Trigger Property="IsMouseOver" Value="True">
                                             <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Accent}"/>
                                             <Setter TargetName="DeckLogo" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
-                                            <Setter TargetName="Countdown" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="CountdownClock" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="CountdownTime" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
                                         </Trigger>
                                         <Trigger Property="IsDragging" Value="True">
                                             <Setter TargetName="Grip" Property="Background" Value="{DynamicResource B.Accent}"/>
                                             <Setter TargetName="Grip" Property="BorderBrush" Value="{DynamicResource B.OnAccent}"/>
                                             <Setter TargetName="DeckLogo" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
-                                            <Setter TargetName="Countdown" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="CountdownClock" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
+                                            <Setter TargetName="CountdownTime" Property="Foreground" Value="{DynamicResource B.OnAccent}"/>
                                         </Trigger>
                                         <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Grip" Property="BorderThickness" Value="3"/></Trigger>
-                                        <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Value="timer">
-                                            <Setter TargetName="DeckLogo" Property="Visibility" Value="Collapsed"/>
-                                            <Setter TargetName="Countdown" Property="Visibility" Value="Visible"/>
-                                        </DataTrigger>
+                                        <Trigger Property="Countdown" Value="{x:Null}">
+                                            <Setter TargetName="DeckLogo" Property="Visibility" Value="Visible"/>
+                                            <Setter TargetName="Countdown" Property="Visibility" Value="Collapsed"/>
+                                        </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </c:DeckGrip.Template>

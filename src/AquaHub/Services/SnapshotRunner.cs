@@ -30,6 +30,7 @@ public static class SnapshotRunner
             if (only == "models") { await ModelsAsync(outDir); return; }
             if (only == "studio") { await StudioAsync(outDir); return; }
             if (only == "settings-ui") { await SettingsAsync(outDir); return; }
+            if (only == "search-ui") { await SearchAsync(outDir); return; }
             if (scratchProfile) Hub.Core.Chats.DeleteAll();
             // QA mode renders AI content even if a game is running (normal mode pauses AI then).
             Hub.Core.Llm.PauseReason = () => null;
@@ -197,6 +198,180 @@ public static class SnapshotRunner
             }
         }
         win.Close();
+    }
+
+    private static async Task SearchAsync(string outDir)
+    {
+        Hub.Core.Settings.Update(s =>
+        {
+            s.Ai.Enabled = s.Ai.ManageOllama = s.Ai.StartOllamaOnDemand = false;
+            s.General.ReduceMotion = true;
+            s.Ask.Computer = s.Privacy.LoadRemoteImages = false;
+        });
+        var win = new MainWindow { Width = 1440, Height = 880, Left = -32000, Top = -32000,
+            WindowStartupLocation = WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false };
+        var search = await Hub.Search.GetFilesAsync();
+        bool activated = false;
+        win.Activated += (_, _) => activated = true;
+        win.SourceInitialized += (_, _) =>
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(win).Handle;
+            var style = Native.GetWindowLongPtr(handle, Native.GWL_EXSTYLE).ToInt64();
+            Native.SetWindowLongPtr(handle, Native.GWL_EXSTYLE, new IntPtr(style | Native.WS_EX_NOACTIVATE));
+        };
+        try
+        {
+            win.Show();
+            win.Navigate("search");
+            await Settle(300);
+            if (win.IsActive || win.Left + win.ActualWidth >= SystemParameters.VirtualScreenLeft)
+                throw new InvalidOperationException("Search render must stay inactive and off-screen.");
+            Capture((FrameworkElement)win.Content, Path.Combine(outDir, "empty.png"), scale: 1);
+            await CheckSearchDeckAsync(win, outDir);
+            var folder = Path.Combine(Path.GetDirectoryName(Hub.Core.Paths.Root)!, "Search samples " + Guid.NewGuid().ToString("N"), "College notes");
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "Workshop notes for the autumn planning meeting and supplier follow-up.txt"),
+                "The ceramics kiln cools overnight before the workshop inspects the glaze.");
+            await search.AddAsync(folder, true);
+            var page = (UI.Pages.FileSearchPage)win.PageHost.Content;
+            page.Query.Text = "ceramics";
+            var timeout = System.Diagnostics.Stopwatch.StartNew();
+            while (page.Results.Items.Count != 1 && timeout.Elapsed < TimeSpan.FromSeconds(15)) await Settle(75);
+            if (page.Results.Items.Count != 1) throw new InvalidOperationException("Expected one authorized lexical result. " + search.Status);
+            foreach (var (theme, width) in new[] { ("dark", 1440), ("light", 820) })
+            {
+                var settings = Hub.Core.Settings.Clone();
+                settings.General.Theme = theme;
+                Hub.Theme.Apply(settings.General);
+                win.Width = width;
+                page.Query.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+                    PresentationSource.FromVisual(page), Environment.TickCount, System.Windows.Input.Key.Down)
+                    { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent });
+                await Settle(140);
+                if (!page.Open.IsEnabled || !page.Reveal.IsEnabled || page.Query.ActualWidth < 240 || page.Results.ActualHeight < 120)
+                    throw new InvalidOperationException("Search controls or result list did not fit.");
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"results-{theme}.png"), scale: 1);
+            }
+            if (!Sandbox.Enabled) throw new InvalidOperationException("Search actions require the isolated E2E journal.");
+            page.Open.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            page.Reveal.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            var journal = Path.Combine(Hub.Core.Paths.Root, "e2e-journal.log");
+            var target = ((Core.Search.SearchHit)page.Results.SelectedItem).Path;
+            var actionTimeout = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                await Settle(40);
+                var entries = File.ReadAllLines(journal);
+                if (entries.Any(e => e.EndsWith("\topen-file\t" + target, StringComparison.Ordinal)) &&
+                    entries.Any(e => e.EndsWith("\treveal-file\t" + target, StringComparison.Ordinal))) break;
+                if (actionTimeout.Elapsed > TimeSpan.FromSeconds(3))
+                    throw new InvalidOperationException("Selected file actions did not reach the isolated journal.");
+            }
+            var nested = Directory.CreateDirectory(Path.Combine(folder, "Spring term")).FullName;
+            File.WriteAllText(Path.Combine(nested, "Glaze.txt"), "Ceramics requires heat.");
+            var palette = new CommandPalette(win.Navigate);
+            try
+            {
+                palette.SetQuery("Search files");
+                if (palette.Results.SelectedItem is not PaletteItem { Title: "Search files" })
+                    throw new InvalidOperationException("The palette did not rank Search files first.");
+                palette.SetQuery("Search files: ceramics");
+                if (palette.Results.SelectedItem is not PaletteItem item || palette.Results.Items.Count != 1)
+                    throw new InvalidOperationException("The palette did not offer the direct file search.");
+                await item.Run();
+            }
+            finally { palette.Close(); }
+            await WaitForResults(2);
+            var activation = AppArgs.Parse(["--search-folder", nested + @"\."]);
+            if (activation.SearchFolder != nested) throw new InvalidOperationException("Explorer folder argument did not round-trip.");
+            win.Navigate("search", "folder:" + activation.SearchFolder);
+            await WaitForResults(1);
+            if (page.Results.Items[0] is not Core.Search.SearchHit { Name: "Glaze.txt" } || page.ReviewFolder.IsVisible)
+                throw new InvalidOperationException("Explorer scope did not limit results to the selected subfolder.");
+            Capture((FrameworkElement)win.Content, Path.Combine(outDir, "folder-scope.png"), scale: 1);
+            win.Navigate("search", "folder:" + Path.Combine(Path.GetDirectoryName(folder)!, "Unapproved"));
+            await WaitForResults(0);
+            if (new ButtonAutomationPeer(page.ReviewFolder).GetPattern(PatternInterface.Invoke) is not IInvokeProvider review)
+                throw new InvalidOperationException("Folder review could not be invoked.");
+            review.Invoke();
+            await Settle(100);
+            if (!page.Consent.IsVisible || page.IncludeContent.IsChecked == true || (await search.RootsAsync()).Count != 1)
+                throw new InvalidOperationException("Explorer opened an unapproved folder without the existing consent controls.");
+            win.Navigate("search", "query:ceramics");
+            await WaitForResults(2);
+
+            async Task WaitForResults(int count)
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                while (clock.Elapsed < TimeSpan.FromSeconds(10))
+                {
+                    await Settle(50);
+                    if (page.Results.Items.Count == count && page.Summary.Text != "Searching…" && page.Commands.IsEnabled) return;
+                }
+                throw new InvalidOperationException($"Expected {count} Search results through the shortcut.");
+            }
+
+            var other = Path.Combine(Path.GetDirectoryName(folder)!, "Index load " + Guid.NewGuid().ToString("N"));
+            await Task.Run(() =>
+            {
+                Directory.CreateDirectory(other);
+                for (var i=0; i<2000; i++) File.WriteAllText(Path.Combine(other,$"entry-{i:D4}.txt"), "Synthetic file");
+            });
+            var sampling = Task.Run(async () =>
+            {
+                var delays = new List<double>();
+                for (var i=0; i<120; i++)
+                {
+                    var started = System.Diagnostics.Stopwatch.GetTimestamp();
+                    await win.Dispatcher.InvokeAsync(() => delays.Add(System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds), DispatcherPriority.Input);
+                    await Task.Delay(15).ConfigureAwait(false);
+                }
+                return delays.Order().ElementAt(113);
+            });
+            await search.AddAsync(other,false);
+            var p95 = await sampling;
+            File.WriteAllText(Path.Combine(outDir,"dispatcher.txt"), FormattableString.Invariant($"Release check: 120 input-priority samples during a 2,000-file scan, p95 {p95:F2} ms"));
+            foreach (var root in await search.RootsAsync()) await search.RemoveAsync(root.Id);
+            await Settle(350);
+            if (page.Results.Items.Count != 0) throw new InvalidOperationException("Revoked result still visible.");
+            if (activated) throw new InvalidOperationException("Search renderer took foreground focus.");
+        }
+        finally { win.Close(); await search.StopAsync(); }
+    }
+
+    private static async Task CheckSearchDeckAsync(MainWindow win, string outDir)
+    {
+        Hub.Core.Settings.Update(s =>
+        {
+            s.Apps.Add(new Core.Settings.AppEntry { Id = "scratch-exe", Name = "Aqua Hub", Target = Environment.ProcessPath! });
+            s.Apps.Add(new Core.Settings.AppEntry { Id = "scratch-link", Name = "Reference", Kind = "url", Target = "https://example.invalid" });
+        });
+        win.Navigate("today");
+        win.DeckHandle.Visibility = Visibility.Visible;
+        win.DeckHandle.ToggleRequested?.Invoke();
+        win.DeckHandle.Countdown = "4:59";
+        foreach (var (theme, width) in new[] { ("dark", 1440), ("light", 820) })
+        {
+            var settings = Hub.Core.Settings.Clone();
+            settings.General.Theme = theme;
+            Hub.Theme.Apply(settings.General);
+            win.Width = width;
+            await Settle(100);
+            Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"deck-search-{theme}.png"), scale: 1);
+            if (win.DeckApp1.Content is not Image)
+                throw new InvalidOperationException($"The Deck did not display the executable icon ({win.DeckApp1.Content?.GetType().Name ?? "empty"}).");
+            if (win.DeckApp2.Content is not UI.Controls.Icon { Kind: "globe" })
+                throw new InvalidOperationException("The Deck did not display the link icon.");
+            if (win.DeckHandle.Template.FindName("CountdownClock", win.DeckHandle) is not UI.Controls.Icon { IsVisible: true })
+                throw new InvalidOperationException("The Deck did not display the countdown clock.");
+        }
+        if (new ButtonAutomationPeer(win.DeckSearch).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)
+            throw new InvalidOperationException("The Deck did not expose its file search button.");
+        invoke.Invoke();
+        await Settle(150);
+        if (win.PageHost.Content is not UI.Pages.FileSearchPage || win.DeckActions.IsVisible)
+            throw new InvalidOperationException("The Deck did not open Search files and close its actions.");
+        win.DeckHandle.Visibility = Visibility.Collapsed;
     }
 
     private static async Task SettingsAsync(string outDir)

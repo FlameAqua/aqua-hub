@@ -16,5 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="../../src/AquaHub/Platform/SearchFiles.cs" Link="Windows/SearchFiles.cs" />
+    <Compile Include="../../src/AquaHub/Platform/SearchFolderActivation.cs" Link="Windows/SearchFolderActivation.cs" />
   </ItemGroup>
 </Project>

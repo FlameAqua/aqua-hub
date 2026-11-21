@@ -31,9 +31,13 @@ public partial class CommandPalette : Window
 {
     private CancellationTokenSource? _askCts;
     private string _lastQuestion = "";
+    private readonly Action<string, string?> _showPage;
 
-    public CommandPalette()
+    public CommandPalette() : this(Hub.Windows.ShowMain) { }
+
+    internal CommandPalette(Action<string, string?> showPage)
     {
+        _showPage = showPage;
         InitializeComponent();
         SourceInitialized += (_, _) =>
         {
@@ -104,6 +108,9 @@ public partial class CommandPalette : Window
 
     private List<PaletteItem> Build(string q)
     {
+        if (q.StartsWith("search files:", StringComparison.OrdinalIgnoreCase))
+            return [SearchFiles(q["search files:".Length..].Trim())];
+
         var s = Hub.S;
         var all = new List<PaletteItem>();
 
@@ -137,6 +144,8 @@ public partial class CommandPalette : Window
             Title = "Research a topic", Subtitle = "Several web searches, the best pages read, a cited report", Icon = "research", Hint = "Ask",
             Keywords = "research web investigate report deep sources", Run = () => { Hub.Windows.ShowMain("ask", "@research:"); return Task.CompletedTask; },
         });
+        var searchFiles = SearchFiles();
+        all.Add(searchFiles);
         if (s.Ask.Computer)
             all.Add(new PaletteItem
             {
@@ -195,7 +204,7 @@ public partial class CommandPalette : Window
             ("ask", "Ask Aqua", "ask"), ("workbench", "Workbench", "wand"), ("agents", "Agents", "agents"), ("models", "Models", "cube"), ("settings", "Settings", "settings"),
         };
         foreach (var (id, name, icon) in pages)
-            all.Add(new PaletteItem { Title = name, Subtitle = "Go to page", Icon = icon, Hint = "Page", Keywords = "go show page " + id, Run = () => { Hub.Windows.ShowMain(id); return Task.CompletedTask; } });
+            all.Add(new PaletteItem { Title = name, Subtitle = "Go to page", Icon = icon, Hint = "Page", Keywords = "go show page " + id, Run = () => { _showPage(id, null); return Task.CompletedTask; } });
         foreach (var w in s.Markets.Watchlist.Concat(s.Markets.Indices).Concat(s.Markets.Macro))
         {
             var quote = Hub.State.Quotes.GetValueOrDefault(w.Symbol);
@@ -209,7 +218,7 @@ public partial class CommandPalette : Window
         }
 
         if (q.Length == 0)
-            return all.Take(4).Concat(all.Where(i => i.Hint == "Scene")).Concat(all.Where(i => i.Hint == "Page").Take(3)).Take(10).ToList();
+            return all.Take(4).Append(searchFiles).Concat(all.Where(i => i.Hint == "Scene")).Concat(all.Where(i => i.Hint == "Page").Take(3)).Take(10).ToList();
 
         // Earlier chats whose title matches.
         if (q.Length >= 3)
@@ -311,6 +320,19 @@ public partial class CommandPalette : Window
         }
         return ranked;
     }
+
+    private PaletteItem SearchFiles(string? query = null) => new()
+    {
+        Title = string.IsNullOrEmpty(query) ? "Search files" : $"Search files: “{query}”",
+        Subtitle = "Search approved folders",
+        Icon = "search",
+        Keywords = "find files folders documents filename semantic",
+        Run = () =>
+        {
+            _showPage("search", query is null ? null : "query:" + query);
+            return Task.CompletedTask;
+        },
+    };
 
     private static Task Show(string askArg)
     {

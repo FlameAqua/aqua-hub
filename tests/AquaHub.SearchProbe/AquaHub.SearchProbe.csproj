@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>$(AquaWindowsTfm)</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/AquaHub/AquaHub.csproj" />
+    <None Include="../AquaHub.Tests/Fixtures/search-relevance.json" Link="search-relevance.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

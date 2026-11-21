@@ -54,6 +54,17 @@ public partial class ModelsPage : UserControl, IPage
         Refresh();
         OnProgress(Hub.LocalAi.DownloadProgress);
         _timer.Start();
+        if (arg == "search") Dispatcher.BeginInvoke(() =>
+        {
+            if (!_active) return;
+            var search = Roles.Items.OfType<RoleRow>().FirstOrDefault(r => r.Id == "search");
+            if (search != null && Roles.ItemContainerGenerator.ContainerFromItem(search) is ContentPresenter presenter
+                && presenter.ContentTemplate?.FindName("RolePicker", presenter) is ComboBox picker)
+            {
+                picker.BringIntoView();
+                if (!Hub.SnapshotMode) picker.Focus();
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     public void OnNavigatedFrom()
@@ -108,7 +119,7 @@ public partial class ModelsPage : UserControl, IPage
                 MakeRole("main", "Main", "Ask Aqua and briefs", models),
                 MakeRole("creative", "Creative", "Roleplay, on the GPU · defaults to Main", models),
                 MakeRole("background", "Editor", "News and social analysis on the GPU · chat goes first", models),
-                MakeRole("search", "Search", "Search by meaning · available in Phase 8", models),
+                MakeRole("search", "Search", "EmbeddingGemma · file search on the CPU", models),
             };
             Problems.Visibility = ai.Problems.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             Problems.Header = $"{ai.Problems.Count} files couldn't be read";
@@ -146,7 +157,7 @@ public partial class ModelsPage : UserControl, IPage
 
     private static RoleRow MakeRole(string role, string title, string hint, IReadOnlyList<LocalModel> models)
     {
-        var list = models.Where(m => role == "search" ? m.Embedding : !m.Embedding)
+        var list = models.Where(m => role == "search" ? m.Embedding && m.Source == ModelSource.Aqua && m.Sha256 == Core.Search.SearchEmbeddings.Pin.File.Sha256 : !m.Embedding)
             .Select(m => new Choice(m.Id, m.Name)).Prepend(new Choice("", role == "main" ? "Automatic" : role == "search" ? "None" : "Use Main (recommended)")).ToList();
         var raw = Hub.LocalAi.RoleValue(role);
         var id = Hub.LocalAi.ForRole(role)?.Id ?? (raw is "" or "auto" ? "" : raw);

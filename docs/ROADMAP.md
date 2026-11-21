@@ -1,8 +1,7 @@
 # Aqua Hub roadmap
 
-Adrian's priority order, agreed 5 November 2026. This repository document is the maintained roadmap; no external artifact
-or agent handoff is required to understand the plan. Release baseline is 1.3.0 (`b021e9b`), with the subsequent Image Gen
-reference upgrades committed as `86f5ec6`. Adrian retains direction, commits and releases.
+Version 1.4.0 shipped at `fb474d7` with Phase 7 and the Settings and Deck refinements. Adrian owns direction,
+commits and releases. The release tag and the outstanding live acceptance items below track different milestones.
 
 ## Delivery order
 
@@ -12,7 +11,7 @@ reference upgrades committed as `86f5ec6`. Adrian retains direction, commits and
 | 1 | Phase 4, including 4.5/4.6 | Implementation and modular checks delivered; targeted live/performance follow-ups remain |
 | 2 | **5.3 / 5.4:** live streams and X | 5.3 linking confirmed by owner; remaining acceptance below. 5.4 deferred: paid APIs conflict with free-only scope |
 | 3 | **7:** everyday wins | Deck, quick reminders, day agenda and confirmed scene actions implemented. Trading 212 deferred by Adrian |
-| 4 | **8:** powerful file and semantic search | Needs a dedicated design/acceptance pass |
+| 4 | **8:** powerful file and semantic search | Local implementation and scratch CPU retrieval verified. Desktop and concurrent GPU acceptance remain. |
 | 5 | **9:** remaining voice and creativity features | Image Gen already delivered early |
 | 6 | **6:** user-built agents and deeper health tools | Later |
 | 7 | **5.1 / 5.2:** reactions, interests and For You | Deferred until the functional features above |
@@ -155,22 +154,20 @@ These ship independently of reactions, interest decay or a For You ranking layer
   Try mouse and keyboard dismissal of Ask's mode hint, Deck hover in both themes, and Social source setup and related
   links in the owner build before preparing the next release.
 
-## Then Phase 8: find anything
+## Phase 8: local file search
 
-File indexing, CPU semantic search using EmbeddingGemma and a dedicated Search page. Spend a separate design pass on:
+Search files now supports explicitly approved fixed local NTFS folders. Names and paths are the default.
+Per-folder content consent adds plain text and Office/OpenDocument passages to a private SQLite index.
+Aqua opens Search from the Deck and Command Palette. The installed default profile can enable folder-scoped
+search in File Explorer's **Show more options** menu.
+Aqua can rank paraphrases with a verified EmbeddingGemma CPU process. Folder approval, updates, recovery,
+result actions and storage limits are documented in [Architecture](ARCHITECTURE.md#local-file-search) and
+[Security](SECURITY.md#search-folder-authority). See [Scoring](SCORING.md) for the tested workload and results.
 
-- Scope and permission model: allowed roots, sensitive files, explicit grants, reparse/short-name paths, encrypted or
-  unavailable files and cloud placeholders. Recheck authorization when opening a result; an index entry is not access.
-- Search quality: exact filename/path matches alongside lexical and semantic content search, filters, explanations and
-  ranking. Build a representative relevance set, including exact names, paraphrases, ambiguous queries and no-match cases.
-- Incremental indexing with bounded CPU/I/O, change reconciliation, pause/cancel, restart recovery and deletion propagation.
-  Do not rescan whole drives on every query or silently hydrate remote files.
-- Versioned extraction/chunks/embedding model, stable document identity and incremental rebuilds; avoid mixing incompatible
-  vectors. Define storage limits and ensure removed roots/documents lose their indexed text and embeddings.
-- A responsive query/result UI with measured foreground latency, initial-index cost, idle overhead and disk growth.
-  Keep CPU embeddings independent of the generation GPU; assess resource contention on the actual target PC.
-
-These are design requirements to refine with Adrian, not a claim that the existing Search model slot implements an index.
+Owner acceptance still includes the native folder picker, open/reveal with installed file handlers, physical keyboard
+and screen reader use, the installed Explorer menu and its removal, a representative personal corpus, and
+timing isolated CPU indexing alongside GPU generation.
+The initial scope leaves OCR, PDF content, media understanding, archives, removable and network drives, and Ask integration deferred.
 
 ## Then Phase 9: remaining voice and creativity
 

@@ -9,8 +9,10 @@ namespace AquaHub.UI.Controls;
 public sealed class DeckGrip : Thumb
 {
     public static readonly DependencyProperty IsOpenProperty = DependencyProperty.Register(nameof(IsOpen), typeof(bool), typeof(DeckGrip));
+    public static readonly DependencyProperty CountdownProperty = DependencyProperty.Register(nameof(Countdown), typeof(string), typeof(DeckGrip));
 
     public bool IsOpen { get => (bool)GetValue(IsOpenProperty); set => SetValue(IsOpenProperty, value); }
+    public string? Countdown { get => (string?)GetValue(CountdownProperty); set => SetValue(CountdownProperty, value); }
     internal Action<Point>? MoveRequested { get; set; }
     internal Action? ToggleRequested { get; set; }
 

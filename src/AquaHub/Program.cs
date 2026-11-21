@@ -23,7 +23,11 @@ public static class Program
                 .SetAutoApplyOnStartup(false)
                 // Uninstalling: remove the Start with Windows entries that start this copy. The profile (settings,
                 // history) stays in %LOCALAPPDATA%\AquaHub.
-                .OnBeforeUninstallFastCallback(_ => Autostart.RemoveEntriesFor(Environment.ProcessPath))
+                .OnBeforeUninstallFastCallback(_ =>
+                {
+                    Autostart.RemoveEntriesFor(Environment.ProcessPath);
+                    ExplorerSearch.Set(false, Environment.ProcessPath);
+                })
                 .Run();
         }
         catch (Exception ex)

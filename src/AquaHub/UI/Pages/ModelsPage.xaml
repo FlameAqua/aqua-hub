@@ -25,7 +25,7 @@
      <Border Style="{StaticResource Card}" Padding="16">
       <StackPanel><TextBlock Text="{Binding Title}" Style="{StaticResource T.CardTitle}"/>
        <TextBlock Text="{Binding Hint}" Style="{StaticResource T.Caption}" TextWrapping="Wrap" MinHeight="38" Margin="0,6,0,10"/>
-       <ComboBox ItemsSource="{Binding Choices}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SelectedId, Mode=OneWay}" SelectionChanged="OnRoleChanged"
+       <ComboBox x:Name="RolePicker" ItemsSource="{Binding Choices}" DisplayMemberPath="Label" SelectedValuePath="Id" SelectedValue="{Binding SelectedId, Mode=OneWay}" SelectionChanged="OnRoleChanged"
         AutomationProperties.AutomationId="{Binding AutomationId}" AutomationProperties.Name="{Binding Title}"/>
       </StackPanel>
      </Border>

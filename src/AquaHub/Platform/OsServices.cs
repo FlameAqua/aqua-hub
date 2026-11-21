@@ -11,7 +11,7 @@ namespace AquaHub.Platform;
 /// <summary>One running instance per user; later launches signal the first one and exit.</summary>
 public sealed class SingleInstance : IDisposable
 {
-    public static readonly string[] Pages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "models", "settings" };
+    public static readonly string[] Pages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "models", "settings", "search" };
 
     /// <summary>What a second launch can ask the running instance to do (`--page markets` becomes "page-markets").</summary>
     public static readonly string[] Commands = new[] { "activate", "flyout", "palette", "tray-menu", "read-brief", "quit" }
@@ -20,12 +20,17 @@ public sealed class SingleInstance : IDisposable
     private readonly Dictionary<string, EventWaitHandle> _events = new();
     private readonly List<RegisteredWaitHandle> _waits = new();
     private readonly bool _owned;
+    private readonly SearchFolderActivation _folders;
+    private readonly CancellationTokenSource _stopFolders = new();
+    private Task _folderListener = Task.CompletedTask;
 
     /// <param name="scope">Profile folder: one instance per profile (tests can run beside the real app).</param>
     public SingleInstance(string name, string scope)
     {
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
         var id = Hash.Short(sid, name, scope.ToLowerInvariant());
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        _folders = new SearchFolderActivation($"{name}.{id}.{process.SessionId}.search-folder");
         _mutex = new Mutex(true, $"Local\\{name}.{id}", out _owned);
         foreach (var cmd in Commands)
             _events[cmd] = new EventWaitHandle(false, EventResetMode.AutoReset, $"Local\\{name}.{id}.{cmd}");
@@ -35,15 +40,25 @@ public sealed class SingleInstance : IDisposable
 
     /// <summary>Asks the running instance to perform a command (activate, flyout, palette, tray-menu, read-brief, quit, page-…).</summary>
     public void Signal(string command) => _events.GetValueOrDefault(command, _events["activate"]).Set();
+    public Task<bool> SendSearchFolderAsync(string folder) => _folders.SendAsync(folder);
 
-    public void Listen(Action<string> onCommand)
+    public void Listen(Action<string> onCommand, Action<string> onSearchFolder)
     {
         foreach (var (cmd, handle) in _events)
             _waits.Add(ThreadPool.RegisterWaitForSingleObject(handle, (_, _) => onCommand(cmd), null, Timeout.Infinite, false));
+        _folderListener = _folders.ListenAsync(onSearchFolder, _stopFolders.Token);
+    }
+
+    public Task StopFolderListenerAsync()
+    {
+        _stopFolders.Cancel();
+        return _folderListener;
     }
 
     public void Dispose()
     {
+        _stopFolders.Cancel();
+        _stopFolders.Dispose();
         foreach (var w in _waits) w.Unregister(null);
         if (_owned) { try { _mutex.ReleaseMutex(); } catch { } }
         _mutex.Dispose();

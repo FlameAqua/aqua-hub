@@ -1032,3 +1032,65 @@ layout passed the repeat render and bounds check. The last committed main CI run
 The interactive desktop suite was skipped to keep Adrian's display available. Physical hover and drag, native hint
 dismissal with mouse and keyboard, screen-reader use and connected-account interaction are manual acceptance before the
 version bump and release build.
+
+## 20 November 2026 · Phase 8 local file search
+
+The Search page and index were exercised in disposable profiles on local NTFS on Adrian's Ryzen 7 9700X
+(16 logical processors, Windows build 26300, .NET SDK 10.0.401, Release x64). No personal files were indexed.
+The college search project's watcher batching and separation of filtered retrieval informed the design.
+Aqua retains its own ability to revoke a grant and validate each file before showing a cached passage or opening it.
+
+The real retrieval probe registered the verified 328,577,056-byte EmbeddingGemma QAT Q8_0 GGUF in a scratch Aqua
+model library and selected the Search role. It used the 19,365,702-byte llama.cpp b11387 CPU x64 archive, two threads,
+mean pooling and 768-dimensional normalized embeddings. Against 30 labeled documents, lexical search alone placed
+**0/10** intended files in the top three for the ten paraphrases. Hybrid search placed **10/10** there, seven at rank
+one. Three unrelated queries returned zero files. Earlier tests exposed weak matches on common words and an
+overly restrictive semantic cutoff. With ranking held fixed, five additional queries targeting former distractors
+put all five intended files in the top three, four at rank one. A broad bicycle-club query surfaced both drafts,
+and specifying March ranked the March draft first. All documents were synthetic. Relevance on a personal collection
+remains an owner acceptance check. The fixture and repeatable commands are in [Development](DEVELOPMENT.md#search-verification).
+
+| Release workload | Observed |
+|---|---|
+| 500 padded 20,971-byte text files and 1,500 name-only files | 3.33 s to index names and text, 91.30 s including 1,000 passage embeddings |
+| Warm queries, 20 per mode after warm-up | Lexical p95 3.0 ms, hybrid p95 58.0 ms, measured at the service boundary before UI debounce |
+| WPF dispatcher during a separate 2,000-file scan | Input-priority queue delay p95 30.65 ms over 120 samples in the Release off-screen app |
+| Storage and model process | 6,364,056 bytes for SQLite with WAL/SHM, 313,643,008 peak private bytes sampled for the CPU server |
+| Burst of 1,000 renames | 2.73 s until all renamed paths appeared with 2,000 total files |
+| Five idle minutes after a 125-second settling interval | Probe CPU 0.001% of the machine, 0 process read/write bytes, SQLite data version 12 throughout |
+| Probe retained private memory | 9,084,928 bytes above the pre-index baseline at the end of the run |
+
+An earlier run of the same workload took 3.18 s for names/text and 91.27 s including embeddings. It recorded
+53,248 process bytes both read and written during the idle interval. Short idle windows cannot establish zero
+I/O or leak freedom. The 15-minute reconciliation falls outside those windows.
+
+The normal Debug unit suite passed **1,307** cases with **23** opt-in tests skipped. Search cases include effective
+read access, refused aliases/links and locked files, pause/reopen, stale writes and actions after revocation,
+incompatible vector spaces, filters, extraction limits, superseded queries and joining a pending embedding at quit.
+NTFS hardlinks and a junction were real. Encrypted/cloud placeholder refusal was tested with file attributes.
+An initial handle-reopen failure was found with the real NTFS probe and corrected. Current CI and the release
+workflow passed on the committed 1.4.0 baseline at `fb474d7`. These changes are local.
+
+The focused off-screen Search component covers dark and light themes, the narrow layout, Down-arrow selection,
+bounded passages, dry-run Open and Show in folder, result withdrawal and reduced motion. Review caught a clipped
+search field, a white result surface in dark mode and a focus transfer during a synthesized keypress.
+The corrected T04 run passed with activation monitored throughout. Its native app and E2E harness built with
+zero warnings or errors. The runtime journal confirmed both button actions against the selected document.
+The three interactive Search cases, physical keyboard/mouse/screen-reader behavior, installed file handlers,
+live cloud placeholders and simultaneous real GPU generation remain owner acceptance. The long legacy desktop suite
+was skipped. No independent review score was assigned.
+
+## 21 November 2026 · Search shortcuts and Deck icons
+
+The Deck and Command Palette now open Search files. The palette also sends an explicit query to the search field.
+Explorer's opt-in scopes search to the selected folder or background location. It uses the existing approval form
+when needed. The Deck renders Windows icons for pinned apps, built-in icons for links and unavailable images, and a
+clock glyph alongside the active countdown.
+
+The normal Debug unit run passed 1,310 cases with 23 opt-in cases skipped. New cases verified filtering below a
+folder across the three search signals, Windows path parsing and bounded same-user pipe delivery. The scratch
+Release T04 run exercised Deck invocation, palette query handoff, scoped Search and the unapproved folder review.
+The first render found a countdown binding issue. The corrected Deck was rendered in both themes, including the
+narrow layout. The verification run used an off-screen window and disposable profile. Native Explorer menu
+registration, invocation and removal still require an installed-copy check. CI and release were green at the
+committed `fb474d7` baseline.

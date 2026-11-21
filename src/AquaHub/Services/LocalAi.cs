@@ -206,6 +206,7 @@ public sealed class LocalAi : IDisposable, IAsyncDisposable
         ct = cancellation.Token;
         build ??= RecommendedBuild;
         if (Sandbox.Intercept("llama-install", build.Backend)) return null;
+        using var search = await Hub.Search.SuspendEngineAsync(ct).ConfigureAwait(false);
         var install = await Hub.Core.LlamaSetup.InstallAsync(build, ct).ConfigureAwait(false);
         Recheck();
         return install;
@@ -218,6 +219,7 @@ public sealed class LocalAi : IDisposable, IAsyncDisposable
     {
         using var operation = OwnOperation();
         if (Sandbox.Intercept("llama-remove")) return;
+        using var search = await Hub.Search.SuspendEngineAsync(_stop.Token).ConfigureAwait(false);
         await Hub.Llama.UnloadAsync(null, "the runtime is being removed").ConfigureAwait(false);
         Hub.Core.LlamaSetup.Remove();
         Recheck();
@@ -295,6 +297,8 @@ public sealed class LocalAi : IDisposable, IAsyncDisposable
         using var operation = OwnOperation();
         if (model.Source != ModelSource.Aqua) return false;
         if (Sandbox.Intercept("model-remove", model.Id)) return false;
+        using var search = model.Sha256 == AquaHub.Core.Search.SearchEmbeddings.Pin.File.Sha256
+            ? await Hub.Search.SuspendEngineAsync(_stop.Token).ConfigureAwait(false) : null;
         await Hub.Llama.UnloadAsync(model.Id, "it's being removed").ConfigureAwait(false);
         foreach (var role in Roles)
             if (ForRole(role)?.Id == model.Id) SetRole(role, null);

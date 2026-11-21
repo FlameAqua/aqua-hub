@@ -160,6 +160,7 @@ public partial class MainWindow : Window
         "upcoming" => new UpcomingPage(Hub.Core.Reminders),
         "system" => new SystemPage(),
         "launchpad" => new LaunchpadPage(),
+        "search" => new FileSearchPage(Hub.Search.GetFilesAsync),
         "ask" => new AskPage(),
         "workbench" => new WorkbenchPage(),
         "agents" => new AgentsPage(),

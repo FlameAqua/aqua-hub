@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -34,7 +33,7 @@ public partial class MainWindow
     private void InitializeDeck()
     {
         _deck = Hub.S.Deck;
-        _deckBubbles = [(DeckAsk, 66, 0), (DeckLaunchpad, 112, 32), (DeckToday, 93, 77),
+        _deckBubbles = [(DeckAsk, 66, 0), (DeckSearch, 47, 49), (DeckLaunchpad, 112, 32), (DeckToday, 93, 77),
             (DeckAdd, 47, 98), (DeckTimer, 0, 66), (DeckHide, 0, 115), (DeckApp1, 161, 32), (DeckApp2, 142, 79)];
         DeckHandle.RenderTransform = _deckScale;
         DeckHandle.RenderTransformOrigin = new Point(.5, .5);
@@ -127,6 +126,7 @@ public partial class MainWindow
     }
 
     private void OnDeckAsk(object sender, RoutedEventArgs e) => OpenFromDeck("ask");
+    private void OnDeckSearch(object sender, RoutedEventArgs e) => OpenFromDeck("search");
     private void OnDeckLaunchpad(object sender, RoutedEventArgs e) => OpenFromDeck("launchpad");
     private void OnDeckAddReminder(object sender, RoutedEventArgs e) => OpenFromDeck("upcoming", "new-reminder");
     private void OnDeckToday(object sender, RoutedEventArgs e) => OpenFromDeck("upcoming", "agenda-today");
@@ -135,7 +135,7 @@ public partial class MainWindow
     {
         CloseDeckSurfaces();
         Navigate(page, argument);
-        if (page != "upcoming") NavRadios().FirstOrDefault(item => item.IsChecked == true)?.Focus();
+        if (page is not ("upcoming" or "search")) NavRadios().FirstOrDefault(item => item.IsChecked == true)?.Focus();
     }
 
     private void RefreshDeckPins()
@@ -150,9 +150,13 @@ public partial class MainWindow
         button.Visibility = app is null ? Visibility.Collapsed : Visibility.Visible;
         button.Tag = app?.Id;
         button.ToolTip = app?.Name;
-        var initials = app?.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2)
-            .Select(part => StringInfo.GetNextTextElement(part));
-        button.Content = initials is null ? null : string.Concat(initials).ToUpper(CultureInfo.CurrentCulture);
+        button.Content = app switch
+        {
+            null => null,
+            { Kind: "url" } => new Controls.Icon { Kind = "globe", Width = 18, Height = 18 },
+            _ when Hub.Catalog.IconFor(app) is { } icon => new Image { Source = icon, Width = 22, Height = 22 },
+            _ => new Controls.Icon { Kind = "launchpad", Width = 18, Height = 18 },
+        };
         AutomationProperties.SetName(button, app is null ? "" : $"Open {app.Name}");
     }
 
@@ -242,7 +246,7 @@ public partial class MainWindow
         DeckTimerRing.Label = label;
         DeckTimerRing.Value = fraction * 100;
         DeckHandle.ToolTip = active ? label : "Open Deck · drag to move";
-        DeckHandle.Tag = active ? "timer" : null;
+        DeckHandle.Countdown = active ? label : null;
         DeckDial.IsEnabled = !active && !_timerSaving;
         DeckTimerCommand.IsEnabled = !_timerSaving;
         DeckTimerCommand.Content = active ? "Stop timer" : "Start";

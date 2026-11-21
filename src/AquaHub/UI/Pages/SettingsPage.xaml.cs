@@ -58,6 +58,8 @@ public partial class SettingsPage : UserControl, IPage
     public SettingsPage()
     {
         InitializeComponent();
+        ExplorerSearchSwitch.IsEnabled = ExplorerSearch.Available;
+        if (!ExplorerSearch.Available) Row_explorersearch.Description = "Available in the installed copy with the default profile.";
         _s = Hub.Core.Settings.Clone();
         _original = SettingsStore.DeepCopy(_s);
         _save = new UiThrottle(Save, 600);
@@ -141,7 +143,7 @@ public partial class SettingsPage : UserControl, IPage
         var section = SectionDefs.FirstOrDefault(s => s.Id == parts[0]) ?? Sections.SelectedItem as SectionVM ?? SectionDefs[0];
         Sections.SelectedItem = section;
         var row = parts.Length == 2 ? FindName("Row_" + parts[1]) as SettingRow : null;
-        QueueReveal(section, row);
+        QueueReveal(section, section.Id == "ai" && parts is [_, "runtime"] ? RuntimeCard : row);
     }
 
     private void OnRelatedSetting(object sender, RoutedEventArgs e)
@@ -149,13 +151,13 @@ public partial class SettingsPage : UserControl, IPage
         if (sender is Button { Tag: string target }) NavigateToSetting(target);
     }
 
-    private void QueueReveal(SectionVM section, SettingRow? row)
+    private void QueueReveal(SectionVM section, FrameworkElement? row)
     {
         var request = ++_revealVersion;
         Dispatcher.BeginInvoke(() =>
         {
             if (!_streamsActive || _revealVersion != request || !ReferenceEquals(Sections.SelectedItem, section)) return;
-            if (row is not null && FindName("P_" + section.Id) is Panel panel && LogicalDescendants<SettingRow>(panel).Contains(row))
+            if (row is not null && FindName("P_" + section.Id) is Panel panel && panel.IsAncestorOf(row))
                 Reveal(row);
             else
             {

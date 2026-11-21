@@ -1,0 +1,64 @@
+<UserControl x:Class="AquaHub.UI.Pages.FileSearchPage"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:AquaHub.UI.Controls" xmlns:ui="clr-namespace:AquaHub.UI">
+ <Grid Margin="28,22,28,20">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+  <StackPanel x:Name="Commands">
+   <DockPanel LastChildFill="False"><TextBlock Text="Search files" Style="{StaticResource T.Title}"/><c:HintButton AutomationProperties.Name="About file search" Margin="8,0,0,0" HelpText="Search approved folders by file name, path or a passage from a document. With EmbeddingGemma selected, you can describe what the document is about."/></DockPanel>
+   <TextBox x:Name="Query" MaxLength="256" FontSize="19" Height="46" Padding="12,0" ui:UiProps.Placeholder="File name, phrase or description" Margin="0,12,0,6"
+      AutomationProperties.Name="Search files by name, path or meaning" AutomationProperties.AutomationId="search-query"
+      TextChanged="OnQuery" PreviewKeyDown="OnQueryKey"/>
+   <WrapPanel>
+    <Button Style="{StaticResource Btn.Accent}" Click="OnAdd" Content="Add folder" AutomationProperties.AutomationId="search-add"/>
+    <Button x:Name="FolderButton" Style="{StaticResource Btn.Icon}" Margin="6,0,0,0" Click="OnFolders" ToolTip="Manage folders" AutomationProperties.Name="Manage folders" AutomationProperties.AutomationId="search-folders"><c:Icon Kind="folder" Width="17" Height="17"/></Button>
+    <Button Style="{StaticResource Btn.Icon}" Click="OnFilters" ToolTip="Search filters" AutomationProperties.Name="Search filters" AutomationProperties.AutomationId="search-filters"><c:Icon Kind="filter" Width="17" Height="17"/></Button>
+    <Button x:Name="Pause" Style="{StaticResource Btn.Icon}" Click="OnPause" AutomationProperties.AutomationId="search-pause"><c:Icon x:Name="PauseIcon" Kind="pause" Width="16" Height="16"/></Button>
+   </WrapPanel>
+   <DockPanel x:Name="FolderScope" Visibility="Collapsed" Margin="0,6" LastChildFill="True">
+    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Icon}" ToolTip="Search all approved folders" AutomationProperties.Name="Search all approved folders" Click="OnClearFolderScope"><c:Icon Kind="close" Width="15" Height="15"/></Button>
+    <Button x:Name="ReviewFolder" DockPanel.Dock="Right" Style="{StaticResource Btn.Link}" Content="Review folder" Click="OnReviewFolder"/>
+    <TextBlock x:Name="ScopedPath" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="search-scoped-folder"/>
+   </DockPanel>
+   <StackPanel x:Name="Consent" Visibility="Collapsed" Margin="0,8">
+    <TextBlock x:Name="ChosenPath" FontWeight="SemiBold" TextWrapping="Wrap"/>
+    <TextBlock Text="Aqua saves names, paths, sizes and dates in your local profile." TextWrapping="Wrap"/>
+    <CheckBox x:Name="IncludeContent" Content="Include document contents" Margin="0,6"/>
+    <TextBlock Text="Includes readable excerpts and meaning vectors. Anyone with access to your Aqua profile could read the excerpts." TextWrapping="Wrap"/>
+    <WrapPanel Margin="0,6"><Button Style="{StaticResource Btn.Standard}" Content="Approve folder" Click="OnApprove"/><Button Style="{StaticResource Btn.Link}" Content="Cancel" Click="OnCancel"/></WrapPanel>
+   </StackPanel>
+   <StackPanel x:Name="Folders" Visibility="Collapsed" Margin="0,8">
+    <ComboBox x:Name="Managed" AutomationProperties.Name="Approved folder" SelectionChanged="OnManaged"/>
+    <TextBlock Text="Removing a folder clears its index. Turning off contents clears its excerpts and vectors." TextWrapping="Wrap" Margin="0,5"/>
+    <WrapPanel><Button x:Name="Mode" Style="{StaticResource Btn.Link}" Click="OnMode"/><Button Style="{StaticResource Btn.Link}" Content="Remove folder" Click="OnRemove"/></WrapPanel>
+   </StackPanel>
+   <WrapPanel x:Name="Filters" Visibility="Collapsed" Margin="0,8">
+    <ComboBox x:Name="Scope" Width="180" AutomationProperties.Name="Folder filter" SelectionChanged="OnFilter"/>
+    <TextBox x:Name="Extension" ui:UiProps.Placeholder=".docx" Width="95" Margin="6,0" MaxLength="15" ToolTip="File extension, e.g. .docx" AutomationProperties.Name="File extension" TextChanged="OnQuery"/>
+    <CheckBox x:Name="Recent" Content="Last 30 days" VerticalAlignment="Center" Checked="OnFilter" Unchecked="OnFilter"/>
+   </WrapPanel>
+   <TextBlock x:Name="Progress" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.AutomationId="search-status"/>
+   <WrapPanel x:Name="SemanticTools"><TextBlock x:Name="Meaning" VerticalAlignment="Center" TextWrapping="Wrap"/><Button Style="{StaticResource Btn.Icon}" ToolTip="Choose Search model" AutomationProperties.Name="Choose Search model" Click="OnModel"><c:Icon Kind="cube" Width="16" Height="16"/></Button><Button Style="{StaticResource Btn.Icon}" ToolTip="Runtime settings" AutomationProperties.Name="Runtime settings" Click="OnRuntime"><c:Icon Kind="settings" Width="16" Height="16"/></Button></WrapPanel>
+   <DockPanel Margin="0,4" LastChildFill="True">
+    <StackPanel x:Name="ResultActions" DockPanel.Dock="Right" Orientation="Horizontal" Visibility="Hidden">
+     <Button x:Name="Open" Style="{StaticResource Btn.Standard}" Content="Open file" Click="OnOpen" IsEnabled="False"/>
+     <Button x:Name="Reveal" Style="{StaticResource Btn.Icon}" ToolTip="Show in folder" AutomationProperties.Name="Show in folder" Click="OnReveal" IsEnabled="False"><c:Icon Kind="folder" Width="16" Height="16"/></Button>
+    </StackPanel>
+    <TextBlock x:Name="Summary" VerticalAlignment="Center" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="search-summary"/>
+   </DockPanel>
+  </StackPanel>
+  <ListBox Style="{StaticResource PlainList}" x:Name="Results" Grid.Row="1" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Matching files"
+     AutomationProperties.AutomationId="search-results" SelectionChanged="OnSelection" PreviewKeyDown="OnResultKey">
+   <ListBox.ItemTemplate><DataTemplate>
+    <StackPanel Margin="6,5">
+     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis"/>
+     <TextBlock Text="{Binding Location}" ToolTip="{Binding Path}" AutomationProperties.HelpText="{Binding Path}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource B.Text2}"/>
+     <TextBlock Text="{Binding Reason}" Foreground="{DynamicResource B.AccentText}"/>
+     <TextBlock Text="{Binding Snippet}" TextWrapping="Wrap" MaxHeight="65"/>
+    </StackPanel>
+   </DataTemplate></ListBox.ItemTemplate>
+  </ListBox>
+  <c:FeedbackPopup x:Name="Notice" Grid.RowSpan="2" Panel.ZIndex="3"/>
+ </Grid>
+</UserControl>

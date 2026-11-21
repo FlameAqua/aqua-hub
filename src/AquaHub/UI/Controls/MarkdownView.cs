@@ -163,17 +163,22 @@ public sealed class MarkdownView : RichTextBox
     /// <summary>Opens a file from an answer: documents, pictures and media with their app; programs, scripts and folders are shown in File Explorer.</summary>
     public static void OpenFile(string path, bool reveal = false)
     {
+        try { OpenFileChecked(path, reveal); }
+        catch (Exception ex) { Core.Util.Log.Warn("ask", "Couldn't open the file", ex); }
+    }
+
+    internal static void OpenFileChecked(string path, bool reveal)
+    {
         var isFile = File.Exists(path);
         if (!isFile && !Directory.Exists(path)) return;
         var open = !reveal && isFile && AnswerText.OpensWithItsApp(path);
         if (Sandbox.Intercept(open ? "open-file" : "reveal-file", path)) return;
-        try
+        if (open) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        else
         {
-            if (open) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-            else if (isFile) Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
-            else Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+            Process.Start(new ProcessStartInfo(explorer, isFile ? $"/select,\"{path}\"" : $"\"{path}\"") { UseShellExecute = true });
         }
-        catch (Exception ex) { Core.Util.Log.Warn("ask", "Couldn't open the file", ex); }
     }
 
     /// <summary>Opens a cited source: web links in the browser; files open with their app when they're documents, pictures or media, else they're shown in their folder (never run).</summary>

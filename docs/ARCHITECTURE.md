@@ -120,7 +120,7 @@ schemas and bounded repair; output still needs deterministic validation before p
 
 `PriorityGate` serializes GPU generation. Interactive work precedes waiting background work; it does not preempt an
 already running request. An Ask answer reserves the slot across its tool loop and releases it while awaiting user approval
-or a requested AI agent. Image generation uses the same gate. CPU embedding work has a separate lane for future search.
+or a requested AI agent. Image generation uses the same gate. File search uses a separately owned CPU embedding process.
 
 | Model choice | Use |
 |---|---|
@@ -128,7 +128,7 @@ or a requested AI agent. Image generation uses the same gate. CPU embedding work
 | Deep override | Briefs and market analysis; Main when unset |
 | Editor (`ai.llama.backgroundModel`) | News Editor, Social Pulse and Foresight; Main when unset |
 | Creative | Roleplay; Main when unset |
-| Search | Reserved for Phase 8 CPU embeddings |
+| Search | Verified EmbeddingGemma Q8_0 for local file retrieval |
 
 All current generation runs on the GPU lane; there is no large background CPU generation model. One generation model
 is resident at a time, and switching models costs a load. This gate cannot control other applications' GPU workloads.
@@ -267,6 +267,53 @@ does not exist yet; it belongs to Phase 9. Image Gen shipped early from that pha
 
 ## 7. Windows effects, storage and updates
 
+### Local file search
+
+The native Search files page accepts separate folder grants and optional content consent. SearchSession connects the
+Search model role and Aqua's verified runtime to FileSearchService. An existing index reopens on startup. A fresh profile
+opens the database on first use. Initialization runs off the dispatcher and the page can retry an unavailable store.
+Search shares SQLite, WAL, FTS5, file exclusion rules, theme controls, shell-action policy and process containment with
+the rest of Aqua. A separate profile database, `search.sqlite`, isolates its size budget and keeps private passages out
+of feed and Ask queries.
+
+The Deck and Command Palette open the same Search page. The palette accepts `Search files: <query>` and leaves the
+query in the editable search field. The installed default profile can opt into **Search here with Aqua** in File
+Explorer's folder and folder-background menus. Its static verbs launch the same executable with the folder as one
+argument. A bounded current-user pipe passes that scope to the running instance in the same profile and Windows
+session. The name, text and semantic results come from approved files inside the selected folder. **Review folder**
+opens the usual consent form when the selected location has no approved coverage.
+
+One worker consumes up to 256 coalesced watcher paths. A resumed or interrupted session compares the current tree with
+committed file stamps. Overflow requests reconciliation. An active index also reconciles every 15 minutes. Each pass is
+bounded to 100,000 visited entries per root and 64 path components. At most 16 disjoint roots, 20,000 files and 16,000
+passages can be retained. Limits leave partial coverage visible. Files are identified by volume, file index and creation
+time. Size, last write and NTFS change time invalidate stale passages. A rename replaces the path and regenerates the
+title-dependent vectors. Separate file copies retain separate results.
+
+Content support covers TXT, MD/MARKDOWN, CSV, TSV, DOCX, PPTX, XLSX, ODT, ODP and ODS. The reader consumes a verified
+handle with an 8 MiB input cap, bounded package/XML expansion and a per-file extraction deadline. Output is limited to
+32,768 UTF-16 code units and 64 KiB of UTF-8 passage text. Unsupported files are name-searchable. Changes to extraction,
+normalization or chunking require a SearchText version bump. Incompatible document versions are discarded on reopen.
+The model, server, pooling, dimensions and retrieval prompts identify the vector space. Incompatible vectors are cleared
+for incremental regeneration. The main database caps at 496 MiB with operational room for WAL. Root removal requests
+incremental vacuum. Live profile size includes temporary SQLite files.
+
+Exact full paths and filenames lead. Other candidates come from partial or one-edit name matches, FTS5 passage rank
+and a bounded cosine scan. Reciprocal-rank fusion combines file ranks with a constant of 60. A file contributes once
+per signal. A cosine floor of 0.40 suppresses weak semantic-only candidates on the labeled fixture. The page publishes
+up to 50 revalidated files, showing a match reason and up to 200 characters from a matching passage. A new query cancels
+the previous request. Lexical results appear first. A missing runtime or model leaves them usable.
+
+The supported model is Aqua's pinned EmbeddingGemma 300M QAT Q8_0 GGUF. A separate authenticated llama-server runs
+with CPU device selection, zero GPU layers, one slot and two inference/batch threads. The embeddings API returns 768
+mean-pooled, normalized values per query or passage. Search checks shape, finite values and norm. Input includes the
+retrieval prefix and fits the model's 2,048-token window. A query takes priority between indexing requests. The idle
+check releases the CPU process after approximately one to two minutes. Runtime installation/removal and Search model
+removal join the CPU process before replacing its files. Quit joins Search work before disposing the shared process host.
+The model uses the [Gemma terms](https://ai.google.dev/gemma/terms). See the
+[model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card) and
+[pinned server API](https://github.com/ggml-org/llama.cpp/blob/b11387/tools/server/README.md).
+
 ### Settings and contextual help
 
 Settings groups its existing sections by task. Navigation, search and related links share the section and optional row
@@ -286,7 +333,9 @@ for Ask, Launchpad, up to two pinned apps, today's agenda, a new reminder, the t
 uses available space, and animations follow Aqua's and Windows' motion settings. The settings store replaces the file
 atomically, including while shareable readers have it open.
 
-Deck surfaces use the active theme's opaque popup and accent brushes. Hover and press use the same accent and foreground
+Pinned applications use their Windows icons with a built-in fallback. Pinned web links use a globe glyph. An active
+timer shows a clock above the remaining time on the Deck handle. Deck surfaces use the active theme's opaque popup and
+accent brushes. Hover and press use the same accent and foreground
 pair. Expansion animates position without changing the opacity of the controls.
 
 The Deck timer accepts 1–60 minutes and creates a normal one-off reminder at a fixed instant. Optional duration

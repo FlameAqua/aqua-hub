@@ -62,7 +62,7 @@ an index hit is not authorization. Searches skip system/app-data/cache locations
 
 Files explicitly attached by the user are a separate grant: current `CanRead` applies the sensitive filename/extension
 guard but bypasses ordinary root/folder/link checks for that exact file. Do not document that exception as identical to
-root-based access. It needs its own path/identity review before Phase 8 reuses this policy. Checks on mutable filesystem
+root-based access. Search has its own handle-based authority checks below. Checks on mutable filesystem
 paths are not a complete defence against a same-user process swapping a file between check and open.
 
 Remote HTML is reduced to text, never embedded as an executable page. XML readers restrict DTD/entity handling; Office
@@ -76,6 +76,35 @@ are revealed rather than executed. Credential/key/password-store filenames and e
 Maths rendering has a recursion guard: oversized/deep/line-heavy formulae stay text; XAML-Math rendering uses a dedicated
 large-stack thread. Markdown does not execute code. Total formula/table complexity and table accessibility remain open
 limits to verify; a per-formula guard alone does not bound an entire long chat.
+
+### Search folder authority
+
+Each grant records a chosen folder and its Windows identity. Name indexing is the default. Content indexing requires
+separate consent for that folder. The local profile retains paths, names, identity/change stamps, size and dates.
+Content consent also retains extracted passages, a full-text index and derived vectors in ordinary SQLite storage.
+Other software with access to the profile can read these. Queries have no saved history. The Search service sends
+queries and passages only to its authenticated, Aqua-owned loopback CPU model. Ask attachments, temporary chat grants
+and Windows Search results confer no background indexing rights. Search folder approval grants no Ask access.
+
+Explorer's opt-in uses two per-user static verbs for the installed default profile. The verbs supply a folder scope.
+The current-user pipe accepts bounded paths and has a connection/read deadline. The existing consent form still
+requires approval before indexing a new folder. Turning off the option or uninstalling removes the menu entries
+owned by that executable.
+
+The Windows adapter accepts explicit subfolders on fixed local NTFS drives with an unambiguous drive letter. It refuses
+UNC/device paths, whole drives, alternate streams, noncanonical components, short-name aliases, reparse points,
+multiply linked files, hidden/system/encrypted files, cloud placeholders, credential names, skipped application/system
+locations and Aqua's profile. Ancestor handles disallow rename while a child is checked. Metadata opens use no-recall
+and open-reparse-point flags. The data handle must match the inspected identity and allow current read access.
+Extraction uses bounded text and passive XML/package readers. Document links, scripts and macros are never interpreted.
+
+Cached snippets and actions require a fresh approved root, matching file stamp and readable handle. Locked or
+temporarily unavailable entries can remain on disk, hidden from results until revalidated. Confirmed missing files
+are removed. Removing a folder deletes its rows, FTS entries and vectors in a transaction. Disabling content deletes
+its old index and rebuilds names under a new grant. Non-reused IDs prevent pending writes from recreating revoked
+data. These are logical deletions. Freed database pages, journals, backups and older disk bytes can persist.
+Open uses the existing file-type allowlist. Other types can be revealed in Explorer. The external handler ultimately
+resolves the supplied path under the current user's authority after Aqua hands it to Windows.
 
 ## 4. Network access and secrets
 

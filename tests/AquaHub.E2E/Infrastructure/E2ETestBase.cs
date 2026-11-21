@@ -9,7 +9,7 @@ namespace AquaHub.E2E.Infrastructure;
 /// </summary>
 public abstract class E2ETestBase : IClassFixture<AppFixture>
 {
-    public static readonly string[] AllPages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "workbench", "models", "settings" };
+    public static readonly string[] AllPages = { "today", "news", "social", "markets", "upcoming", "system", "launchpad", "ask", "agents", "workbench", "models", "settings", "search" };
 
     protected readonly AppFixture Fixture;
     protected readonly ITestOutputHelper Out;

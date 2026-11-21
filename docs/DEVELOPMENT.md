@@ -193,6 +193,36 @@ It starts no collectors, media session, model or server and writes only `perform
 as first layout, dispatcher queue delay and managed/private/working-set memory. Full GC is explicit and included in the
 workload; working-set trimming is not used. This is a diagnostic, not a desktop E2E or model/GPU acceptance result.
 
+### Search verification
+
+The normal unit project exercises grants, extraction, indexing, retrieval and cancellation. For the modular desktop
+runner use a disposable location on fixed local NTFS, outside application data and the Aqua profile. The Search fixtures
+must satisfy the production file policy. `./scripts/e2e.ps1 -Component Search -Filter T04 -Root <scratch-parent>`
+runs the inactive off-screen renderer, including theme/width, real lexical retrieval, dry-run result actions and
+revocation. T01 through T03 use the interactive desktop. Coordinate those separately.
+
+For a real CPU retrieval or scale run, set `$aquaScratch` to an isolated build directory. Supply the already approved,
+pinned GGUF and CPU x64 ZIP by path. The probe validates both artifacts and creates a fresh synthetic corpus, model
+library and profile for each invocation. Each run keeps its own model copy. Use the project build, never publish.
+
+```powershell
+dotnet build tests/AquaHub.SearchProbe -c Release "-p:OutDir=$aquaScratch/search-probe/"
+& "$aquaScratch/search-probe/AquaHub.SearchProbe.exe" quality $gguf $cpuZip $ntfsScratch
+& "$aquaScratch/search-probe/AquaHub.SearchProbe.exe" performance $gguf $cpuZip $ntfsScratch
+```
+
+Quality uses ten labeled paraphrases among 30 distinguishable files. Aim for at least eight correct files in the first
+three results and zero hits for the three unrelated controls. The probe also reports five held-out queries and
+checks whether it can surface similar drafts together and distinguish the requested month. Use the unit corpus for filename/path precedence,
+spelling, passage matching and changes. The scale workload uses 2,000 local files, 1,000 passages and 1,000 renames.
+Release targets on the reference Ryzen desktop are 30 seconds for names/text, five minutes including embeddings,
+250 ms p95 warm hybrid service latency, 50 ms p95 input-priority dispatcher delay, and 30 seconds to reconcile the
+burst. Allow 64 MiB for the active workload's index and 800 MiB private memory for the CPU server.
+After server unload, compare five idle minutes against 1% of one core, 32 MiB retained private growth and zero index
+commits. Process I/O also includes runtime activity. For GPU coexistence, compare the same generation model, prompt
+and settings with CPU indexing enabled/disabled, looking for uninterrupted residency and throughput within 10%.
+Record hardware, build, workload, timing boundaries and pending physical checks in [Scoring](SCORING.md).
+
 ## Documentation, files and release hygiene
 
 Keep maintained docs focused on contracts, current policy and open acceptance tasks. Remove dead links when deleting

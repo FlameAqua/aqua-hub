@@ -12,7 +12,7 @@ namespace AquaHub;
 
 /// <param name="DemoUpdate">--demo-update [ready]: a pretend release for trying the update banner (Debug builds and E2E dry runs).</param>
 public sealed record AppArgs(bool Background, string? Snapshot, int SnapshotWait, string? SnapshotPages, string? DataDir, string? Page,
-    bool E2e, string? Command, bool Measure = false, string? DemoUpdate = null)
+    bool E2e, string? Command, bool Measure = false, string? DemoUpdate = null, string? SearchFolder = null)
 {
     public static AppArgs Parse(string[] args)
     {
@@ -21,19 +21,21 @@ public sealed record AppArgs(bool Background, string? Snapshot, int SnapshotWait
             var i = Array.FindIndex(args, a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
         }
+        var fromExplorer = args.Contains("--search-folder", StringComparer.OrdinalIgnoreCase);
         return new AppArgs(
             args.Any(a => a.Equals("--background", StringComparison.OrdinalIgnoreCase)),
             Value("--snapshot"),
             int.TryParse(Value("--wait"), out var w) ? w : 240,
             Value("--pages"),
             Value("--data-dir"),
-            Value("--page"),
+            fromExplorer ? "search" : Value("--page"),
             args.Any(a => a.Equals("--e2e", StringComparison.OrdinalIgnoreCase)) || Environment.GetEnvironmentVariable("AQUAHUB_E2E") == "1",
             SingleInstance.Commands.FirstOrDefault(c => args.Any(a => a.Equals("--" + c, StringComparison.OrdinalIgnoreCase))),
             args.Any(a => a.Equals("--measure", StringComparison.OrdinalIgnoreCase)),
             args.Any(a => a.Equals("--demo-update", StringComparison.OrdinalIgnoreCase))
                 ? Value("--demo-update") is { } stage && stage.Equals("ready", StringComparison.OrdinalIgnoreCase) ? "ready" : "available"
-                : null);
+                : null,
+            SearchFolderActivation.Normalize(Value("--search-folder")));
     }
 }
 
@@ -62,7 +64,9 @@ public partial class App : Application
         var llm = Hub.Core.Llm.StopAsync();
         var streams = Hub.Core.Streams.StopAsync();
         var youtube = Hub.Core.YouTubeAccount.StopAsync();
-        await Task.WhenAll(agents, local, ask, images, llm, streams, youtube, reminderScene, Hub.Windows.DeckSaved, _initialization, _mediaInitialization);
+        var folderListener = _single?.StopFolderListenerAsync() ?? Task.CompletedTask;
+        await Task.WhenAll(agents, local, ask, images, llm, streams, youtube, reminderScene, Hub.Windows.DeckSaved, _initialization, _mediaInitialization, folderListener);
+        await Hub.Search.StopAsync();
         await Hub.Llama.StopAsync();
         _shutdownComplete = true;
     }
@@ -73,7 +77,7 @@ public partial class App : Application
         var args = AppArgs.Parse(e.Args);
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         UseConsistentMonthNames();
-        var settingsSnapshot = args.Snapshot is not null && args.SnapshotPages == "settings-ui";
+        var settingsSnapshot = args.Snapshot is not null && args.SnapshotPages is "settings-ui" or "search-ui";
         if (settingsSnapshot && (!args.E2e || args.Measure || string.IsNullOrWhiteSpace(args.DataDir)
             || (Directory.Exists(args.DataDir) && Directory.EnumerateFileSystemEntries(args.DataDir).Any())))
         {
@@ -89,7 +93,11 @@ public partial class App : Application
             {
                 // Already running for this profile: forward the request (e.g. --flyout from a desktop shortcut or
                 // a jump-list task, --page markets from a script).
-                _single.Signal(args.Command ?? (args.Page is { } page && SingleInstance.Pages.Contains(page) ? "page-" + page : "activate"));
+                if (args.SearchFolder is { } folder)
+                {
+                    if (!_single.SendSearchFolderAsync(folder).GetAwaiter().GetResult()) _single.Signal("page-search");
+                }
+                else _single.Signal(args.Command ?? (args.Page is { } page && SingleInstance.Pages.Contains(page) ? "page-" + page : "activate"));
                 Shutdown();
                 return;
             }
@@ -138,11 +146,12 @@ public partial class App : Application
             new AquaHub.Core.Ai.Local.CompatBook(Path.Combine(Hub.Core.Paths.Llama, "compat.json")), OllamaManager.EngineServer);
         Hub.Core.Llm.Llama = Hub.Llama;
         Hub.LocalAi = new LocalAi();
+        Hub.Search = new SearchSession(Hub.Core, Hub.LlamaHost);
         Hub.Updates = new UpdateService(Sandbox.Enabled, args.DataDir is null ? Array.Empty<string>() : new[] { "--data-dir", paths.Root },
             args.DemoUpdate);
         // A version downloaded earlier ("Later") installs now, before anything opens: Velopack's updater waits for this
         // process to end, swaps versions and starts the new one (in the background again if that's how we started).
-        if (!Hub.SnapshotMode && Hub.Updates.ApplyPendingAtStartup(args.Background))
+        if (!Hub.SnapshotMode && args.SearchFolder is null && Hub.Updates.ApplyPendingAtStartup(args.Background))
         {
             Shutdown();
             return;
@@ -191,12 +200,14 @@ public partial class App : Application
         Hub.Tray.PowerChanged += OnReminderClockChanged;
         _trayController = new TrayController(firstIcon);
         _trayController.Update();
-        _single!.Listen(cmd => Hub.OnUi(() => HandleCommand(cmd)));
+        _single!.Listen(cmd => Hub.OnUi(() => HandleCommand(cmd)),
+            folder => Hub.OnUi(() => { if (!Hub.Quitting) Hub.Windows.ShowMain("search", "folder:" + folder); }));
         TaskbarIntegration.ApplyJumpList(Autostart.ProfileArgs);
         RegisterHotkeys();
         _lastGeneral = Hub.S.General;
         Hub.Core.Settings.Changed += s => Hub.OnUi(() => OnSettingsChanged(s));
         Autostart.Sync(Hub.S.General.LaunchAtStartup, installed: Hub.Updates.IsInstalled);
+        if (ExplorerSearch.Available) ExplorerSearch.Set(Hub.S.General.SearchInExplorerMenu, Environment.ProcessPath);
 
         Hub.Images.Start();
         Hub.Core.Start(runAgents: !Sandbox.OfflineComponents);
@@ -214,7 +225,8 @@ public partial class App : Application
             ? Hub.Ui.InvokeAsync(() => Hub.Ollama.StartAsync("you asked for AI", ct)).Task.Unwrap()
             : Task.FromResult(false);
 
-        if (!args.Background || Hub.Core.Settings.IsFirstRun) Hub.Windows.ShowMain(args.Page);
+        if (args.SearchFolder is { } searchFolder) Hub.Windows.ShowMain("search", "folder:" + searchFolder);
+        else if (!args.Background || Hub.Core.Settings.IsFirstRun) Hub.Windows.ShowMain(args.Page);
         if (args.Command is { } command and not "activate") Dispatcher.BeginInvoke(() => HandleCommand(command), DispatcherPriority.ApplicationIdle);
         Log.Info("app", $"Aqua Hub started{(Sandbox.Enabled ? " (dry-run E2E mode)" : "")}");
     }
@@ -263,6 +275,9 @@ public partial class App : Application
         if (_lastGeneral is null || _lastGeneral.Theme != g.Theme || _lastGeneral.Accent != g.Accent) Hub.Theme.Apply(g);
         if (_lastGeneral is null || _lastGeneral.HotkeyFlyout != g.HotkeyFlyout || _lastGeneral.HotkeyPalette != g.HotkeyPalette) RegisterHotkeys();
         if (_lastGeneral is null || _lastGeneral.LaunchAtStartup != g.LaunchAtStartup) Autostart.Set(g.LaunchAtStartup);
+        if (ExplorerSearch.Available && _lastGeneral?.SearchInExplorerMenu != g.SearchInExplorerMenu &&
+            !ExplorerSearch.Set(g.SearchInExplorerMenu, Environment.ProcessPath))
+            Hub.Windows.Main?.WorkspaceFeedback.Show("Could not update the File Explorer menu.", error: true);
         _lastGeneral = g;
     }
 
@@ -342,6 +357,7 @@ public partial class App : Application
             Cleanup(() => { _ = Hub.Core.Agents.StopAsync(); });
             Cleanup(() => { _ = Hub.Core.Streams.StopAsync(); });
             Cleanup(() => { _ = Hub.Core.YouTubeAccount.StopAsync(); });
+            Cleanup(() => { if (Hub.Search is not null) _ = Hub.Search.StopAsync(); });
             Cleanup(() => { if (Hub.LocalAi is not null) _ = Hub.LocalAi.StopAsync(); });
             Cleanup(() => { if (Hub.Ask is not null) _ = Hub.Ask.StopAsync(); });
         }

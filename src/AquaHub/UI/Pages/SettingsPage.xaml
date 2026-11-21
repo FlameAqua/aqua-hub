@@ -114,6 +114,10 @@
                         <c:SettingRow Icon="close" Title="Keep running in the tray" Description="Closing the window keeps Aqua running. Use the tray icon or a shortcut to reopen it." Keywords="tray minimise minimize background close">
                             <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding General.CloseToTray}"/>
                         </c:SettingRow>
+                        <c:SettingRow x:Name="Row_explorersearch" Icon="search" Title="Search from File Explorer"
+                                      Description="Adds Search here with Aqua under Show more options in the folder menu." Keywords="windows context menu right click folder search">
+                            <CheckBox x:Name="ExplorerSearchSwitch" Style="{StaticResource Switch}" IsChecked="{Binding General.SearchInExplorerMenu}" AutomationProperties.AutomationId="settings-explorer-search"/>
+                        </c:SettingRow>
                         <c:SettingRow Icon="moon" Title="Theme" Keywords="dark mode light mode appearance">
                             <ComboBox SelectedValue="{Binding General.Theme}" SelectedValuePath="Tag" Width="200" SelectionChanged="OnThemeChanged" AutomationProperties.AutomationId="settings-theme">
                                 <ComboBoxItem Content="Use Windows setting" Tag="system"/>

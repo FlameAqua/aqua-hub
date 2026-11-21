@@ -106,7 +106,9 @@ public sealed partial class LocalFiles
 
     /// <summary>Password stores, keys, certificates and similar files — never read, wherever they are.</summary>
     public static bool IsSensitiveName(string path) =>
-        SensitiveExtensions.Contains(Path.GetExtension(path)) || SensitiveName().IsMatch(Path.GetFileName(path));
+        SensitiveExtensions.Contains(Path.GetExtension(path)) || SensitiveName().IsMatch(Path.GetFileName(path))
+        || Path.GetFileName(path).Equals("search.sqlite-wal", StringComparison.OrdinalIgnoreCase)
+        || Path.GetFileName(path).Equals("search.sqlite-shm", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Folders that hold app data or credentials (.ssh, AppData, Windows…) — never searched or offered as a root.</summary>
     public static bool IsSensitiveFolder(string path)
@@ -487,7 +489,7 @@ public sealed partial class LocalFiles
     }
 
     /// <summary>A file inside a folder searches never walk (node_modules, bin, .git, AppData, game libraries…), below <paramref name="root"/>.</summary>
-    internal static bool InSkippedFolder(string path, string root)
+    public static bool InSkippedFolder(string path, string root)
     {
         var folder = Path.GetDirectoryName(path) ?? "";
         var relative = IsUnder(folder, root) ? folder[root.TrimEnd(Path.DirectorySeparatorChar).Length..] : folder;
