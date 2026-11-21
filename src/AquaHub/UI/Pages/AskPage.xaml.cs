@@ -21,6 +21,7 @@ namespace AquaHub.UI.Pages;
 /// <summary>A view over <see cref="AskSession"/> — the chats themselves outlive this page.</summary>
 public partial class AskPage : UserControl, IPage
 {
+    private void OnReadAloudSettings(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "ask:readaloud");
     private static readonly string[] SuggestionTexts =
     {
         "What's happening near me today?",

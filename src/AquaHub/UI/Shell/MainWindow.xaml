@@ -144,6 +144,11 @@
                     </Grid>
                 </Button>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="SpeechStop" Style="{StaticResource Btn.Icon}" WindowChrome.IsHitTestVisibleInChrome="True"
+                            Click="OnSpeechStop" Visibility="Hidden" ToolTip="Stop read aloud"
+                            AutomationProperties.Name="Stop read aloud" AutomationProperties.AutomationId="speech-stop">
+                        <c:Icon Kind="stop" Width="16" Height="16"/>
+                    </Button>
                     <TextBlock x:Name="SyncText" Style="{StaticResource T.Caption}" VerticalAlignment="Center" Margin="0,0,6,0" Background="Transparent"
                                AutomationProperties.AutomationId="sync-status"/>
                     <!-- The tooltip also lists when each area last updated, so the accessible name is fixed here -->

@@ -370,6 +370,8 @@ public sealed partial class SettingsStore
         s.Ask.HistoryMessages = Math.Clamp(s.Ask.HistoryMessages, 2, 40);
         s.Ask.Voice = s.Ask.Voice is "offline" or "online" or "whisper" or "off" ? s.Ask.Voice : "offline";
         s.Ask.WhisperModel = Speech.WhisperCatalog.Choice(s.Ask.WhisperModel).Id;
+        s.Ask.ReadAloudBackend = s.Ask.ReadAloudBackend == "kokoro" ? "kokoro" : "windows";
+        s.Ask.ReadAloudVoice = Speech.KokoroSetup.Voice(s.Ask.ReadAloudVoice).Id;
         s.Ask.Microphone = (s.Ask.Microphone ?? "").Trim() is { Length: <= 200 } mic ? mic : "";
         s.Ask.Model = (s.Ask.Model ?? "").Trim() is { Length: <= 200 } askModel ? askModel : "";
         s.Ask.ModelModes = (s.Ask.ModelModes ?? new()).Where(kv => kv.Key.Trim().Length is > 0 and <= 200 && kv.Value is not null)

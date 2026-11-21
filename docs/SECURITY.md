@@ -127,13 +127,35 @@ rounds it and sends it to Nominatim to resolve a town, then Open-Meteo for time 
 coordinates persist. Offline Windows dictation and Whisper keep audio local/in memory; online Windows speech is a
 separate opt-in. Recording occurs only when the user initiates dictation/test, never as background monitoring.
 
+Read aloud uses local Windows voices or the opt-in audio.cpp CPU process. It does not activate a microphone. The
+Kokoro process receives one bounded text chunk through a file in the profile's dedicated speech work directory.
+Aqua drains process output without logging it and reads at most 4 MiB of WAV data into memory. The text and WAV are
+deleted after synthesis, including cancellation and failure. Aqua attempts to remove abandoned speech work at the
+next startup if a crash or forced exit leaves it behind. Standard deletion provides no guarantee of forensic erasure.
+The Windows backend keeps synthesis in memory. Provider changes and voice recovery require explicit user actions.
+
+Workbench personality templates are ordinary profile data. They carry character text and an optional scene opener.
+They do not grant file, PC or web authority, change global instructions, or participate in Ask memory. Aqua keeps the
+scene, transcript and unsaved Workbench drafts in memory. Deleting a template removes the library entry, while an
+active scene can keep its in-memory copy until reset or exit. Explicit transcript Copy uses the clipboard.
+If a non-loopback model endpoint is configured and allowed, Roleplay sends the scene and bounded recent conversation
+and Workbench sends the draft description. Both surfaces disclose the remote destination before sending. Raw creative
+outputs are omitted from Aqua's recent-model diagnostics. External model servers have their own retention policies.
+
 ## 5. Local model engines and downloads
 
-Runtime/Whisper archives are fixed vendor releases with expected size/SHA-256. Extraction restricts retained executables
+Runtime, Whisper and Kokoro archives are fixed vendor releases with expected size/SHA-256. Extraction restricts retained executables
 and libraries and caps unpacking. Public model files are fixed Hugging Face revisions with expected size/SHA-256;
 corrupt same-size files must not be trusted. Partial downloads resume only through the verified-download path, and a
 complete hash mismatch discards the partial file. A bounded remote GGUF-header preview is metadata inspection, not
 whole-file verification or a guarantee of fit.
+
+The Kokoro install uses the pinned audio.cpp v0.9.5 Windows CPU ZIP, an audio.cpp Kokoro 82M Q8_0 GGUF and the
+eSpeak-ng Windows DLL and data from the pinned `espeakng-loader` archive. Aqua verifies the full archives before
+extracting the CLI, its libraries and the phonemizer files. It does not run a Python installer, use an audio.cpp web
+server or send spoken text to the download hosts. The [audio.cpp licence](https://github.com/0xShug0/audio.cpp/blob/v0.9.5/LICENSE)
+and [Kokoro weights](https://huggingface.co/hexgrad/Kokoro-82M) are Apache 2.0. The
+[eSpeak-ng phonemizer](https://github.com/espeak-ng/espeak-ng/blob/1.52.0/COPYING) is GPL-3.0-or-later.
 
 The custom engine path takes priority. Otherwise Aqua may use Ollama's installed `lib/ollama/llama-server.exe` when
 upstream cannot read an Ollama conversion or Aqua's build is absent (`useOllamaEngine`, default on). User-installed

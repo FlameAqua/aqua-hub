@@ -23,6 +23,7 @@ public static class Hub
     public static ActionExecutor Actions { get; set; } = null!;
     public static WindowManager Windows { get; set; } = null!;
     public static AskSession Ask { get; set; } = null!;
+    public static Core.Ai.Roleplay.RoleplaySession Roleplay { get; set; } = null!;
     public static ImageGenerationSession Images { get; } = new();
     public static OllamaManager Ollama { get; set; } = null!;
     /// <summary>Aqua's own model runtime (llama.cpp servers per model); used when Settings' provider is "llamacpp".</summary>

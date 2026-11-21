@@ -3,9 +3,6 @@ using AquaHub.Core.Media;
 using AquaHub.Core.Util;
 using AquaHub.Services;
 using Windows.Media.Control;
-using Windows.Media.Core;
-using Windows.Media.Playback;
-using Windows.Media.SpeechSynthesis;
 
 namespace AquaHub.Platform;
 
@@ -367,62 +364,5 @@ public sealed class VolumeController
         ep.GetMute(out var muted);
         var ctx = Guid.Empty;
         ep.SetMute(!muted, ref ctx);
-    }
-}
-
-/// <summary>Reads text aloud with the built-in Windows voices (on-device, offline).</summary>
-public sealed class SpeechService
-{
-    private MediaPlayer? _player;
-    private int _generation;
-    public bool IsSpeaking { get; private set; }
-    public event Action? StateChanged;
-
-    public async Task SpeakAsync(string text, string language)
-    {
-        Stop();
-        var generation = _generation;
-        if (Sandbox.Intercept("speak", text.Length > 80 ? text[..80] : text))
-        {
-            IsSpeaking = true;
-            StateChanged?.Invoke();
-            return;
-        }
-        try
-        {
-            using var synth = new SpeechSynthesizer();
-            var voices = SpeechSynthesizer.AllVoices;
-            var voice = voices.FirstOrDefault(v => v.Language.Equals(language, StringComparison.OrdinalIgnoreCase))
-                        ?? voices.FirstOrDefault(v => v.Language.StartsWith(language.Split('-')[0], StringComparison.OrdinalIgnoreCase) && v.Language.EndsWith("GB", StringComparison.OrdinalIgnoreCase))
-                        ?? voices.FirstOrDefault(v => v.Language.StartsWith(language.Split('-')[0], StringComparison.OrdinalIgnoreCase));
-            if (voice is not null) synth.Voice = voice;
-            synth.Options.SpeakingRate = 1.05;
-            var stream = await synth.SynthesizeTextToStreamAsync(text);
-            // Stopped (or replaced) while the voice was being prepared: don't start talking now.
-            if (generation != _generation) { stream.Dispose(); return; }
-            _player = new MediaPlayer { Source = MediaSource.CreateFromStream(stream, stream.ContentType) };
-            _player.MediaEnded += (_, _) => { IsSpeaking = false; StateChanged?.Invoke(); };
-            _player.Play();
-            IsSpeaking = true;
-            StateChanged?.Invoke();
-        }
-        catch (Exception ex)
-        {
-            Log.Warn("speech", "Text-to-speech failed", ex);
-            IsSpeaking = false;
-            StateChanged?.Invoke();
-        }
-    }
-
-    /// <summary>Stops speaking — also when nothing is playing yet (being prepared, or dry-run mode, which has no player).</summary>
-    public void Stop()
-    {
-        _generation++;
-        var player = _player;
-        _player = null;
-        if (player is not null) try { player.Pause(); player.Dispose(); } catch { }
-        if (!IsSpeaking) return;
-        IsSpeaking = false;
-        StateChanged?.Invoke();
     }
 }

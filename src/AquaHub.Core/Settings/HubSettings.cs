@@ -445,6 +445,8 @@ public sealed class AskSettings
     public string Voice { get; set; } = "offline";
     /// <summary>The Whisper model size to install: base, small or turbo.</summary>
     public string WhisperModel { get; set; } = "small";
+    public string ReadAloudBackend { get; set; } = "windows";
+    public string ReadAloudVoice { get; set; } = "bf_emma";
     /// <summary>While dictating with Windows' recognizers, a note under the Ask box suggests Whisper.</summary>
     public bool WhisperTip { get; set; } = true;
     /// <summary>Send the question as soon as you stop speaking.</summary>

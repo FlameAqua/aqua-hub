@@ -916,6 +916,13 @@
                         </c:SettingRow>
 
                         <TextBlock Text="VOICE" Style="{StaticResource T.Overline}" Margin="4,18,0,8"/>
+                        <c:SettingRow x:Name="Row_readaloud" Icon="volume" Title="Read aloud" ShowDescription="True"
+                                      FocusTarget="{Binding BackendPicker, ElementName=ReadAloudOptions}"
+                                      Description="Reads answers and briefings on this PC. Windows voices follow your language setting.">
+                            <c:SettingRow.Below>
+                                <c:ReadAloudSettings x:Name="ReadAloudOptions"/>
+                            </c:SettingRow.Below>
+                        </c:SettingRow>
                         <c:SettingRow x:Name="Row_voice" Icon="mic" Title="Voice input" ShowDescription="True" Description="Windows online speech sends your voice to Microsoft.">
                             <ComboBox x:Name="VoiceCombo" Width="220" SelectedValue="{Binding Ask.Voice}" SelectedValuePath="Tag" SelectionChanged="OnVoiceEngineChanged" AutomationProperties.Name="Voice input">
                                 <ComboBoxItem Content="Whisper (on this PC)" Tag="whisper"/>

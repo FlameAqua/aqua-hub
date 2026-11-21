@@ -18,6 +18,11 @@
                     <!-- Refresh lives in the title bar (and F5); the page's one primary action is listening to the brief. -->
                     <Button Style="{StaticResource Btn.Accent}" Command="{Binding ReadBriefCommand}" AutomationProperties.AutomationId="read-brief"
                             AutomationProperties.Name="{Binding ReadLabel}">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Read-aloud settings" Click="OnReadAloudSettings"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
                         <StackPanel Orientation="Horizontal">
                             <c:Icon Kind="{Binding ReadIcon}" Width="15" Height="15"/>
                             <TextBlock Text="{Binding ReadLabel}" Margin="8,0,0,0"/>

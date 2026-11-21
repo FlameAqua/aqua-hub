@@ -1094,3 +1094,71 @@ The first render found a countdown binding issue. The corrected Deck was rendere
 narrow layout. The verification run used an off-screen window and disposable profile. Native Explorer menu
 registration, invocation and removal still require an installed-copy check. CI and release were green at the
 committed `fb474d7` baseline.
+
+## 21 November 2026 · Phase 9 local speech and creativity
+
+Phase 8 was committed at `07dabf5` before this work. [CI for that commit](https://github.com/FlameAqua/aqua-hub/actions/runs/44931419674)
+passed. Adrian chose opt-in CPU speech with Windows voices as the default, local personality templates with
+memory-only scenes, and the existing Creative model library.
+
+Ask answers, briefing playback and Settings preview now share request identity, cancellation and playback.
+Review found that the old Ask callbacks could clear a newer request's button and that synthesis was not represented
+in the shared state. Controlled tests cover stop-before-ready, replacement of an uncooperative synthesis, recovery
+from synthesis/playback failures, long-text chunking, temporary file cleanup and shutdown while preparing the next clip.
+Workbench and Roleplay tests cover versioning, invalid records, duplicate names, editing/deleting a template during a
+reply, a reset with a late response, model recovery and joining a cancelled stream.
+
+### Silent audio.cpp measurements
+
+On the Ryzen 7 9700X (16 logical processors, Windows 11 build 26300), the verified Windows x64 binaries synthesized
+British English Emma with two threads in a disposable folder. No system speech package was installed and no samples
+were played. The first test with the documented generic eSpeak session options could not load the phonemizer.
+App-local placement of the pinned DLL with its data and a child-only `ESPEAK_DATA_PATH` resolved it.
+
+| Tested package | Bytes | Published SHA-256 |
+|---|---:|---|
+| audio.cpp v0.9.5 Windows x64 CPU ZIP | 33,795,232 | `fa38ab6f02ebb1256728068549c0beac3bf2fdf1e348a301f0892d44ac14e26a` |
+| v0.9.5 Windows x64 portable CPU ZIP, comparison only | 33,663,926 | `9f470c3b254205d044e91e84d609424f528734cd06b74968ab0e4868a30b839a` |
+| Kokoro 82M Q8_0 GGUF, audio.cpp revision `6f45df32f8fb283e4cfce3d3e1cb7688986fcbe6` | 189,550,976 | `9a4ca6176460cdc8c7845b804c0bbe85a4791ee3ffff568a3fdadbb708c63f47` |
+| espeakng-loader 0.2.4 Windows x64 wheel, extracted DLL and data only | 9,437,292 | `41f1e08ac9deda2efd1ea9de0b81dab9f5ae3c4b24284f76533d0a7b1dd7abd7` |
+
+| Workload | Process start to WAV/exit | WAV duration | Engine peak working set / commit |
+|---|---:|---:|---:|
+| 72-character portable build sample | 30.252 s | 4.975 s | 955 / 4,395 MiB |
+| Same sample, optimized build | 3.522 s | 4.975 s | 956 / 4,396 MiB |
+| 27 characters, six fresh process starts | 1.916–2.517 s | 2.550 s | 633 / 4,079–4,080 MiB |
+| 120-character continuation | 4.655 s | 7.275 s | 1,294 / 4,731 MiB |
+| Earlier 211-character continuation | 7.553 s | 12.100 s | 2,088 / 5,518 MiB |
+
+The short samples used 3.219–3.453 CPU seconds and the 120-character sample used 8.750 CPU seconds. All reported
+24 kHz mono WAV. The larger sample drove the reduction to a 128-character continuation cap. Two scratch cancellations
+killed and joined the native process in 15 and 17 ms after it passed 150 MiB private memory. The process-start figure
+includes loading, synthesis and output. For 27 characters the engine reported 1.397–1.462 seconds inside the request.
+The two-second initial target was exceeded on one of the six fresh starts. Audio-device latency, audible stops,
+gap-free sustained playback, voice quality and pronunciation were outside this silent measurement. The package is CPU-only.
+Physical VRAM and simultaneous embedding plus GPU generation were not measured.
+
+The optimized package is the first supported route. Its upstream build enables native CPU selection, so Aqua limits
+this package to Windows x64 with AVX-512 support. Windows voices remain available on other supported hardware.
+CPU/RAM and interference figures for other PCs have not been established.
+
+A second deployment check kept only the CLI, its runtime libraries and the eSpeak DLL/data. It generated a
+122,444-byte RIFF/WAVE file using the pinned GGUF. The existing Search T04 off-screen component completed while
+the CPU worker generated four 120-character samples. The component passed in 11 seconds, and the worker was still
+running when the runner returned 14.257 seconds after its start. The four synthesis requests took 4.169–4.372
+seconds each and produced 7.275 seconds of audio each. The first overlap attempt was refused because the scratch
+corpus was under AppData. The successful run used a dedicated fixed-NTFS scratch folder outside AppData. The
+corpus was synthetic, with lexical retrieval and no embedding model or GPU generation active.
+
+### Phase 9 application checks
+
+The normal Debug suite passed 1,325 tests with 23 opt-in tests skipped. The isolated Release app and E2E harness
+built with zero warnings and errors. The off-screen Creativity T01 case used dark 1440 × 880 and light 820 × 580
+windows with reduced motion, intercepted speech and a controlled personality draft. It checked the Settings preview
+and shell Stop across navigation, explicit Save after draft review, opening a scene from the saved template and
+deleting the template while preserving the active scene. Visual review caught a hidden-window focus transfer and
+a cramped narrow transcript. The updated renderer monitors activation and checks transcript height.
+
+Physical keyboard, mouse, screen-reader and audio-device acceptance are left for an interactive session. Real
+Creative generation and resource coexistence with CPU Search embeddings and a GPU model or ComfyUI remain open.
+No independent review score was assigned.

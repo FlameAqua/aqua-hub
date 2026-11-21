@@ -127,10 +127,10 @@ or a requested AI agent. Image generation uses the same gate. File search uses a
 | Main | Ask and general generation |
 | Deep override | Briefs and market analysis; Main when unset |
 | Editor (`ai.llama.backgroundModel`) | News Editor, Social Pulse and Foresight; Main when unset |
-| Creative | Roleplay; Main when unset |
+| Creative | Roleplay and Workbench personality drafts; Main when unset |
 | Search | Verified EmbeddingGemma Q8_0 for local file retrieval |
 
-All current generation runs on the GPU lane; there is no large background CPU generation model. One generation model
+Text and image generation use the GPU lane. Read-aloud synthesis is a separate CPU operation. One generation model
 is resident at a time, and switching models costs a load. This gate cannot control other applications' GPU workloads.
 `ai.providerModels` remembers Main/Deep by provider type, not external server address. First-switch Ollama names can carry
 between Ollama and llama.cpp; `hf:` IDs do not carry to another provider. Setting runtime Main while another provider is
@@ -262,8 +262,39 @@ the ComfyUI inspector. Session messages update a dismissible overlay with screen
 can reopen the notice.
 The overlay does not measure against the studio form or gallery.
 
-The Roleplay tab uses Creative/Main with bounded session context and no Ask PC/web tools. A persistent personality library
-does not exist yet; it belongs to Phase 9. Image Gen shipped early from that phase.
+Roleplay and Workbench personality drafting use the existing generation lane. Aqua's runtime uses Creative when set
+and otherwise Main. A missing explicit Creative model fails with a link to its role selector. Other providers use
+their active model. These requests offer no tools and omit raw text from recent-model diagnostics.
+
+`PersonalityLibrary` stores a versioned, bounded list in the profile database under its own key. Workbench owns
+library actions and populates an editable preview before an AI draft can be saved. Each saved template has a UUID,
+name, character instructions and an optional opening scenario. Selecting a template in Roleplay chooses it for the
+next scene. On New scene, `RoleplaySession` copies the selected template into a memory-only scene. Editing or deleting
+its library entry leaves that snapshot usable. Reset cancels and invalidates the old stream. The next turn waits for
+the old operation to exit so late chunks cannot reach the new scene. Returning to the tab shows the active scene.
+The session bounds both visible turns and the history sent to the model; normal quit joins an active stream.
+
+### Read aloud
+
+Ask answers, briefing actions and Settings preview share `SpeechService` and one `ReadAloud` coordinator. Windows
+voices are the default and follow the app language. The opt-in English Kokoro presets use audio.cpp's CPU process.
+The selected accent determines Kokoro's phonemizer language. An unavailable installation, voice language or playback
+device produces an actionable notice. Switching to Windows voices is an explicit Settings action.
+
+The coordinator identifies which control owns the request. A repeated click on that control stops it; a different
+request replaces it. Speech continues across pages with a Stop control in the shell. The coordinator limits input
+before Markdown preparation, speaks prose and table rows, turns formulas into words and omits citation markers and
+fenced code. It prepares at most 8,000 characters and 96 chunks, with a 60-character first chunk and up to 128
+characters per subsequent chunk. Playback and synthesis run off the dispatcher. The worker can prepare one chunk
+ahead while playing the current one. Stop, replacement and shutdown cancel and join owned work, including lookahead.
+The first version exposes Stop, without a pause or resume control.
+
+`KokoroSetup` verifies exact-size, SHA-256-pinned artifacts and stages an app-local install. The native process
+uses two inference threads, starts on demand for one chunk and exits before another synthesis begins. It listens on
+no network port and does not enter the generation GPU gate or the Search embeddings lane. The Windows adapter
+validates the size and header of the returned WAV and plays from memory. The child runs in a Windows kill-on-close
+job; playback completion and errors dispose the corresponding Windows objects. See [Security](SECURITY.md) for
+temporary audio handling and [Scoring](SCORING.md) for measured limits.
 
 ## 7. Windows effects, storage and updates
 
@@ -385,7 +416,8 @@ owns settings, database, logs, caches, chat media, generated images and optional
 Windows Credential Manager. User model/output paths can point outside the profile and retain their separate ownership.
 
 Health collection is read-only and unelevated. Process actions recheck identity/ownership and require the app's existing
-confirmation policy. Speech is explicitly initiated: local Windows/Whisper paths and an optional online Windows mode.
+confirmation policy. Voice input is explicitly initiated through Windows or Whisper, with an optional online Windows
+mode. Read-aloud output uses the separate offline speech coordinator.
 Whisper is an optional verified download, not a dependency installed at every start.
 
 Velopack handles per-user installation and updates. Release metadata fixes the GitHub repository; source builds without

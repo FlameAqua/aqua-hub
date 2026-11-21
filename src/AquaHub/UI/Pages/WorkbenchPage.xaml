@@ -51,11 +51,11 @@
 
         <StackPanel>
             <TextBlock Text="Workbench" Style="{StaticResource T.Title}"/>
-            <TextBlock Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,4,0,0" MaxWidth="820" HorizontalAlignment="Left"
+            <TextBlock x:Name="SkillsLead" Style="{StaticResource T.Body2}" TextWrapping="Wrap" Margin="0,4,0,0" MaxWidth="820" HorizontalAlignment="Left"
                        Text="Teach Aqua skills and things to remember. Describe a skill and Aqua drafts it from its own tools: no code runs, and anything that acts on your PC still asks first."/>
         </StackPanel>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,16,0,12">
+        <WrapPanel Grid.Row="1" Margin="0,16,0,12">
             <RadioButton x:Name="SkillsTab" Style="{StaticResource Tab}" IsChecked="True" Checked="OnTab" AutomationProperties.AutomationId="wb-tab-skills">
                 <StackPanel Orientation="Horizontal"><c:Icon Kind="wand" Width="13" Height="13"/><TextBlock x:Name="SkillsTabText" Text="Skills" Margin="6,0,0,0"/></StackPanel>
             </RadioButton>
@@ -65,10 +65,14 @@
             <RadioButton x:Name="AbilitiesTab" Style="{StaticResource Tab}" Checked="OnTab" AutomationProperties.AutomationId="wb-tab-abilities">
                 <StackPanel Orientation="Horizontal"><c:Icon Kind="sparkle" Width="13" Height="13"/><TextBlock Text="What Aqua can do" Margin="6,0,0,0"/></StackPanel>
             </RadioButton>
-        </StackPanel>
+            <RadioButton x:Name="PersonalitiesTab" Style="{StaticResource Tab}" Checked="OnTab" AutomationProperties.AutomationId="wb-tab-personalities">
+                <TextBlock Text="Personalities"/>
+            </RadioButton>
+        </WrapPanel>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <Grid Margin="0,0,8,8">
+                <c:PersonalityWorkbench x:Name="PersonalitiesPanel" Visibility="Collapsed"/>
                 <!-- ═══ Skills ═══ -->
                 <StackPanel x:Name="SkillsPanel">
                     <!-- Teach -->

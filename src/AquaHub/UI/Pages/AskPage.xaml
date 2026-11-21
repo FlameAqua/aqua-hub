@@ -547,10 +547,15 @@
                                                         <c:Icon Kind="copy" Width="13" Height="13"/>
                                                     </Button>
                                                     <Button Style="{StaticResource MsgAction}" Command="{Binding ReadAloudCommand}" ToolTip="{Binding ReadAloudTip}"
-                                                            AutomationProperties.AutomationId="ask-read-aloud">
+                                                            AutomationProperties.AutomationId="ask-read-aloud" AutomationProperties.Name="{Binding ReadAloudTip}">
+                                                        <Button.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="Read-aloud settings" Click="OnReadAloudSettings"/>
+                                                            </ContextMenu>
+                                                        </Button.ContextMenu>
                                                         <Grid>
                                                             <c:Icon Kind="volume" Width="13" Height="13" Visibility="{Binding IsSpeaking, Converter={StaticResource VisNot}}"/>
-                                                            <c:Icon Kind="pause" Width="13" Height="13" Visibility="{Binding IsSpeaking, Converter={StaticResource Vis}}"/>
+                                                            <c:Icon Kind="stop" Width="13" Height="13" Visibility="{Binding IsSpeaking, Converter={StaticResource Vis}}"/>
                                                         </Grid>
                                                     </Button>
                                                     <Button Style="{StaticResource MsgAction}" Command="{Binding RetryCommand}" ToolTip="Ask again" Visibility="{Binding Question, Converter={StaticResource Vis}}">

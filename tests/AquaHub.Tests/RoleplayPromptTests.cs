@@ -77,4 +77,20 @@ public class RoleplayPromptTests
         Assert.True(RoleplayPrompt.HistoryBudget(4096) > RoleplayPrompt.HistoryBudget(2048));
         Assert.Equal(RoleplayPrompt.MaxHistoryCharacters, RoleplayPrompt.HistoryBudget(16000));
     }
+
+    [Fact]
+    public void PersonalityDraftsUseOnlyTheDescriptionAndHaveNoToolsOrPersistedIdentity()
+    {
+        var request = RoleplayPrompt.DraftRequest("A melancholy tailor", new("creative", 8192, true));
+        Assert.Equal("creative", request.Model);
+        Assert.True(request.RequireModel);
+        Assert.False(request.CaptureOutput);
+        Assert.Empty(request.Tools!);
+        Assert.Equal("A melancholy tailor", Assert.Single(request.Messages).Content);
+        Assert.NotNull(request.Schema);
+        var preview = RoleplayPrompt.ParseDraft("""{"id":"f4240e14-d4ce-4cdd-b59c-b5645ed5aafd","name":"The Tailor","instructions":"Speak quietly.","openingScenario":"The shop is closing."}""");
+        Assert.Equal(Guid.Empty, preview.Id);
+        Assert.Equal("The shop is closing.", preview.OpeningScenario);
+        Assert.Throws<InvalidOperationException>(() => RoleplayPrompt.ParseDraft("""{"name":"Missing instructions"}"""));
+    }
 }

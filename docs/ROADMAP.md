@@ -12,7 +12,7 @@ commits and releases. The release tag and the outstanding live acceptance items 
 | 2 | **5.3 / 5.4:** live streams and X | 5.3 linking confirmed by owner; remaining acceptance below. 5.4 deferred: paid APIs conflict with free-only scope |
 | 3 | **7:** everyday wins | Deck, quick reminders, day agenda and confirmed scene actions implemented. Trading 212 deferred by Adrian |
 | 4 | **8:** powerful file and semantic search | Local implementation and scratch CPU retrieval verified. Desktop and concurrent GPU acceptance remain. |
-| 5 | **9:** remaining voice and creativity features | Image Gen already delivered early |
+| 5 | **9:** remaining voice and creativity features | Read-aloud and personality flows implemented. Native audio, physical interaction and live model acceptance remain. |
 | 6 | **6:** user-built agents and deeper health tools | Later |
 | 7 | **5.1 / 5.2:** reactions, interests and For You | Deferred until the functional features above |
 
@@ -26,7 +26,7 @@ custom path priority; verified model/runtime downloads; model library and header
 choices; failure classification/backoff; compatibility record; shared generation GPU queue; Comfy Image Gen and Roleplay.
 
 All generation uses the GPU. Editor (`ai.llama.backgroundModel`) serves News/Social/Foresight, falling back to Main.
-Creative serves Roleplay with Main fallback. Search is reserved for CPU embeddings. Briefs/market analysis retain the
+Creative serves Roleplay and personality drafting with Main fallback when unset. Search is reserved for CPU embeddings. Briefs/market analysis retain the
 explicit Deep override. The 12 GB suggestion is Qwen3.5 9B Q5_K_M. Image Gen uses local ComfyUI/FLUX.2 Klein 4B.
 There is no large background generation model on the CPU and no llama.cpp router mode.
 
@@ -169,12 +169,18 @@ and screen reader use, the installed Explorer menu and its removal, a representa
 timing isolated CPU indexing alongside GPU generation.
 The initial scope leaves OCR, PDF content, media understanding, archives, removable and network drives, and Ask integration deferred.
 
-## Then Phase 9: remaining voice and creativity
+## Phase 9: voice and creativity
 
-- **9.1:** Read-aloud voices through audio.cpp, distinct from existing dictation/system-voice playback.
-- **9.2:** Image Gen as an Ask tab already exists on ComfyUI/Klein; retain it rather than rebuilding the earlier proposal.
-- **9.3:** Persistent Roleplay personalities/library and Workbench authoring. Roleplay's current session tab already exists.
-- **9.4:** Uncensored model choices. Local operation alone does not remove a model's learned restrictions.
+- **9.1:** Read aloud shares a single owner across answers, briefings and preview. Windows voices remain the default.
+  The optional audio.cpp Kokoro installation exposes four English presets on supported Windows x64 CPUs. Generated
+  WAV and off-screen results are in [Scoring](SCORING.md). Audible quality, pronunciation, device behaviour and
+  coexistence with real CPU Search and GPU generation remain acceptance.
+- **9.2:** The existing Image Gen tab, ComfyUI/FLUX.2 Klein workflow, references, gallery and GPU reservation stay in place.
+- **9.3:** Workbench saves reusable personality templates and reviews model drafts before saving. Roleplay starts
+  from a template snapshot and keeps its conversation in memory across tabs for the running session.
+- **9.4:** Use the existing Models library and Creative role. Roleplay shows the route and points missing-model
+  recovery to that selector. Model training affects refusals, style and consistency regardless of where it runs.
+  Live quality and fit for any chosen Creative model remain owner acceptance.
 
 ## Then Phase 6: your own agents
 

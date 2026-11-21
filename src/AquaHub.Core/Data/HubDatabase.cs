@@ -317,6 +317,17 @@ public sealed partial class HubDatabase
         return JsonUtil.Deserialize<T>(cmd.ExecuteScalar() as string);
     }
 
+    internal System.Text.Json.JsonElement ReadJsonDocument(string key, int maxBytes)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT CASE WHEN length(CAST(value AS BLOB)) <= $max THEN value ELSE '' END FROM kv WHERE key=$k;";
+        cmd.Parameters.AddWithValue("$k", key);
+        cmd.Parameters.AddWithValue("$max", maxBytes);
+        return cmd.ExecuteScalar() is string json
+            ? System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json, JsonUtil.Options) : default;
+    }
+
     // ───────────────────────────── LLM cache ─────────────────────────────
 
     public string? GetLlm(string key)

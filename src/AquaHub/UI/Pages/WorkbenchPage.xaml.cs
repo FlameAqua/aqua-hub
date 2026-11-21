@@ -35,6 +35,7 @@ public partial class WorkbenchPage : UserControl, IPage
     public WorkbenchPage()
     {
         InitializeComponent();
+        PersonalitiesPanel.Feedback = WorkbenchFeedback;
         SkillsList.ItemsSource = _skills;
         MemoryList.ItemsSource = _memories;
         StepsList.ItemsSource = _steps;
@@ -59,6 +60,8 @@ public partial class WorkbenchPage : UserControl, IPage
         {
             case "memory": MemoryTab.IsChecked = true; break;
             case "abilities": AbilitiesTab.IsChecked = true; break;
+            case "personalities": PersonalitiesTab.IsChecked = true; break;
+            case null when PersonalitiesTab.IsChecked == true: break;
             case not null when arg.StartsWith("teach:", StringComparison.Ordinal):
                 SkillsTab.IsChecked = true;
                 TeachInput.Text = arg[6..].Trim();
@@ -85,8 +88,10 @@ public partial class WorkbenchPage : UserControl, IPage
     {
         if (SkillsPanel is null) return;
         SkillsPanel.Visibility = SkillsTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SkillsLead.Visibility = SkillsPanel.Visibility;
         MemoryPanel.Visibility = MemoryTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         AbilitiesPanel.Visibility = AbilitiesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        PersonalitiesPanel.Visibility = PersonalitiesTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         if (AbilitiesTab.IsChecked == true) BuildAbilities();
     }
 

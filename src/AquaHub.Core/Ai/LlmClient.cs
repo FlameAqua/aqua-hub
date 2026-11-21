@@ -103,6 +103,10 @@ public sealed record LlmRequest
     /// for <see cref="Deep"/> requests).
     /// </summary>
     public string? Model { get; init; }
+    /// <summary>Fail if Aqua's named local generation model disappears, even when Main remains available.</summary>
+    public bool RequireModel { get; init; }
+    /// <summary>Whether diagnostics can retain the model's raw text during this app session.</summary>
+    public bool CaptureOutput { get; init; } = true;
     /// <summary>Context window for this request; null = Settings. A different size reloads the model, so only long jobs raise it.</summary>
     public int? ContextTokens { get; init; }
     public LlmReasoningControl? ReasoningControl { get; init; }
@@ -639,6 +643,8 @@ public sealed partial class LlmClient : IDisposable
     {
         var library = Llama!.Library;
         if (!string.IsNullOrWhiteSpace(request.Model) && library.Find(request.Model) is { Embedding: false } named) return (named, LlamaLane.Gpu);
+        if (request.RequireModel && request.Model is { Length: > 0 } required)
+            throw new Roleplay.RoleplayModelUnavailableException(required);
         var pictures = request.Messages.Any(m => m.Images is { Count: > 0 });
         if (request.Editorial && !request.Deep)
         {
@@ -736,7 +742,7 @@ public sealed partial class LlmClient : IDisposable
                 Interlocked.Add(ref Stats.OutputTokens, result.OutputTokens);
                 Stats.LastTokensPerSecond = result.TokensPerSecond;
                 Stats.LastCall = DateTimeOffset.Now;
-                Remember(request.Purpose, model.Id, result.Text);
+                if (request.CaptureOutput) Remember(request.Purpose, model.Id, result.Text);
                 Log.Info("ai", $"{request.Purpose} via {model.Name}: {result.OutputTokens} tok in {sw.Elapsed.TotalSeconds:0.0}s ({result.TokensPerSecond:0} tok/s"
                                + (timings is { CachedTokens: > 0 } t ? $", {t.CachedTokens} of {t.CachedTokens + t.PromptTokens} prompt tokens from the cache" : "")
                                + (load.TotalSeconds >= 1 ? $", {load.TotalSeconds:0.0}s to load" : "") + ")");
@@ -746,7 +752,7 @@ public sealed partial class LlmClient : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Interlocked.Increment(ref Stats.Failures);
-            Stats.LastError = ex.Message;
+            Stats.LastError = request.CaptureOutput ? ex.Message : "Private model request failed";
             throw ex is LlamaRuntimeException ? new LlmUnavailableException(ex.Message) : ex;
         }
     }
@@ -784,15 +790,15 @@ public sealed partial class LlmClient : IDisposable
             Interlocked.Add(ref Stats.OutputTokens, result.OutputTokens);
             Stats.LastTokensPerSecond = result.TokensPerSecond;
             Stats.LastCall = DateTimeOffset.Now;
-            Remember(request.Purpose, model, result.Text);
+            if (request.CaptureOutput) Remember(request.Purpose, model, result.Text);
             Log.Info("ai", $"{request.Purpose} via {model}: {result.OutputTokens} tok in {sw.Elapsed.TotalSeconds:0.0}s ({result.TokensPerSecond:0} tok/s)");
             return result;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Interlocked.Increment(ref Stats.Failures);
-            Stats.LastError = ex.Message;
-            if (ex is HttpRequestException) _health = _health with { Available = false, Error = ex.Message };
+            Stats.LastError = request.CaptureOutput ? ex.Message : "Private model request failed";
+            if (ex is HttpRequestException) _health = _health with { Available = false, Error = Stats.LastError };
             throw;
         }
     }
@@ -1387,7 +1393,8 @@ public sealed partial class LlmClient : IDisposable
                 if (timings is { OutputPerSecond: > 0 }) Stats.LastTokensPerSecond = timings.OutputPerSecond;
                 else if (sw.Elapsed.TotalSeconds > 0) Stats.LastTokensPerSecond = tokens / sw.Elapsed.TotalSeconds;
                 Stats.LastCall = DateTimeOffset.Now;
-                Remember(request.Purpose, model, answer.ToString() + (calls is { Count: > 0 } ? "\n[tool calls] " + string.Join(", ", calls.Select(c => c.Name + c.ArgumentsJson)) : ""));
+                if (request.CaptureOutput)
+                    Remember(request.Purpose, model, answer.ToString() + (calls is { Count: > 0 } ? "\n[tool calls] " + string.Join(", ", calls.Select(c => c.Name + c.ArgumentsJson)) : ""));
             }
             finally { if (control is not null) { control.End = null; control.Id = null; } }
         }

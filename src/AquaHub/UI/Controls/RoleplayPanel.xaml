@@ -18,10 +18,12 @@
             <StackPanel>
                 <TextBlock Text="Roleplay" Style="{StaticResource T.Title}"/>
             </StackPanel>
-            <StackPanel x:Name="HeaderActions" Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <Button Style="{StaticResource Btn.Standard}" Content="Copy transcript" Click="OnCopy" Margin="0,0,8,0"/>
+            <WrapPanel Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <TextBlock x:Name="ResetWarning" Text="New scene clears this conversation." Style="{StaticResource T.Caption}"
+                           VerticalAlignment="Center" Margin="0,0,10,0" Visibility="Collapsed"/>
+                <Button x:Name="CopyTranscript" Style="{StaticResource Btn.Standard}" Content="Copy transcript" Click="OnCopy" Margin="0,0,8,0"/>
                 <Button Style="{StaticResource Btn.Standard}" Content="New scene" Click="OnNewScene" AutomationProperties.AutomationId="roleplay-new-scene"/>
-            </StackPanel>
+            </WrapPanel>
         </Grid>
 
         <Grid x:Name="BodyGrid" Grid.Row="1">
@@ -30,20 +32,47 @@
                 <ColumnDefinition Width="18"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <Border x:Name="SceneSetup" Grid.Column="0" Style="{StaticResource Card}" Padding="16" CornerRadius="14">
+            <Border x:Name="SceneSetup" Grid.Column="0" Style="{StaticResource Card}" Padding="12" CornerRadius="14">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
-                    <DockPanel Margin="0,0,0,12">
+                    <DockPanel Margin="0,0,0,6">
                         <c:HintButton x:Name="ModelHint" DockPanel.Dock="Right" AutomationProperties.Name="About Roleplay"/>
                         <TextBlock Text="Scene" Style="{StaticResource T.CardTitle}" VerticalAlignment="Center"/>
                     </DockPanel>
-                    <TextBlock Text="Persona" Style="{StaticResource T.Caption}" Margin="0,0,0,5"/>
-                    <TextBox x:Name="PersonaBox" ui:UiProps.Placeholder="Who should the model play?" TextChanged="OnSceneEdited" MaxLength="300"
-                             MinHeight="36" Padding="10,7" ui:UiProps.CornerRadius="8" AutomationProperties.AutomationId="roleplay-persona"/>
-                    <TextBlock Text="Scenario" Style="{StaticResource T.Caption}" Margin="0,14,0,5"/>
-                    <TextBox x:Name="ScenarioBox" ui:UiProps.Placeholder="Where does the scene begin?" TextChanged="OnSceneEdited" MaxLength="1200"
-                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="116" MaxHeight="190"
-                             Padding="10,8" ui:UiProps.CornerRadius="8" AutomationProperties.AutomationId="roleplay-scenario"/>
+                    <TextBlock Text="Personality for next scene" Style="{StaticResource T.Caption}" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="PersonalityPicker" AutomationProperties.Name="Personality for next scene"
+                              AutomationProperties.AutomationId="roleplay-personality" SelectionChanged="OnPersonalityPicked">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" MaxWidth="220" ToolTip="{Binding Name}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <WrapPanel Margin="0,4,0,4">
+                        <Button Style="{StaticResource Btn.Link}" Content="Manage personalities" Click="OnManage" Margin="0,0,10,0"
+                                AutomationProperties.AutomationId="roleplay-manage"/>
+                        <Button Style="{StaticResource Btn.Link}" Content="Model settings" Click="OnModelSettings"/>
+                    </WrapPanel>
+                    <TextBlock x:Name="CurrentModel" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.AutomationId="roleplay-model"/>
+                    <TextBlock x:Name="ActivePersonality" Style="{StaticResource T.Caption}" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Visibility="Collapsed" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="RemoteNotice" Text="Your scene and messages leave this PC for the configured AI server."
+                               Style="{StaticResource T.Caption}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
+                    <Expander x:Name="SceneDetails" Header="Scene details" IsExpanded="True" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Persona" Style="{StaticResource T.Caption}" Margin="0,5,0,4"/>
+                            <TextBox x:Name="PersonaBox" ui:UiProps.Placeholder="Who should the model play?" TextChanged="OnSceneEdited" MaxLength="1200"
+                                     AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="72" MinHeight="36" Padding="10,7"
+                                     AutomationProperties.Name="Persona" AutomationProperties.AutomationId="roleplay-persona"/>
+                            <TextBlock Text="Scenario" Style="{StaticResource T.Caption}" Margin="0,8,0,4"/>
+                            <TextBox x:Name="ScenarioBox" ui:UiProps.Placeholder="Where does the scene begin?" TextChanged="OnSceneEdited" MaxLength="1200"
+                                     AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="48" MaxHeight="94"
+                                     Padding="10,8" AutomationProperties.Name="Scenario" AutomationProperties.AutomationId="roleplay-scenario"/>
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
+              </ScrollViewer>
             </Border>
 
             <Border x:Name="ConversationCard" Grid.Column="2" Style="{StaticResource Card}" Padding="18,16" CornerRadius="14">
@@ -54,7 +83,7 @@
                     </Grid.RowDefinitions>
                     <ScrollViewer x:Name="TranscriptScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <Grid>
-                            <TextBlock x:Name="EmptyState" Text="Your scene starts here. Set a persona and scenario, then write the first line."
+                            <TextBlock x:Name="EmptyState" Text="Write the first line of your scene."
                                        Style="{StaticResource T.Body2}" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                                        MaxWidth="390" Margin="24"/>
                             <ItemsControl x:Name="Transcript" AutomationProperties.AutomationId="roleplay-transcript">
@@ -78,7 +107,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="InputBox" ui:UiProps.Placeholder="Write your next line…" AcceptsReturn="True" TextWrapping="Wrap" MaxLength="1200" TextChanged="OnDraftEdited"
                                      MinHeight="48" MaxHeight="126" Padding="12,10" ui:UiProps.CornerRadius="10" KeyDown="OnInputKeyDown"
-                                     AutomationProperties.AutomationId="roleplay-input"/>
+                                     AutomationProperties.Name="Your line" AutomationProperties.AutomationId="roleplay-input"/>
                             <Button x:Name="SendButton" Grid.Column="1" Style="{StaticResource Btn.Accent}" Content="Send" MinWidth="76" Height="42"
                                     Margin="10,0,0,0" Click="OnSend" AutomationProperties.AutomationId="roleplay-send"/>
                             <Button x:Name="CancelButton" Grid.Column="1" Style="{StaticResource Btn.Standard}" Content="Stop" MinWidth="76" Height="42"

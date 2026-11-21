@@ -1,0 +1,25 @@
+<UserControl x:Class="AquaHub.UI.Controls.ReadAloudSettings"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel>
+        <WrapPanel>
+            <ComboBox x:Name="Backend" Width="180" SelectedValuePath="Tag" SelectionChanged="OnBackend"
+                      AutomationProperties.Name="Read-aloud backend" AutomationProperties.AutomationId="read-aloud-backend">
+                <ComboBoxItem Content="Windows voices" Tag="windows"/>
+                <ComboBoxItem Content="Kokoro" Tag="kokoro"/>
+            </ComboBox>
+            <Button x:Name="PreviewButton" Style="{StaticResource Btn.Standard}" Content="Preview" Margin="8,0,0,0"
+                    Click="OnPreview" AutomationProperties.AutomationId="read-aloud-preview"/>
+        </WrapPanel>
+        <StackPanel x:Name="KokoroOptions" Margin="0,8,0,0">
+            <WrapPanel>
+                <ComboBox x:Name="Voice" Width="213" SelectedValuePath="Id" DisplayMemberPath="Name" SelectionChanged="OnVoice"
+                          AutomationProperties.Name="Kokoro voice" AutomationProperties.AutomationId="read-aloud-voice"/>
+                <Button x:Name="Install" Style="{StaticResource Btn.Standard}" Content="Install" Margin="8,0,0,0" Click="OnInstall"
+                        AutomationProperties.AutomationId="read-aloud-install"/>
+            </WrapPanel>
+            <TextBlock x:Name="PackageStatus" Style="{StaticResource T.Caption}" Margin="0,5,0,0" TextWrapping="Wrap"
+                       AutomationProperties.LiveSetting="Polite" AutomationProperties.AutomationId="read-aloud-package"/>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

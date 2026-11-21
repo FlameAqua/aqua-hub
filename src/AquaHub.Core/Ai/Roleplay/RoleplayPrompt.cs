@@ -1,3 +1,6 @@
+using System.Text.Json.Nodes;
+using AquaHub.Core.Util;
+
 namespace AquaHub.Core.Ai.Roleplay;
 
 /// <summary>Builds the private, tool-free prompt and model choice for a roleplay scene.</summary>
@@ -31,6 +34,36 @@ public static class RoleplayPrompt
         if (string.IsNullOrWhiteSpace(creativeModel)) return activeModel;
         if (installedModels.Any(m => m.Equals(creativeModel, StringComparison.OrdinalIgnoreCase))) return creativeModel;
         throw new RoleplayModelUnavailableException(creativeModel);
+    }
+
+    public static LlmRequest DraftRequest(string idea, CreativeRoute model)
+    {
+        idea = idea.Trim();
+        if (idea.Length is 0 or > 1200) throw new InvalidOperationException("Describe the character in up to 1,200 characters.");
+        return new()
+        {
+            System = "Create a reusable fictional roleplay personality from the user's idea. " +
+                     "Use a short name, concise in-character instructions, and an optional opening scenario. " +
+                     "Return one JSON object with name, instructions, and openingScenario as strings, and no surrounding text.",
+            Messages = [new("user", idea)],
+            Model = model.Model,
+            RequireModel = model.RequireModel,
+            CaptureOutput = false,
+            Schema = JsonNode.Parse("""{"type":"object","additionalProperties":false,"required":["name","instructions","openingScenario"],"properties":{"name":{"type":"string"},"instructions":{"type":"string"},"openingScenario":{"type":"string"}}}""")!.AsObject(),
+            Temperature = 0.7,
+            MaxTokens = 650,
+            Priority = LlmPriority.Interactive,
+            Purpose = "Personality draft",
+            Think = false,
+            Tools = [],
+        };
+    }
+
+    public static Personality ParseDraft(string text)
+    {
+        if (text is { Length: > 0 and <= 6000 } && JsonUtil.Deserialize<Personality>(text) is { } draft)
+            return PersonalityLibrary.Validate(draft with { Id = Guid.Empty });
+        throw new InvalidOperationException("The model did not return an editable personality. Try a simpler brief or write it yourself.");
     }
 
     /// <summary>Keeps the newest complete exchanges within a small context budget and appends the current turn.</summary>

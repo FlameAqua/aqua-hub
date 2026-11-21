@@ -141,8 +141,8 @@ public sealed class TodayVM : ObservableObject
     public string BriefMeta { get; private set; } = "";
     private bool _briefRegenerating;
     public bool BriefRegenerating { get => _briefRegenerating; set => Set(ref _briefRegenerating, value); }
-    public string ReadIcon => Hub.Speech.IsSpeaking ? "pause" : "volume";
-    public string ReadLabel => Hub.Speech.IsSpeaking ? "Stop" : "Read aloud";
+    public string ReadIcon => Hub.Speech.IsActive(Platform.SpeechService.Briefing) ? "stop" : "volume";
+    public string ReadLabel => Hub.Speech.IsActive(Platform.SpeechService.Briefing) ? "Stop" : "Read aloud";
 
     private void UpdateBrief()
     {

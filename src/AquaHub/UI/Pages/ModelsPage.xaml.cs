@@ -54,11 +54,11 @@ public partial class ModelsPage : UserControl, IPage
         Refresh();
         OnProgress(Hub.LocalAi.DownloadProgress);
         _timer.Start();
-        if (arg == "search") Dispatcher.BeginInvoke(() =>
+        if (arg is "search" or "creative") Dispatcher.BeginInvoke(() =>
         {
             if (!_active) return;
-            var search = Roles.Items.OfType<RoleRow>().FirstOrDefault(r => r.Id == "search");
-            if (search != null && Roles.ItemContainerGenerator.ContainerFromItem(search) is ContentPresenter presenter
+            var role = Roles.Items.OfType<RoleRow>().FirstOrDefault(r => r.Id == arg);
+            if (role != null && Roles.ItemContainerGenerator.ContainerFromItem(role) is ContentPresenter presenter
                 && presenter.ContentTemplate?.FindName("RolePicker", presenter) is ComboBox picker)
             {
                 picker.BringIntoView();

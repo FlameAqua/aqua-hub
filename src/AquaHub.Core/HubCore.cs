@@ -52,6 +52,7 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
     public WebReader WebReader { get; }
     /// <summary>Skills and memories you taught Ask (Workbench).</summary>
     public Ai.Assistant.Workbench Workbench { get; }
+    public Ai.Roleplay.PersonalityLibrary Personalities { get; }
     public Ai.Assistant.ChatStore Chats { get; }
     public Ai.Assistant.SkillDrafter SkillDrafter { get; }
     public CommandInterpreter Commands { get; }
@@ -108,6 +109,7 @@ public sealed class HubCore : IDisposable, IAsyncDisposable
         WebSearch = new WebSearch(Http, () => Settings.Current, secrets);
         WebReader = new WebReader();
         Workbench = new Ai.Assistant.Workbench(Db);
+        Personalities = new Ai.Roleplay.PersonalityLibrary(Db);
         Chats = new Ai.Assistant.ChatStore(Db, paths.ChatMedia);
         SkillDrafter = new Ai.Assistant.SkillDrafter(Llm);
         Assistant = new Ai.Assistant.AskAgent(State, Db, Llm, () => Settings.Current, WebSearch, WebReader, Workbench) { RunAgent = Agents.RunAndWaitAsync };

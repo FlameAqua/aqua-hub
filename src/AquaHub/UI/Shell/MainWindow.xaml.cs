@@ -6,6 +6,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using AquaHub.Core.Agents;
 using AquaHub.Core.Models;
+using AquaHub.Core.Speech;
 using AquaHub.Core.Updates;
 using AquaHub.Core.Util;
 using AquaHub.Platform;
@@ -53,6 +54,8 @@ public partial class MainWindow : Window
             Hub.Core.Settings.Changed += OnSettingsChanged;
             Hub.Ollama.Changed += OnOllamaChanged;
             Hub.Updates.Changed += OnUpdatesChanged;
+            Hub.Speech.StateChanged += OnReadAloudChanged;
+            OnReadAloudChanged();
             _clock.Start();
             UpdateStatus();
             UpdateNavMode();
@@ -67,6 +70,7 @@ public partial class MainWindow : Window
             Hub.Core.Settings.Changed -= OnSettingsChanged;
             Hub.Ollama.Changed -= OnOllamaChanged;
             Hub.Updates.Changed -= OnUpdatesChanged;
+            Hub.Speech.StateChanged -= OnReadAloudChanged;
             _clock.Stop();
             (PageHost.Content as IPage)?.OnNavigatedFrom();
             PageHost.Content = null;
@@ -100,6 +104,23 @@ public partial class MainWindow : Window
     }
 
     private IEnumerable<RadioButton> NavRadios() => NavItems.Children.OfType<RadioButton>().Append(SettingsNav);
+
+    private void OnSpeechStop(object sender, RoutedEventArgs e) => Hub.Speech.Stop();
+
+    private void OnReadAloudChanged()
+    {
+        var state = Hub.Speech.State;
+        SpeechStop.Visibility = state.Active ? Visibility.Visible : Visibility.Hidden;
+        SpeechStop.ToolTip = state.Stage == ReadAloudStage.Preparing ? "Preparing speech. Click to stop." : "Stop read aloud";
+        if (state is { Stage: ReadAloudStage.Failed, Message: { } error })
+            WorkspaceFeedback.Show(error, "read-aloud-feedback", error: true, actionLabel: "Read-aloud settings",
+                action: () => Navigate("settings", "ask:readaloud"));
+        else if (state.Stage == ReadAloudStage.Preparing)
+            WorkspaceFeedback.Show("Preparing speech…", "read-aloud-feedback", busy: true);
+        else if (state.Message is { } notice)
+            WorkspaceFeedback.Show(notice, "read-aloud-feedback");
+        else WorkspaceFeedback.Hide("read-aloud-feedback");
+    }
 
     private void ApplyBackdrop()
     {

@@ -70,6 +70,7 @@ public sealed class AskSession
 
     public AskSession()
     {
+        Hub.Speech.StateChanged += OnReadAloudChanged;
         Current = NewThread(null);
         // Turning "Keep Ask chats" off deletes the stored ones straight away; "Keep pictures with chats" off, their pictures
         // and what the messages kept about them (the pictures' paths and what they showed).
@@ -139,6 +140,7 @@ public sealed class AskSession
 
     public async Task StopAsync()
     {
+        Hub.Speech.StateChanged -= OnReadAloudChanged;
         _stopping = true;
         Hub.Core.Settings.Changed -= _settingsChanged;
         Hub.Core.Chats.Changed -= _chatsChanged;
@@ -1033,7 +1035,7 @@ public sealed class AskSession
     private void Wire(ChatThread thread, ChatMessageVM vm)
     {
         vm.CopyCommand = new RelayCommand(() => Copy(vm.Text));
-        vm.ReadAloudCommand = new RelayCommand(() => _ = ReadAloudAsync(vm));
+        vm.ReadAloudCommand = new RelayCommand(() => Hub.Speech.Toggle(vm, vm.Text, Hub.S.Location.Language, markdown: true));
         if (vm.IsUser)
         {
             vm.EditCommand = new RelayCommand(() =>
@@ -1097,19 +1099,16 @@ public sealed class AskSession
         await SendAsync(text, opts);
     }
 
-    private static async Task ReadAloudAsync(ChatMessageVM vm)
+    private ChatMessageVM? _speakingMessage;
+
+    private void OnReadAloudChanged()
     {
-        if (vm.IsSpeaking) { Hub.Speech.Stop(); vm.IsSpeaking = false; return; }
-        vm.IsSpeaking = true;
-        void Done()
-        {
-            if (Hub.Speech.IsSpeaking) return;
-            vm.IsSpeaking = false;
-            Hub.Speech.StateChanged -= Done;
-        }
-        Hub.Speech.StateChanged += Done;
-        await Hub.Speech.SpeakAsync(AnswerText.Spoken(vm.Text), Hub.S.Location.Language);
-        if (!Hub.Speech.IsSpeaking) Done();
+        var state = Hub.Speech.State;
+        var next = state.Active ? state.Owner as ChatMessageVM : null;
+        if (ReferenceEquals(next, _speakingMessage)) return;
+        _speakingMessage?.IsSpeaking = false;
+        _speakingMessage = next;
+        if (next is not null) next.IsSpeaking = true;
     }
 
     public static void Copy(string text)

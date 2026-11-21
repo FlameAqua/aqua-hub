@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
@@ -7,6 +8,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using AquaHub.Core.Ai;
 using AquaHub.Core.Ai.Assistant;
+using AquaHub.Core.Ai.Roleplay;
+using AquaHub.Core.Speech;
 using AquaHub.Core.Util;
 using AquaHub.Platform;
 using AquaHub.UI.Shell;
@@ -31,6 +34,7 @@ public static class SnapshotRunner
             if (only == "studio") { await StudioAsync(outDir); return; }
             if (only == "settings-ui") { await SettingsAsync(outDir); return; }
             if (only == "search-ui") { await SearchAsync(outDir); return; }
+            if (only == "creativity-ui") { await CreativityAsync(outDir); return; }
             if (scratchProfile) Hub.Core.Chats.DeleteAll();
             // QA mode renders AI content even if a game is running (normal mode pauses AI then).
             Hub.Core.Llm.PauseReason = () => null;
@@ -372,6 +376,141 @@ public static class SnapshotRunner
         if (win.PageHost.Content is not UI.Pages.FileSearchPage || win.DeckActions.IsVisible)
             throw new InvalidOperationException("The Deck did not open Search files and close its actions.");
         win.DeckHandle.Visibility = Visibility.Collapsed;
+    }
+
+    private static async Task CreativityAsync(string outDir)
+    {
+        if (!Sandbox.Enabled) throw new InvalidOperationException("Creativity rendering requires an isolated profile.");
+        Hub.Core.Settings.Update(s =>
+        {
+            s.Ai.Enabled = s.Ai.ManageOllama = s.Ai.StartOllamaOnDemand = false;
+            s.Ai.Llama.UseOllamaModels = s.Ai.Llama.UseOllamaEngine = false;
+            s.Ask.Computer = s.Privacy.LoadRemoteImages = false;
+            s.Ask.ReadAloudBackend = "windows";
+            s.General.ReduceMotion = true;
+        });
+        var character = await Task.Run(() => Hub.Core.Personalities.Save(new Personality(Guid.Empty,
+            "The Night Archivist and Keeper of Lost Letters from Across the Northern Coast", "A quiet archivist.", "A letter arrives.")));
+        var win = new MainWindow { Width = 1440, Height = 880, Left = -32000, Top = -32000,
+            WindowStartupLocation = WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false };
+        bool activated = false;
+        win.Activated += (_, _) => activated = true;
+        try
+        {
+            win.Show();
+            foreach (var (theme, width) in new[] { ("dark", 1440), ("light", 820) })
+            {
+                var options = Hub.Core.Settings.Clone().General;
+                options.Theme = theme;
+                Hub.Theme.Apply(options);
+                win.Width = width;
+                win.Height = theme == "light" ? 580 : 880;
+                win.Navigate("settings", "ask:readaloud");
+                await LayoutAsync();
+                var row = (UI.Controls.SettingRow)((FrameworkElement)win.PageHost.Content).FindName("Row_readaloud");
+                var voiceSettings = row.Below as UI.Controls.ReadAloudSettings
+                    ?? throw new InvalidOperationException("Read-aloud settings did not open.");
+                var preview = (Button)voiceSettings.FindName("PreviewButton");
+                if (!preview.IsVisible || !preview.IsEnabled || AutomationProperties.GetAutomationId(preview) != "read-aloud-preview")
+                    throw new InvalidOperationException("Read-aloud settings did not expose an accessible preview.");
+                ((ComboBox)voiceSettings.BackendPicker).SelectedValue = "kokoro";
+                await LayoutAsync();
+                var install = (Button)voiceSettings.FindName("Install");
+                if (KokoroSetup.Supported && (!install.IsVisible || install.TransformToAncestor(row).TransformBounds(new Rect(install.RenderSize)).Right > row.ActualWidth))
+                    throw new InvalidOperationException("The Kokoro install controls did not fit.");
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"voice-{theme}.png"), scale: 1);
+                ((ComboBox)voiceSettings.BackendPicker).SelectedValue = "windows";
+                Invoke(preview);
+                await UntilAsync(() => Hub.Speech.State.Stage == ReadAloudStage.Playing && win.SpeechStop.IsVisible);
+                win.Navigate("workbench", "personalities");
+                await LayoutAsync();
+                if (!win.SpeechStop.IsVisible) throw new InvalidOperationException("Speech could not be stopped after navigation.");
+                Invoke(win.SpeechStop);
+                await UntilAsync(() => !Hub.Speech.State.Active && !win.SpeechStop.IsVisible);
+
+                var workbench = (UI.Controls.PersonalityWorkbench)((FrameworkElement)win.PageHost.Content).FindName("PersonalitiesPanel");
+                var list = (ListBox)workbench.FindName("LibraryList");
+                await UntilAsync(() => list.Items.OfType<Personality>().Any(p => p.Id == character.Id));
+                list.SelectedItem = list.Items.OfType<Personality>().Single(p => p.Id == character.Id);
+                var edit = FindVisual<Button>(workbench, b => AutomationProperties.GetAutomationId(b) == "personality-edit");
+                Invoke(edit ?? throw new InvalidOperationException("The Edit action was missing."));
+                await LayoutAsync();
+                if (((TextBox)workbench.FindName("NameBox")).Text != character.Name)
+                    throw new InvalidOperationException("Workbench did not open the saved personality.");
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"personalities-{theme}.png"), scale: 1);
+                if (theme == "dark")
+                {
+                    character = character with { OpeningScenario = "A letter and a map arrive." };
+                    var proposed = new TaskCompletionSource<Personality>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    workbench.DraftPersonality = (_, token) => proposed.Task.WaitAsync(token);
+                    ((Expander)workbench.FindName("DraftOptions")).IsExpanded = true;
+                    ((TextBox)workbench.FindName("Idea")).Text = "A quiet archivist receives a letter and a map.";
+                    Invoke((Button)workbench.FindName("DraftButton"));
+                    await UntilAsync(() => !((Button)workbench.FindName("SaveButton")).IsEnabled);
+                    proposed.SetResult(character);
+                    var scenario = (TextBox)workbench.FindName("Scenario");
+                    await UntilAsync(() => scenario.Text == character.OpeningScenario);
+                    if ((await Task.Run(Hub.Core.Personalities.List)).Single() == character)
+                        throw new InvalidOperationException("A draft was stored before Save.");
+                    Invoke((Button)workbench.FindName("SaveButton"));
+                    await UntilAsync(() => list.Items.OfType<Personality>().Any(p => p == character));
+                }
+                win.Navigate("ask", "roleplay");
+                await LayoutAsync();
+                var roleplay = FindVisual<UI.Controls.RoleplayPanel>(win, p => p.IsVisible)
+                    ?? throw new InvalidOperationException("Roleplay did not open.");
+                var picker = (ComboBox)roleplay.FindName("PersonalityPicker");
+                await UntilAsync(() => picker.Items.OfType<Personality>().Any(p => p.Id == character.Id));
+                picker.SelectedItem = picker.Items.OfType<Personality>().Single(p => p.Id == character.Id);
+                Invoke(FindVisual<Button>(roleplay, b => AutomationProperties.GetAutomationId(b) == "roleplay-new-scene")!);
+                await UntilAsync(() => Hub.Roleplay.Personality?.Id == character.Id);
+                if (Hub.Roleplay.Scenario != character.OpeningScenario) throw new InvalidOperationException("Roleplay lost the starting scenario.");
+                if (roleplay.FindName("TranscriptScroll") is not ScrollViewer { ActualHeight: >= 80 })
+                    throw new InvalidOperationException("The Roleplay transcript needs room at the minimum window size.");
+                Capture((FrameworkElement)win.Content, Path.Combine(outDir, $"roleplay-{theme}.png"), scale: 1);
+            }
+            win.Navigate("workbench", "personalities");
+            await LayoutAsync();
+            var library = FindVisual<ListBox>(win, list => AutomationProperties.GetAutomationId(list) == "personalities-list")!;
+            await UntilAsync(() => library.Items.OfType<Personality>().Any(p => p == character));
+            library.SelectedItem = library.Items.OfType<Personality>().Single(p => p == character);
+            Invoke(FindVisual<Button>(win, b => AutomationProperties.GetAutomationId(b) == "personality-delete")!);
+            await LayoutAsync();
+            Invoke(FindVisual<Button>(win, b => AutomationProperties.GetAutomationId(b) == "personality-delete-confirm")!);
+            await UntilAsync(() => library.Items.Count == 0);
+            win.Navigate("ask", "roleplay");
+            await LayoutAsync();
+            if (Hub.Roleplay.Personality != character || (await Task.Run(Hub.Core.Personalities.List)).Count != 0)
+                throw new InvalidOperationException("Deleting a template affected the active scene or failed to persist.");
+        }
+        finally { win.Close(); }
+
+        static void Invoke(Button button)
+        {
+            if (new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke) is not IInvokeProvider invoke)
+                throw new InvalidOperationException("Button has no accessible Invoke pattern.");
+            invoke.Invoke();
+        }
+
+        async Task LayoutAsync()
+        {
+            await win.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+            win.UpdateLayout();
+            if (activated || win.IsActive || win.Left > -20000 || win.Top > -20000)
+                throw new InvalidOperationException("The render window must stay inactive and off-screen.");
+        }
+
+        async Task UntilAsync(Func<bool> ready)
+        {
+            var limit = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                await LayoutAsync();
+                if (ready()) return;
+            }
+            while (limit.Elapsed < TimeSpan.FromSeconds(5));
+            throw new TimeoutException("The creativity control did not reach its expected state.");
+        }
     }
 
     private static async Task SettingsAsync(string outDir)

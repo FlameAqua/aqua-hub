@@ -17,4 +17,5 @@ Assert-Rejected { Resolve-E2ESelection -Component Settings }
 Assert-Rejected { Resolve-E2ESelection -All -Component Models }
 Assert-Rejected { Resolve-E2ESelection -Component Models -Filter 'T01|T02' }
 Assert-Selection ((Resolve-E2ESelection -Component Search -Filter T03).Filter -eq 'Execution=Offline&(Component=Search)&FullyQualifiedName~T03') 'Select Search by individual case.'
-'E2E selection checks passed (12 cases).'
+Assert-Selection ((Resolve-E2ESelection -Component Creativity -Filter T01).Filter -eq 'Execution=Offline&(Component=Creativity)&FullyQualifiedName~T01') 'Select the off-screen Creativity component.'
+'E2E selection checks passed (13 cases).'

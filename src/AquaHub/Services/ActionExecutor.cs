@@ -156,11 +156,11 @@ public sealed partial class ActionExecutor
         catch { return null; }
     }
 
-    public async Task ReadBriefAsync()
+    public Task ReadBriefAsync()
     {
-        if (Hub.Speech.IsSpeaking) { Hub.Speech.Stop(); return; }
+        if (Hub.Speech.IsActive(Platform.SpeechService.Briefing)) { Hub.Speech.Stop(); return Task.CompletedTask; }
         var b = Hub.State.Brief;
-        if (b is null) return;
+        if (b is null) return Task.CompletedTask;
         var sb = new StringBuilder();
         sb.Append(b.Summary).Append(' ');
         foreach (var sec in b.Sections)
@@ -168,7 +168,8 @@ public sealed partial class ActionExecutor
             sb.Append(sec.Title).Append(". ");
             foreach (var bullet in sec.Bullets) sb.Append(bullet.TrimEnd('.')).Append(". ");
         }
-        await Hub.Speech.SpeakAsync(sb.ToString(), Hub.S.Location.Language);
+        Hub.Speech.Toggle(Platform.SpeechService.Briefing, sb.ToString(), Hub.S.Location.Language);
+        return Task.CompletedTask;
     }
 
     public Task RunSceneAsync(Scene scene, IProgress<string>? progress = null) =>

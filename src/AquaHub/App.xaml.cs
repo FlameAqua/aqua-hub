@@ -54,18 +54,19 @@ public partial class App : Application
     private async Task StopOwnedAsync()
     {
         var reminderScene = Hub.Actions.StopReminderSceneAsync();
-        Hub.Speech?.Stop();
+        var speech = Hub.Speech?.ShutdownAsync() ?? Task.CompletedTask;
         Hub.Updates?.StopScheduling();
         Hub.Ollama?.StopScheduling();
         var agents = Hub.Core.Agents.StopAsync();
         var local = Hub.LocalAi.StopAsync();
         var ask = Hub.Ask.StopAsync();
+        var roleplay = Hub.Roleplay?.ShutdownAsync() ?? Task.CompletedTask;
         var images = Hub.Images.StopAsync();
         var llm = Hub.Core.Llm.StopAsync();
         var streams = Hub.Core.Streams.StopAsync();
         var youtube = Hub.Core.YouTubeAccount.StopAsync();
         var folderListener = _single?.StopFolderListenerAsync() ?? Task.CompletedTask;
-        await Task.WhenAll(agents, local, ask, images, llm, streams, youtube, reminderScene, Hub.Windows.DeckSaved, _initialization, _mediaInitialization, folderListener);
+        await Task.WhenAll(agents, local, ask, images, llm, streams, youtube, reminderScene, speech, roleplay, Hub.Windows.DeckSaved, _initialization, _mediaInitialization, folderListener);
         await Hub.Search.StopAsync();
         await Hub.Llama.StopAsync();
         _shutdownComplete = true;
@@ -77,7 +78,7 @@ public partial class App : Application
         var args = AppArgs.Parse(e.Args);
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         UseConsistentMonthNames();
-        var settingsSnapshot = args.Snapshot is not null && args.SnapshotPages is "settings-ui" or "search-ui";
+        var settingsSnapshot = args.Snapshot is not null && args.SnapshotPages is "settings-ui" or "search-ui" or "creativity-ui";
         if (settingsSnapshot && (!args.E2e || args.Measure || string.IsNullOrWhiteSpace(args.DataDir)
             || (Directory.Exists(args.DataDir) && Directory.EnumerateFileSystemEntries(args.DataDir).Any())))
         {
@@ -134,7 +135,7 @@ public partial class App : Application
         MediaController.CatalogLookup = Hub.Catalog.NameFor;
         Hub.Volume = new VolumeController();
         Hub.Media = new MediaController();
-        Hub.Speech = new SpeechService();
+        Hub.Speech = new SpeechService(new Core.Speech.KokoroSetup(System.IO.Path.Combine(paths.Root, "read-aloud"), Hub.Core.Http.Client), () => Hub.S.Ask);
         Hub.Actions = new ActionExecutor();
         Hub.System = new SystemMonitor();
         Hub.Windows = new WindowManager();
@@ -146,6 +147,7 @@ public partial class App : Application
             new AquaHub.Core.Ai.Local.CompatBook(Path.Combine(Hub.Core.Paths.Llama, "compat.json")), OllamaManager.EngineServer);
         Hub.Core.Llm.Llama = Hub.Llama;
         Hub.LocalAi = new LocalAi();
+        Hub.Roleplay = new(CreativeModels.Resolve, (request, ct) => Hub.Core.Llm.ChatStreamAsync(request, reserved: false, ct));
         Hub.Search = new SearchSession(Hub.Core, Hub.LlamaHost);
         Hub.Updates = new UpdateService(Sandbox.Enabled, args.DataDir is null ? Array.Empty<string>() : new[] { "--data-dir", paths.Root },
             args.DemoUpdate);
@@ -347,7 +349,7 @@ public partial class App : Application
             try { action(); }
             catch (Exception ex) { Log.Warn("app", "Exit cleanup failed", ex); }
         }
-        Cleanup(() => Hub.Speech?.Stop());
+        Cleanup(() => { if (Hub.Speech is { } speech) _ = speech.ShutdownAsync(); });
         Cleanup(Hub.Images.Stop);
         // Forced Windows/session shutdown cannot pump UI continuations. Cancel owners and leave their dependencies
         // alive until process exit; normal Quit awaits them with the dispatcher still running.
@@ -360,6 +362,7 @@ public partial class App : Application
             Cleanup(() => { if (Hub.Search is not null) _ = Hub.Search.StopAsync(); });
             Cleanup(() => { if (Hub.LocalAi is not null) _ = Hub.LocalAi.StopAsync(); });
             Cleanup(() => { if (Hub.Ask is not null) _ = Hub.Ask.StopAsync(); });
+            Cleanup(() => { if (Hub.Roleplay is not null) _ = Hub.Roleplay.ShutdownAsync(); });
         }
         Cleanup(() => Hub.Ollama?.OnAppExit());
         if (_shutdownComplete) Cleanup(() => Hub.Core?.Dispose());

@@ -8,6 +8,7 @@ namespace AquaHub.UI.Pages;
 
 public partial class TodayPage : UserControl, IPage
 {
+    private void OnReadAloudSettings(object sender, RoutedEventArgs e) => Hub.Windows.ShowMain("settings", "ask:readaloud");
     private readonly TodayVM _vm = new();
 
     public TodayPage()
