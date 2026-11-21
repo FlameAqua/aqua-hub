@@ -11,7 +11,7 @@
     Test-only packages are used exclusively by tests/AquaHub.Tests.
   -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="11.0.0" />
     <PackageVersion Include="System.Speech" Version="10.0.12" />
     <PackageVersion Include="Velopack" Version="1.2.161" />
     <PackageVersion Include="WpfMath" Version="2.1.0" />
